@@ -1,0 +1,94 @@
+{
+  "id": "mpu6050",
+  "name": "MPU6050 6-Axis Accelerometer & Gyroscope",
+  "name_ru": "MPU6050 6-осевой акселерометр и гироскоп",
+  "description": "6-axis MotionTracking device combining a 3-axis gyroscope and a 3-axis accelerometer with an I2C interface. Used in PiCar Pro for tilt sensing, motion detection, and orientation tracking to support features like collision detection and movement analysis.",
+  "description_ru": "6-осевой датчик движения, объединяющий 3-осевой гироскоп и 3-осевой акселерометр с интерфейсом I2C. Используется в PiCar Pro для определения наклона, обнаружения движения и отслеживания ориентации для поддержки функций обнаружения столкновений и анализа движения.",
+  "chip": "MPU6050",
+  "manufacturer": "InvenSense (TDK)",
+  "datasheet_url": "https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/",
+  "specs": {
+    "voltage_supply": "2.375V – 3.46V",
+    "voltage_logic": "1.71V – VDD (I2C level shifted on most modules to 3.3V/5V)",
+    "interface": "I2C (up to 400 kHz) / SPI (up to 20 MHz, I2C mode used in PiCar Pro)",
+    "i2c_speed": "400 kHz (Fast mode)",
+    "accelerometer_range": "±2g, ±4g, ±8g, ±16g (programmable)",
+    "gyroscope_range": "±250, ±500, ±1000, ±2000 °/sec (programmable)",
+    "accelerometer_resolution": "16-bit",
+    "gyroscope_resolution": "16-bit",
+    "adc_resolution": "16-bit per axis",
+    "sample_rate": "4 Hz – 8 kHz (programmable)",
+    "fifo_size": "1024 bytes",
+    "dmp": "Digital Motion Processor onboard",
+    "operating_temp": "-40°C to +85°C",
+    "package": "QFN-24 (4mm × 4mm)"
+  },
+  "pins": [
+    {
+      "pin_name": "VDD",
+      "connected_to": "Raspberry Pi 3.3V (Pin 1)",
+      "function": "Power supply (3.3V)"
+    },
+    {
+      "pin_name": "VLOGIC",
+      "connected_to": "Raspberry Pi 3.3V (Pin 1)",
+      "function": "Logic level voltage (3.3V for I2C compatibility)"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
+      "function": "Common ground"
+    },
+    {
+      "pin_name": "SCL",
+      "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
+      "function": "I2C clock line"
+    },
+    {
+      "pin_name": "SDA",
+      "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
+      "function": "I2C data line"
+    },
+    {
+      "pin_name": "INT",
+      "connected_to": "Optional — can connect to any GPIO for data-ready interrupt",
+      "function": "Interrupt output (data ready, motion detect, FIFO overflow)"
+    },
+    {
+      "pin_name": "AD0",
+      "connected_to": "GND for address 0x68, VDD for address 0x69",
+      "function": "I2C address select (LSB)"
+    },
+    {
+      "pin_name": "XDA",
+      "connected_to": "Not connected (secondary I2C bus for external magnetometer)",
+      "function": "Secondary I2C SDA (for MPU9150 compass bypass)"
+    },
+    {
+      "pin_name": "XCL",
+      "connected_to": "Not connected (secondary I2C bus for external magnetometer)",
+      "function": "Secondary I2C SCL (for MPU9150 compass bypass)"
+    }
+  ],
+  "i2c_address": "0x68",
+  "i2c_address_alternates": ["0x69"],
+  "related_modules": ["imu"],
+  "tips": [
+    "The WHO_AM_I register (0x75) should return 0x68 — use this to verify I2C communication is working.",
+    "Calibrate the sensor at power-on: take ~1000 readings with the device stationary, then store offsets for accelerometer and gyroscope.",
+    "The DMP (Digital Motion Processor) can compute quaternion output and fuse sensor data, reducing CPU load on the Raspberry Pi.",
+    "For tilt sensing, accelerometer alone works for static measurements. Use a complementary filter or Kalman filter to fuse accelerometer and gyroscope data for dynamic measurements.",
+    "Set the sample rate divider (register 0x19) and DLPF (register 0x1A) based on your application. For robotics, 100 Hz with DLPF=3 (44Hz bandwidth) is a good starting point.",
+    "The FIFO buffer (1024 bytes) can accumulate sensor data and be read in bursts, reducing I2C bus overhead.",
+    "AD0 pin sets I2C address: LOW = 0x68, HIGH = 0x69. Most breakout modules have a solder jumper for this."
+  ],
+  "tips_ru": [
+    "Регистр WHO_AM_I (0x75) должен возвращать 0x68 — используйте его для проверки работоспособности I2C.",
+    "Калибруйте датчик при включении: сделайте ~1000 измерений в неподвижном состоянии, затем сохраните смещения для акселерометра и гироскопа.",
+    "DMP (цифровой процессор движения) может вычислять кватернионы и объединять данные датчиков, снижая нагрузку на процессор Raspberry Pi.",
+    "Для определения наклона достаточно акселерометра в статическом режиме. Используйте комплементарный фильтр или фильтр Калмана для динамических измерений.",
+    "Установите делитель частоты дискретизации (регистр 0x19) и DLPF (регистр 0x1A) в зависимости от задачи. Для робототехники хорошая отправная точка — 100 Гц с DLPF=3 (полоса 44 Гц).",
+    "Буфер FIFO (1024 байта) может накапливать данные датчиков и считываться пакетами, снижая нагрузку на шину I2C.",
+    "Вывод AD0 задаёт адрес I2C: LOW = 0x68, HIGH = 0x69. Большинство модулей имеют джампер для этого."
+  ]
+}

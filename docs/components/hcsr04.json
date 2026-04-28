@@ -1,0 +1,71 @@
+{
+  "id": "hcsr04",
+  "name": "HC-SR04 Ultrasonic Distance Sensor",
+  "name_ru": "HC-SR04 Ультразвуковой датчик расстояния",
+  "description": "Ultrasonic distance measuring sensor with a range of 2 cm to 400 cm. Emits a 40 kHz ultrasonic pulse and measures the time for the echo to return. Used in PiCar Pro for obstacle detection and distance measurement to support autonomous navigation.",
+  "description_ru": "Ультразвуковой датчик измерения расстояния с диапазоном от 2 см до 400 см. Излучает ультразвуковой импульс 40 кГц и измеряет время возврата эха. Используется в PiCar Pro для обнаружения препятствий и измерения расстояния для автономной навигации.",
+  "chip": "HC-SR04",
+  "manufacturer": "Various (generic HC-SR04 modules)",
+  "datasheet_url": "https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf",
+  "specs": {
+    "voltage_supply": "5V DC",
+    "voltage_logic": "5V (echo output is 5V — requires voltage divider for 3.3V GPIO!)",
+    "interface": "GPIO (trigger/echo pulse)",
+    "working_frequency": "40 kHz",
+    "range_min": "2 cm",
+    "range_max": "400 cm",
+    "resolution": "0.3 cm (theoretical, ~1 cm practical)",
+    "measuring_angle": "15° effective cone",
+    "trigger_pulse": "10 µs TTL pulse",
+    "echo_pulse": "150 µs – 25 ms (proportional to distance)",
+    "cycle_period": "60 ms minimum between measurements",
+    "current_consumption": "~15 mA",
+    "operating_temp": "-15°C to +70°C",
+    "dimensions": "45mm × 20mm × 15mm"
+  },
+  "pins": [
+    {
+      "pin_name": "VCC",
+      "connected_to": "Raspberry Pi 5V (Pin 2 or Pin 4)",
+      "function": "Power supply (5V required)"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
+      "function": "Common ground"
+    },
+    {
+      "pin_name": "TRIG",
+      "connected_to": "Raspberry Pi GPIO 11 (Pin 23)",
+      "function": "Trigger input — send 10µs pulse to start measurement"
+    },
+    {
+      "pin_name": "ECHO",
+      "connected_to": "Raspberry Pi GPIO 8 (Pin 24) via voltage divider (1kΩ + 2kΩ)",
+      "function": "Echo output — HIGH pulse width proportional to distance (WARNING: 5V logic!)"
+    }
+  ],
+  "i2c_address": null,
+  "i2c_address_alternates": [],
+  "related_modules": ["ultrasonic"],
+  "tips": [
+    "CRITICAL: The ECHO pin outputs 5V, but Raspberry Pi GPIO is 3.3V-tolerant. Use a voltage divider (1kΩ + 2kΩ) on the ECHO line to step down to ~3.3V. Direct connection can damage the GPIO!",
+    "Distance formula: distance (cm) = (echo_pulse_time_us × 0.0343) / 2, where 0.0343 cm/µs is the speed of sound at 20°C.",
+    "Temperature affects speed of sound: at 0°C it's ~331 m/s, at 20°C it's ~343 m/s. For precision, compensate using v = 331.4 + 0.6 × T(°C).",
+    "Leave at least 60 ms between measurements to avoid overlapping echoes.",
+    "The measurement cone is approximately 15° — objects outside this cone may not be detected reliably.",
+    "Soft materials (fabric, foam) absorb ultrasonic waves and may not produce reliable echoes.",
+    "Multiple HC-SR04 sensors should not be triggered simultaneously as their echoes can interfere. Trigger them sequentially.",
+    "For more accurate timing, use pigpio library's waveforms or hardware-timed GPIO rather than Python time.sleep()."
+  ],
+  "tips_ru": [
+    "КРИТИЧЕСКИ ВАЖНО: Вывод ECHO выдаёт 5В, а GPIO Raspberry Pi рассчитан на 3.3В. Используйте делитель напряжения (1кОм + 2кОм) на линии ECHO для понижения до ~3.3В. Прямое подключение может повредить GPIO!",
+    "Формула расстояния: расстояние (см) = (время_эха_мкс × 0.0343) / 2, где 0.0343 см/мкс — скорость звука при 20°C.",
+    "Температура влияет на скорость звука: при 0°C ~331 м/с, при 20°C ~343 м/с. Для точности компенсируйте по формуле v = 331.4 + 0.6 × T(°C).",
+    "Оставляйте минимум 60 мс между измерениями, чтобы избежать наложения эхо-сигналов.",
+    "Конус измерения примерно 15° — объекты вне этого конуса могут не обнаруживаться надёжно.",
+    "Мягкие материалы (ткань, пенопласт) поглощают ультразвуковые волны и могут не давать надёжного эха.",
+    "Несколько датчиков HC-SR04 не следует запускать одновременно — их эхо-сигналы могут интерферировать. Запускайте их последовательно.",
+    "Для более точного тайминга используйте библиотеку pigpio с аппаратно-синхронизированным GPIO вместо Python time.sleep()."
+  ]
+}

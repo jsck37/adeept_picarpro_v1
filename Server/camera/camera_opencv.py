@@ -242,8 +242,10 @@ class Camera(BaseCamera):
             raise RuntimeError("picamera2 not installed")
 
         self._picam = Picamera2()
+        # Use BGR888 format directly — OpenCV works in BGR, so this avoids
+        # the costly RGB→BGR conversion and fixes the red/blue color swap
         config = self._picam.create_preview_configuration(
-            main={"size": CAMERA_RESOLUTION, "format": "RGB888"}
+            main={"size": CAMERA_RESOLUTION, "format": "BGR888"}
         )
         self._picam.configure(config)
 
@@ -253,7 +255,7 @@ class Camera(BaseCamera):
             self._picam.set_control("flip_v", True)
 
         self._picam.start()
-        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps")
+        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps (BGR888)")
 
     def frames(self):
         """Generator that yields JPEG-encoded frames."""
@@ -261,29 +263,25 @@ class Camera(BaseCamera):
 
         while True:
             try:
-                # Capture frame
+                # Capture frame directly in BGR format — no conversion needed!
                 frame = self._picam.capture_array()
 
-                # Convert RGB to BGR for OpenCV
-                if frame is not None and len(frame.shape) == 3:
-                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                else:
+                if frame is None or len(frame.shape) != 3:
                     continue
 
-                # Submit to CV thread if a mode is active
+                # Submit to CV thread if a mode is active (CV works in BGR)
                 if self.cv_thread.cv_mode != CV_MODE_NONE:
-                    self.cv_thread.submit_frame(frame_bgr.copy())
+                    self.cv_thread.submit_frame(frame.copy())
 
                 # Draw overlays
-                frame_bgr = self._draw_overlays(frame_bgr)
+                frame = self._draw_overlays(frame)
 
-                # SINGLE JPEG encoding (v1 did this twice!)
+                # JPEG encoding (OpenCV imencode expects BGR input)
                 encode_params = [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY]
-                success, jpeg_data = cv2.imencode('.jpg', frame_bgr, encode_params)
+                success, jpeg_data = cv2.imencode('.jpg', frame, encode_params)
                 if success:
                     yield jpeg_data.tobytes()
                 else:
-                    # Skip this frame rather than crash
                     continue
 
             except Exception as e:

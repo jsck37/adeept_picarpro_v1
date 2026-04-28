@@ -1,0 +1,67 @@
+{
+  "id": "ssd1306",
+  "name": "SSD1306 128x64 OLED Display",
+  "name_ru": "SSD1306 OLED-дисплей 128x64",
+  "description": "Monochrome 128x64 pixel OLED display controller with I2C interface. Used in PiCar Pro to show real-time system information such as battery level, IP address, sensor readings, and status messages directly on the robot.",
+  "description_ru": "Монохромный OLED-дисплей 128x64 пикселей с контроллером SSD1306 и интерфейсом I2C. Используется в PiCar Pro для отображения системной информации в реальном времени: уровня заряда батареи, IP-адреса, показаний датчиков и статусных сообщений.",
+  "chip": "SSD1306",
+  "manufacturer": "Solomon Systech",
+  "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/SSD1306.pdf",
+  "specs": {
+    "voltage_supply": "1.65V – 3.5V (VDD), 7V – 15V (VCC for OLED panel)",
+    "voltage_logic": "1.65V – 3.3V",
+    "interface": "I2C / SPI (I2C mode used in PiCar Pro)",
+    "i2c_speed": "400 kHz (Fast mode)",
+    "resolution": "128 x 64 pixels",
+    "color_depth": "1-bit monochrome (white on black)",
+    "display_size": "0.96 inch diagonal (typical module)",
+    "pixel_format": "Page-based (8 pages × 128 columns × 8 bits)",
+    "ram_size": "1024 bytes (GDDRAM)",
+    "i2c_mode": "I2C with data/command control via D/C bit (Co bit in control byte)",
+    "operating_temp": "-40°C to +85°C (controller), varies by OLED panel",
+    "package": "COG (Chip on Glass) / bare die on OLED module"
+  },
+  "pins": [
+    {
+      "pin_name": "VCC",
+      "connected_to": "Raspberry Pi 3.3V (Pin 1)",
+      "function": "Logic power supply (3.3V)"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
+      "function": "Common ground"
+    },
+    {
+      "pin_name": "SCL",
+      "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
+      "function": "I2C clock line"
+    },
+    {
+      "pin_name": "SDA",
+      "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
+      "function": "I2C data line"
+    }
+  ],
+  "i2c_address": "0x3C",
+  "i2c_address_alternates": ["0x3D"],
+  "related_modules": ["oled"],
+  "tips": [
+    "Common I2C addresses are 0x3C (SA0=0) or 0x3D (SA0=1). Check your module's solder jumper to confirm.",
+    "The display uses page-based addressing: 8 pages of 128 bytes each. Each byte controls 8 vertical pixels.",
+    "Initialization sequence must be sent after power-on: set multiplex ratio, display offset, segment map, COM scan direction, charge pump enable (0x14 for 3.3V operation), and display on.",
+    "The charge pump MUST be enabled (command 0x8D, 0x14) when powering from 3.3V to generate the internal high voltage for the OLED panel.",
+    "For smooth animations, use double-buffering: render to a frame buffer in RAM, then write the entire buffer to the display.",
+    "At 400 kHz I2C, a full-screen refresh takes approximately 2 ms — fast enough for real-time status updates.",
+    "Use the luma.oled or Adafruit_SSD1306 Python libraries for easy integration."
+  ],
+  "tips_ru": [
+    "Типичные адреса I2C: 0x3C (SA0=0) или 0x3D (SA0=1). Проверьте джампер на модуле.",
+    "Дисплей использует страничную адресацию: 8 страниц по 128 байт. Каждый байт управляет 8 вертикальными пикселями.",
+    "После включения необходимо отправить последовательность инициализации: установить мультиплекс, смещение, карту сегментов, направление COM, включить зарядовый насос (0x14 для 3.3В) и включить дисплей.",
+    "Зарядовый насос ДОЛЖЕН быть включён (команда 0x8D, 0x14) при питании от 3.3В для генерации внутреннего высокого напряжения для OLED-панели.",
+    "Для плавной анимации используйте двойную буферизацию: рендерите в буфер в ОЗУ, затем записывайте весь буфер на дисплей.",
+    "При 400 кГц I2C полное обновление экрана занимает примерно 2 мс — достаточно быстро для обновления статуса в реальном времени.",
+    "Используйте библиотеки Python luma.oled или Adafruit_SSD1306 для простой интеграции."
+  ]
+}

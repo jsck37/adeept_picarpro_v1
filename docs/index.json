@@ -1,0 +1,212 @@
+{
+  "project": "PiCar Pro",
+  "version": "1.0.0",
+  "description": "PiCar Pro — Raspberry Pi-based autonomous robot car with servo arm, ultrasonic distance sensing, IMU, OLED display, addressable LEDs, line tracking, and camera",
+  "description_ru": "PiCar Pro — автономный робот-автомобиль на базе Raspberry Pi с серворукой, ультразвуковым датчиком расстояния, IMU, OLED-дисплеем, адресуемыми светодиодами, отслеживанием линии и камерой",
+  "generated": "2025-03-04",
+  "board": "Raspberry Pi 3 Model B+",
+  "documentation_files": {
+    "pinout": {
+      "path": "pinout.json",
+      "description": "Complete Raspberry Pi 3B+ GPIO pinout with PiCar Pro module assignments",
+      "description_ru": "Полная распиновка GPIO Raspberry Pi 3B+ с привязкой к модулям PiCar Pro"
+    }
+  },
+  "components": [
+    {
+      "id": "pca9685",
+      "name": "PCA9685 Servo PWM Controller",
+      "name_ru": "PCA9685 ШИМ-контроллер сервоприводов",
+      "chip": "PCA9685",
+      "description": "16-channel 12-bit PWM/servo driver via I2C — controls pan, tilt, arm servos",
+      "description_ru": "16-канальный 12-битный ШИМ/серво-драйвер через I2C — управляет сервоприводами панорамы, наклона и руки",
+      "datasheet_url": "https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf",
+      "documentation_path": "components/pca9685.json",
+      "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
+      "i2c_address": "0x40",
+      "related_modules": ["servo", "camera", "arm"]
+    },
+    {
+      "id": "ads7830",
+      "name": "ADS7830 8-Channel ADC",
+      "name_ru": "ADS7830 8-канальный АЦП",
+      "chip": "ADS7830",
+      "description": "8-channel 8-bit ADC via I2C — measures battery voltage",
+      "description_ru": "8-канальный 8-битный АЦП через I2C — измеряет напряжение батареи",
+      "datasheet_url": "https://www.ti.com/lit/ds/symlink/ads7830.pdf",
+      "documentation_path": "components/ads7830.json",
+      "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
+      "i2c_address": "0x48",
+      "related_modules": ["battery"]
+    },
+    {
+      "id": "ssd1306",
+      "name": "SSD1306 OLED Display",
+      "name_ru": "SSD1306 OLED-дисплей",
+      "chip": "SSD1306",
+      "description": "128x64 monochrome OLED display via I2C — shows battery, IP, status",
+      "description_ru": "128x64 монохромный OLED-дисплей через I2C — показывает батарею, IP, статус",
+      "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/SSD1306.pdf",
+      "documentation_path": "components/ssd1306.json",
+      "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
+      "i2c_address": "0x3C",
+      "related_modules": ["oled"]
+    },
+    {
+      "id": "mpu6050",
+      "name": "MPU6050 6-Axis IMU",
+      "name_ru": "MPU6050 6-осевой IMU",
+      "chip": "MPU6050",
+      "description": "6-axis accelerometer + gyroscope via I2C — motion and orientation sensing",
+      "description_ru": "6-осевой акселерометр + гироскоп через I2C — определение движения и ориентации",
+      "datasheet_url": "https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/",
+      "documentation_path": "components/mpu6050.json",
+      "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
+      "i2c_address": "0x68",
+      "related_modules": ["imu"]
+    },
+    {
+      "id": "hcsr04",
+      "name": "HC-SR04 Ultrasonic Sensor",
+      "name_ru": "HC-SR04 Ультразвуковой датчик",
+      "chip": "HC-SR04",
+      "description": "Ultrasonic distance sensor (2–400 cm) via GPIO — obstacle detection",
+      "description_ru": "Ультразвуковой датчик расстояния (2–400 см) через GPIO — обнаружение препятствий",
+      "datasheet_url": "https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf",
+      "documentation_path": "components/hcsr04.json",
+      "pins_used": ["GPIO11 (TRIG)", "GPIO8 (ECHO)"],
+      "i2c_address": null,
+      "related_modules": ["ultrasonic"]
+    },
+    {
+      "id": "ws2812",
+      "name": "WS2812B Addressable RGB LED",
+      "name_ru": "WS2812B Адресуемый RGB-светодиод",
+      "chip": "WS2812B",
+      "description": "Individually addressable RGB LED via SPI0 MOSI — customizable lighting effects",
+      "description_ru": "Индивидуально адресуемый RGB-светодиод через SPI0 MOSI — настраиваемые световые эффекты",
+      "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf",
+      "documentation_path": "components/ws2812.json",
+      "pins_used": ["GPIO10 (SPI0 MOSI)"],
+      "i2c_address": null,
+      "related_modules": ["led"]
+    },
+    {
+      "id": "l298n",
+      "name": "L298N Motor Driver",
+      "name_ru": "L298N Моторный драйвер",
+      "chip": "L298N",
+      "description": "Dual H-bridge motor driver via GPIO+PWM — drives left and right DC motors",
+      "description_ru": "Двойной H-мост моторный драйвер через GPIO+ШИМ — управляет левым и правым двигателями",
+      "datasheet_url": "https://www.st.com/resource/en/datasheet/l298.pdf",
+      "documentation_path": "components/l298n.json",
+      "pins_used": ["GPIO4 (EN_A)", "GPIO26 (IN1_A)", "GPIO21 (IN2_A)", "GPIO17 (EN_B)", "GPIO27 (IN1_B)", "GPIO18 (IN2_B)"],
+      "i2c_address": null,
+      "related_modules": ["motor"]
+    },
+    {
+      "id": "camera",
+      "name": "Raspberry Pi Camera Module v2",
+      "name_ru": "Модуль камеры Raspberry Pi v2",
+      "chip": "IMX219",
+      "description": "8MP camera via MIPI CSI-2 — video streaming, object detection, remote monitoring",
+      "description_ru": "8МП камера через MIPI CSI-2 — потоковое видео, обнаружение объектов, удалённый мониторинг",
+      "datasheet_url": "https://www.raspberrypi.com/documentation/accessories/camera.html",
+      "documentation_path": "components/camera.json",
+      "pins_used": ["MIPI CSI-2 connector"],
+      "i2c_address": null,
+      "related_modules": ["camera"]
+    }
+  ],
+  "additional_hardware": [
+    {
+      "id": "buzzer",
+      "name": "Active Buzzer",
+      "name_ru": "Активный зуммер",
+      "description": "Buzzer for audio feedback — connected to GPIO 18 (shared with IN2_B)",
+      "description_ru": "Зуммер для звуковой обратной связи — подключён к GPIO 18 (совместно с IN2_B)",
+      "pins_used": ["GPIO18"],
+      "i2c_address": null,
+      "related_modules": ["buzzer"]
+    },
+    {
+      "id": "switch",
+      "name": "Tactile Switches",
+      "name_ru": "Тактильные кнопки",
+      "description": "3 tactile switches for user input — GPIO 5, 6, 13",
+      "description_ru": "3 тактильные кнопки для пользовательского ввода — GPIO 5, 6, 13",
+      "pins_used": ["GPIO5", "GPIO6", "GPIO13"],
+      "i2c_address": null,
+      "related_modules": ["switch"]
+    },
+    {
+      "id": "line_tracker",
+      "name": "IR Line Tracker Sensors",
+      "name_ru": "ИК-датчики отслеживания линии",
+      "description": "3 IR reflectance sensors for line following — GPIO 20 (left), 16 (center), 19 (right)",
+      "description_ru": "3 ИК-рефлекторных датчика для движения по линии — GPIO 20 (левый), 16 (центральный), 19 (правый)",
+      "pins_used": ["GPIO20", "GPIO16", "GPIO19"],
+      "i2c_address": null,
+      "related_modules": ["line_tracker"]
+    }
+  ],
+  "i2c_bus_summary": {
+    "bus": 1,
+    "sda_pin": 3,
+    "scl_pin": 5,
+    "devices": [
+      {"address": "0x3C", "id": "ssd1306", "name": "SSD1306 OLED Display"},
+      {"address": "0x40", "id": "pca9685", "name": "PCA9685 Servo Controller"},
+      {"address": "0x48", "id": "ads7830", "name": "ADS7830 ADC"},
+      {"address": "0x68", "id": "mpu6050", "name": "MPU6050 IMU"}
+    ]
+  },
+  "gpio_summary": {
+    "motors": {
+      "module": "l298n",
+      "pins": {
+        "EN_A": {"gpio": 4, "pin": 7, "function": "PWM speed control — left motor"},
+        "IN1_A": {"gpio": 26, "pin": 37, "function": "Direction control — left motor"},
+        "IN2_A": {"gpio": 21, "pin": 40, "function": "Direction control — left motor"},
+        "EN_B": {"gpio": 17, "pin": 11, "function": "PWM speed control — right motor"},
+        "IN1_B": {"gpio": 27, "pin": 13, "function": "Direction control — right motor"},
+        "IN2_B": {"gpio": 18, "pin": 12, "function": "Direction control — right motor / Buzzer"}
+      }
+    },
+    "ultrasonic": {
+      "module": "hcsr04",
+      "pins": {
+        "TRIG": {"gpio": 11, "pin": 23, "function": "Trigger pulse output"},
+        "ECHO": {"gpio": 8, "pin": 24, "function": "Echo pulse input (5V → voltage divider!)"}
+      }
+    },
+    "leds": {
+      "module": "ws2812",
+      "pins": {
+        "MOSI": {"gpio": 10, "pin": 19, "function": "SPI0 data — WS2812B serial data"}
+      }
+    },
+    "switches": {
+      "module": "switch",
+      "pins": {
+        "SW1": {"gpio": 5, "pin": 29, "function": "Switch 1 input"},
+        "SW2": {"gpio": 6, "pin": 31, "function": "Switch 2 input"},
+        "SW3": {"gpio": 13, "pin": 33, "function": "Switch 3 input"}
+      }
+    },
+    "line_tracker": {
+      "module": "line_tracker",
+      "pins": {
+        "LEFT": {"gpio": 20, "pin": 38, "function": "Left IR sensor"},
+        "CENTER": {"gpio": 16, "pin": 36, "function": "Center IR sensor"},
+        "RIGHT": {"gpio": 19, "pin": 35, "function": "Right IR sensor"}
+      }
+    },
+    "buzzer": {
+      "module": "buzzer",
+      "pins": {
+        "BUZZER": {"gpio": 18, "pin": 12, "function": "Buzzer output (shared with IN2_B!)"}
+      }
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "id": "l298n",
+  "name": "L298N Dual H-Bridge Motor Driver",
+  "name_ru": "L298N Двойной H-мост моторный драйвер",
+  "description": "Dual H-bridge motor driver capable of driving two DC motors independently with direction and speed control. In PiCar Pro, it drives the left and right DC motors using direct GPIO connections for direction control and PWM for speed regulation via enable pins.",
+  "description_ru": "Двойной H-мост моторный драйвер, способный управлять двумя двигателями постоянного тока независимо с контролем направления и скорости. В PiCar Pro управляет левым и правым двигателями постоянного тока через прямые подключения GPIO для управления направлением и ШИМ для регулировки скорости через выводы разрешения.",
+  "chip": "L298N",
+  "manufacturer": "STMicroelectronics",
+  "datasheet_url": "https://www.st.com/resource/en/datasheet/l298.pdf",
+  "specs": {
+    "voltage_logic": "4.5V – 5.5V (internal 5V regulator) or 5V external",
+    "voltage_motor": "5V – 35V (via VS terminal)",
+    "voltage_drop": "Typical 1.8V per transistor pair (3.6V total at full load)",
+    "current_per_channel": "2A peak, 1.5A continuous (with heatsink)",
+    "channels": "2 (dual H-bridge)",
+    "interface": "GPIO (IN1, IN2, IN3, IN4) + PWM (EN_A, EN_B)",
+    "pwm_frequency": "Up to 40 kHz (typically 1–10 kHz for DC motors)",
+    "enable_pins": "Active HIGH — PWM for speed control",
+    "protection": "Thermal shutdown, overcurrent protection (with external sense resistors)",
+    "operating_temp": "-25°C to +130°C",
+    "package": "Multiwatt-15 / PowerSO-20"
+  },
+  "pins": [
+    {
+      "pin_name": "12V / VS",
+      "connected_to": "Battery positive terminal (7.4V 2S LiPo or 6× AA battery pack)",
+      "function": "Motor power supply input (5V–35V)"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39) AND Battery negative",
+      "function": "Common ground (must connect both Pi GND and battery GND)"
+    },
+    {
+      "pin_name": "5V",
+      "connected_to": "Not used as output when jumper is on (provides regulated 5V). Remove jumper and supply 5V if using EN pins.",
+      "function": "5V regulated output (when 12V jumper installed) or 5V logic input"
+    },
+    {
+      "pin_name": "EN_A",
+      "connected_to": "Raspberry Pi GPIO 4 (Pin 7)",
+      "function": "Enable Motor A — PWM signal for speed control of left motor"
+    },
+    {
+      "pin_name": "IN1_A",
+      "connected_to": "Raspberry Pi GPIO 26 (Pin 37)",
+      "function": "Motor A direction control input 1"
+    },
+    {
+      "pin_name": "IN2_A",
+      "connected_to": "Raspberry Pi GPIO 21 (Pin 40)",
+      "function": "Motor A direction control input 2"
+    },
+    {
+      "pin_name": "IN1_B",
+      "connected_to": "Raspberry Pi GPIO 27 (Pin 13)",
+      "function": "Motor B direction control input 1"
+    },
+    {
+      "pin_name": "IN2_B",
+      "connected_to": "Raspberry Pi GPIO 18 (Pin 12)",
+      "function": "Motor B direction control input 2"
+    },
+    {
+      "pin_name": "EN_B",
+      "connected_to": "Raspberry Pi GPIO 17 (Pin 11)",
+      "function": "Enable Motor B — PWM signal for speed control of right motor"
+    },
+    {
+      "pin_name": "OUT1",
+      "connected_to": "Left Motor terminal A",
+      "function": "Motor A output 1"
+    },
+    {
+      "pin_name": "OUT2",
+      "connected_to": "Left Motor terminal B",
+      "function": "Motor A output 2"
+    },
+    {
+      "pin_name": "OUT3",
+      "connected_to": "Right Motor terminal A",
+      "function": "Motor B output 1"
+    },
+    {
+      "pin_name": "OUT4",
+      "connected_to": "Right Motor terminal B",
+      "function": "Motor B output 2"
+    }
+  ],
+  "i2c_address": null,
+  "i2c_address_alternates": [],
+  "related_modules": ["motor"],
+  "truth_table": {
+    "description": "Motor direction control truth table",
+    "motor_a": [
+      {"EN_A": "HIGH/PWM", "IN1_A": "HIGH", "IN2_A": "LOW", "direction": "Forward"},
+      {"EN_A": "HIGH/PWM", "IN1_A": "LOW", "IN2_A": "HIGH", "direction": "Backward"},
+      {"EN_A": "HIGH/PWM", "IN1_A": "LOW", "IN2_A": "LOW", "direction": "Free run stop"},
+      {"EN_A": "HIGH/PWM", "IN1_A": "HIGH", "IN2_A": "HIGH", "direction": "Fast stop (brake)"},
+      {"EN_A": "LOW", "IN1_A": "X", "IN2_A": "X", "direction": "Disabled (coast)"}
+    ],
+    "motor_b": [
+      {"EN_B": "HIGH/PWM", "IN1_B": "HIGH", "IN2_B": "LOW", "direction": "Forward"},
+      {"EN_B": "HIGH/PWM", "IN1_B": "LOW", "IN2_B": "HIGH", "direction": "Backward"},
+      {"EN_B": "HIGH/PWM", "IN1_B": "LOW", "IN2_B": "LOW", "direction": "Free run stop"},
+      {"EN_B": "HIGH/PWM", "IN1_B": "HIGH", "IN2_B": "HIGH", "direction": "Fast stop (brake)"},
+      {"EN_B": "LOW", "IN1_B": "X", "IN2_B": "X", "direction": "Disabled (coast)"}
+    ]
+  },
+  "tips": [
+    "IMPORTANT: The L298N has a ~3.6V voltage drop. With a 7.4V battery, motors see only ~3.8V. Use a higher supply voltage or consider TB6612FNG for lower dropout.",
+    "The onboard 5V jumper: when installed, the internal regulator provides 5V. Remove it if VS > 12V or if you need to supply 5V externally.",
+    "Connect both Raspberry Pi GND and battery GND to the L298N GND terminal — a common ground is essential.",
+    "PWM frequency of 1 kHz is typical for DC motors. Higher frequencies (up to 10 kHz) can reduce audible noise but may increase switching losses.",
+    "The EN_A and EN_B jumper caps must be REMOVED to use PWM speed control. With jumpers installed, both motors are always enabled at full speed.",
+    "For differential drive: both motors forward = straight ahead, one faster = turn, one forward + one backward = spin/rotate.",
+    "The L298N can get hot at high currents. Attach a heatsink if running motors near the 2A peak rating.",
+    "Current sense pins (CSA, CSB) can be used with sense resistors for current monitoring, but are typically left disconnected."
+  ],
+  "tips_ru": [
+    "ВАЖНО: L298N имеет падение напряжения ~3.6В. При батарее 7.4В двигатели получают лишь ~3.8В. Используйте более высокое напряжение питания или рассмотрите TB6612FNG с меньшим падением.",
+    "Джампер 5В: если установлен, внутренний стабилизатор выдаёт 5В. Снимите его, если VS > 12В или нужно подавать 5В извне.",
+    "Подключите GND Raspberry Pi и минус батареи к клемме GND L298N — общая земля обязательна.",
+    "Частота ШИМ 1 кГц типична для двигателей постоянного тока. Более высокие частоты (до 10 кГц) снижают слышимый шум, но увеличивают потери на переключение.",
+    "Джамперные колпачки EN_A и EN_B нужно СНЯТЬ для управления скоростью через ШИМ. С установленными джамперами оба двигателя всегда работают на полной скорости.",
+    "Для дифференциального привода: оба двигателя вперёд = прямо, один быстрее = поворот, один вперёд + один назад = разворот на месте.",
+    "L298N может нагреваться при больших токах. Установите радиатор, если двигатели работают вблизи пикового тока 2А.",
+    "Выводы измерения тока (CSA, CSB) можно использовать с резисторами для мониторинга тока, но обычно остаются неподключёнными."
+  ]
+}

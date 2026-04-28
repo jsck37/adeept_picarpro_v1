@@ -1,0 +1,126 @@
+{
+  "id": "ads7830",
+  "name": "ADS7830 8-Channel 8-Bit ADC",
+  "name_ru": "ADS7830 8-канальный 8-битный АЦП",
+  "description": "8-channel, 8-bit successive approximation register (SAR) analog-to-digital converter with I2C interface. Used in PiCar Pro to measure battery voltage through a voltage divider on one of its 8 input channels, enabling real-time battery monitoring.",
+  "description_ru": "8-канальный 8-битный АЦП последовательного приближения с интерфейсом I2C. Используется в PiCar Pro для измерения напряжения батареи через делитель напряжения на одном из 8 входных каналов, обеспечивая мониторинг батареи в реальном времени.",
+  "chip": "ADS7830",
+  "manufacturer": "Texas Instruments",
+  "datasheet_url": "https://www.ti.com/lit/ds/symlink/ads7830.pdf",
+  "specs": {
+    "voltage_supply": "2.7V – 5.5V",
+    "voltage_logic": "2.7V – 5.5V",
+    "voltage_analog_input": "0V – VREF",
+    "interface": "I2C",
+    "i2c_speed": "3.4 MHz (High-Speed mode)",
+    "resolution": "8-bit (256 steps)",
+    "channels": 8,
+    "sampling_rate": "70 kSPS",
+    "input_impedance": "High (sample-and-hold)",
+    "reference_voltage": "External or VDD (internal reference option)",
+    "power_consumption": "1.8 mW at 70 kSPS (3V supply)",
+    "operating_temp": "-40°C to +85°C",
+    "package": "TSSOP-16"
+  },
+  "pins": [
+    {
+      "pin_name": "VDD",
+      "connected_to": "Raspberry Pi 3.3V (Pin 1) or 5V (Pin 2/4)",
+      "function": "Power supply"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
+      "function": "Common ground"
+    },
+    {
+      "pin_name": "SDA",
+      "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
+      "function": "I2C data line"
+    },
+    {
+      "pin_name": "SCL",
+      "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
+      "function": "I2C clock line"
+    },
+    {
+      "pin_name": "CH0",
+      "connected_to": "Battery voltage divider output",
+      "function": "Analog input — battery voltage monitoring"
+    },
+    {
+      "pin_name": "CH1",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH2",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH3",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH4",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH5",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH6",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "CH7",
+      "connected_to": "Not connected / spare",
+      "function": "Analog input — available for expansion"
+    },
+    {
+      "pin_name": "VREF",
+      "connected_to": "VDD (using internal reference) or external reference",
+      "function": "Reference voltage for ADC conversion"
+    },
+    {
+      "pin_name": "COM",
+      "connected_to": "GND",
+      "function": "Common analog input (single-ended mode reference)"
+    },
+    {
+      "pin_name": "A0",
+      "connected_to": "Address jumper — LOW for 0x48",
+      "function": "I2C address bit 0"
+    },
+    {
+      "pin_name": "A1",
+      "connected_to": "Address jumper — LOW for 0x48",
+      "function": "I2C address bit 1"
+    }
+  ],
+  "i2c_address": "0x48",
+  "i2c_address_alternates": ["0x49", "0x4A", "0x4B"],
+  "related_modules": ["battery"],
+  "tips": [
+    "Use a voltage divider to measure battery voltages above VDD. For a 2S LiPo (7.4V–8.4V), use a 1:2 divider with 10kΩ + 10kΩ resistors.",
+    "At 8-bit resolution with VREF=3.3V, each LSB equals ~12.9 mV. With a 1:2 divider, battery resolution is ~25.8 mV per step.",
+    "The command byte format: bit 7 (start), bits 6-4 (channel select), bits 3-2 (mode: single-ended or differential), bits 1-0 (don't care).",
+    "For battery monitoring, single-ended mode on CH0 is typically used: command byte = 0x8C (CH0, single-ended, internal reference).",
+    "The ADS7830 can be configured for single-ended or differential input modes — single-ended is simpler for voltage measurement.",
+    "Pull-up resistors (4.7kΩ) are required on SDA and SCL lines if not already present on the I2C bus."
+  ],
+  "tips_ru": [
+    "Используйте делитель напряжения для измерения напряжения батареи выше VDD. Для 2S LiPo (7.4В–8.4В) используйте делитель 1:2 с резисторами 10кОм + 10кОм.",
+    "При 8-битном разрешении и VREF=3.3В каждый LSB равен ~12.9 мВ. С делителем 1:2 разрешение по батарее ~25.8 мВ на шаг.",
+    "Формат командного байта: бит 7 (старт), биты 6-4 (выбор канала), биты 3-2 (режим: одиночный или дифференциальный), биты 1-0 (не используются).",
+    "Для мониторинга батареи обычно используется одиночный режим на CH0: командный байт = 0x8C (CH0, одиночный, внутренний ИОН).",
+    "ADS7830 можно настроить для одиночных или дифференциальных входов — одиночный режим проще для измерения напряжения.",
+    "Подтягивающие резисторы (4.7кОм) необходимы на линиях SDA и SCL, если они ещё не установлены на шине I2C."
+  ]
+}

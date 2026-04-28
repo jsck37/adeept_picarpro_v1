@@ -1,0 +1,70 @@
+{
+  "id": "ws2812",
+  "name": "WS2812B Addressable RGB LED",
+  "name_ru": "WS2812B Адресуемый RGB-светодиод",
+  "description": "Individually addressable RGB LED with integrated controller and serial data interface. Each LED receives data on its DIN pin, displays its own color, and forwards remaining data to the next LED via DOUT. Used in PiCar Pro for customizable RGB LED effects via SPI0 MOSI.",
+  "description_ru": "Индивидуально адресуемый RGB-светодиод со встроенным контроллером и последовательным интерфейсом. Каждый светодиод получает данные на вывод DIN, отображает свой цвет и передаёт оставшиеся данные следующему светодиоду через DOUT. Используется в PiCar Pro для настраиваемых RGB-эффектов через SPI0 MOSI.",
+  "chip": "WS2812B",
+  "manufacturer": "Worldsemi",
+  "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf",
+  "specs": {
+    "voltage_supply": "3.5V – 5.3V (5V typical)",
+    "voltage_logic_data": "0.7 × VDD (HIGH), 0.3 × VDD (LOW)",
+    "interface": "Single-wire serial (NRZ encoding via SPI MOSI)",
+    "data_rate": "800 kHz (1.25 µs per bit)",
+    "color_depth": "24-bit (8-bit per channel: GRB order)",
+    "led_count": "Chainable — number depends on power supply capacity",
+    "current_per_led": "Up to 60 mA (20 mA per channel at full white)",
+    "data_protocol": "T0H: 0.4µs, T0L: 0.85µs, T1H: 0.8µs, T1L: 0.45µs, RES: >50µs",
+    "color_order": "GRB (not RGB — green comes first in data stream)",
+    "operating_temp": "-25°C to +80°C",
+    "viewing_angle": "120°"
+  },
+  "pins": [
+    {
+      "pin_name": "VDD",
+      "connected_to": "5V Power Rail (external supply recommended for >10 LEDs)",
+      "function": "LED power supply (5V)"
+    },
+    {
+      "pin_name": "DIN",
+      "connected_to": "Raspberry Pi GPIO 10 / SPI0 MOSI (Pin 19)",
+      "function": "Serial data input — receives color data from SPI MOSI"
+    },
+    {
+      "pin_name": "DOUT",
+      "connected_to": "DIN of next LED in chain",
+      "function": "Serial data output — forwards data to next LED"
+    },
+    {
+      "pin_name": "GND",
+      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
+      "function": "Common ground (must be shared with Raspberry Pi)"
+    }
+  ],
+  "i2c_address": null,
+  "i2c_address_alternates": [],
+  "related_modules": ["led"],
+  "tips": [
+    "The SPI0 MOSI output is 3.3V, but WS2812B data input expects ~0.7 × VDD = 3.5V at 5V supply. A logic level shifter (3.3V → 5V) is recommended for reliable operation, though many setups work without one at shorter wire lengths.",
+    "To drive WS2812B via SPI, set SPI clock to approximately 3.2 MHz (800 kHz × 4 bits per data bit). Each LED byte is encoded as 4 SPI bytes (3 = high bit, 2 = low bit for typical encoding).",
+    "Color data order is GRB (Green-Red-Blue), not RGB. Sending RGB values will produce incorrect colors — swap bytes accordingly.",
+    "A reset signal (>50 µs LOW) must be sent after all LED data to latch the colors. The SPI transfer naturally provides this gap.",
+    "For N LEDs, you need N × 24 bits of data (GRB) + reset. At 3.2 MHz SPI, 10 LEDs take ~0.1 ms — very fast.",
+    "Power each LED can draw up to 60 mA at full white. For 10 LEDs, that's 600 mA — use an external 5V supply, not the Raspberry Pi's 5V pin.",
+    "Add a 300–500 Ω resistor on the DIN line between the Raspberry Pi and the first LED to prevent signal ringing.",
+    "Add a 100–1000 µF capacitor across the power supply near the LEDs to handle current surges during color changes.",
+    "Popular Python libraries: rpi_ws281x (native), neopixel (Adafruit), or spidev-based custom drivers for SPI mode."
+  ],
+  "tips_ru": [
+    "Выход SPI0 MOSI выдаёт 3.3В, а вход данных WS2812B ожидает ~0.7 × VDD = 3.5В при питании 5В. Рекомендуется преобразователь уровня (3.3В → 5В), хотя многие установки работают без него при коротких проводах.",
+    "Для управления WS2812B через SPI установите частоту SPI примерно 3.2 МГц (800 кГц × 4 бита на бит данных). Каждый байт светодиода кодируется как 4 байта SPI.",
+    "Порядок данных цвета — GRB (зелёный-красный-синий), а не RGB. Отправка значений RGB даст неверные цвета — поменяйте байты местами.",
+    "Сигнал сброса (>50 мкс LOW) должен быть отправлен после всех данных светодиодов для фиксации цветов. Передача SPI естественным образом обеспечивает этот промежуток.",
+    "Для N светодиодов нужно N × 24 бит данных (GRB) + сброс. При SPI 3.2 МГц, 10 светодиодов занимают ~0.1 мс — очень быстро.",
+    "Каждый светодиод может потреблять до 60 мА при полном белом. Для 10 светодиодов это 600 мА — используйте внешний источник 5В, а не 5В Raspberry Pi.",
+    "Добавьте резистор 300–500 Ом на линию DIN между Raspberry Pi и первым светодиодом для предотвращения звона сигнала.",
+    "Добавьте конденсатор 100–1000 мкФ параллельно источнику питания рядом со светодиодами для компенсации скачков тока при смене цветов.",
+    "Популярные библиотеки Python: rpi_ws281x (нативная), neopixel (Adafruit) или пользовательские драйверы на основе spidev для режима SPI."
+  ]
+}

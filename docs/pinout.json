@@ -1,0 +1,447 @@
+{
+  "board": "Raspberry Pi 3 Model B+",
+  "revision": "1.3",
+  "soc": "BCM2837B0",
+  "description": "Complete GPIO pinout for Raspberry Pi 3B+ with PiCar Pro module assignments",
+  "description_ru": "Полная распиновка GPIO Raspberry Pi 3B+ с привязкой к модулям PiCar Pro",
+  "color_categories": {
+    "power": "#e74c3c",
+    "ground": "#7f8c8d",
+    "i2c": "#2ecc71",
+    "spi": "#3498db",
+    "uart": "#9b59b6",
+    "gpio": "#f39c12"
+  },
+  "pins": [
+    {
+      "pin": 1,
+      "gpio": null,
+      "function": "3V3",
+      "name": "3.3V Power",
+      "module": null,
+      "color_category": "power",
+      "notes": "3.3V power supply rail — used by I2C devices (PCA9685, ADS7830, SSD1306, MPU6050)"
+    },
+    {
+      "pin": 2,
+      "gpio": null,
+      "function": "5V",
+      "name": "5V Power",
+      "module": null,
+      "color_category": "power",
+      "notes": "5V power supply rail — used by HC-SR04, WS2812B LED power, L298N logic"
+    },
+    {
+      "pin": 3,
+      "gpio": 2,
+      "function": "SDA1",
+      "name": "I2C1 Data",
+      "module": "pca9685, ads7830, ssd1306, mpu6050",
+      "color_category": "i2c",
+      "notes": "I2C bus 1 data line — shared by all I2C devices (PCA9685, ADS7830, SSD1306, MPU6050)"
+    },
+    {
+      "pin": 4,
+      "gpio": null,
+      "function": "5V",
+      "name": "5V Power",
+      "module": null,
+      "color_category": "power",
+      "notes": "5V power supply rail — secondary 5V pin"
+    },
+    {
+      "pin": 5,
+      "gpio": 3,
+      "function": "SCL1",
+      "name": "I2C1 Clock",
+      "module": "pca9685, ads7830, ssd1306, mpu6050",
+      "color_category": "i2c",
+      "notes": "I2C bus 1 clock line — shared by all I2C devices (PCA9685, ADS7830, SSD1306, MPU6050)"
+    },
+    {
+      "pin": 6,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 7,
+      "gpio": 4,
+      "function": "GPIO4",
+      "name": "Motor A Enable",
+      "module": "l298n",
+      "color_category": "gpio",
+      "notes": "EN_A — PWM speed control for left motor (Motor A)"
+    },
+    {
+      "pin": 8,
+      "gpio": 14,
+      "function": "TXD0",
+      "name": "UART Transmit",
+      "module": null,
+      "color_category": "uart",
+      "notes": "UART0 transmit — available for serial communication (unused by PiCar Pro)"
+    },
+    {
+      "pin": 9,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 10,
+      "gpio": 15,
+      "function": "RXD0",
+      "name": "UART Receive",
+      "module": null,
+      "color_category": "uart",
+      "notes": "UART0 receive — available for serial communication (unused by PiCar Pro)"
+    },
+    {
+      "pin": 11,
+      "gpio": 17,
+      "function": "GPIO17",
+      "name": "Motor B Enable",
+      "module": "l298n",
+      "color_category": "gpio",
+      "notes": "EN_B — PWM speed control for right motor (Motor B)"
+    },
+    {
+      "pin": 12,
+      "gpio": 18,
+      "function": "GPIO18",
+      "name": "Motor B IN2 / Buzzer",
+      "module": "l298n, buzzer",
+      "color_category": "gpio",
+      "notes": "CONFLICT: Used as IN2_B for motor direction AND buzzer output. GPIO 18 supports hardware PWM0 — suitable for buzzer tone generation. Verify configuration to avoid conflict."
+    },
+    {
+      "pin": 13,
+      "gpio": 27,
+      "function": "GPIO27",
+      "name": "Motor B IN1",
+      "module": "l298n",
+      "color_category": "gpio",
+      "notes": "IN1_B — Motor B direction control input 1 (right motor)"
+    },
+    {
+      "pin": 14,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 15,
+      "gpio": 22,
+      "function": "GPIO22",
+      "name": "General Purpose",
+      "module": null,
+      "color_category": "gpio",
+      "notes": "Available GPIO — unused by PiCar Pro"
+    },
+    {
+      "pin": 16,
+      "gpio": 23,
+      "function": "GPIO23",
+      "name": "General Purpose",
+      "module": null,
+      "color_category": "gpio",
+      "notes": "Available GPIO — unused by PiCar Pro"
+    },
+    {
+      "pin": 17,
+      "gpio": null,
+      "function": "3V3",
+      "name": "3.3V Power",
+      "module": null,
+      "color_category": "power",
+      "notes": "3.3V power supply rail — secondary 3.3V pin"
+    },
+    {
+      "pin": 18,
+      "gpio": 24,
+      "function": "GPIO24",
+      "name": "General Purpose",
+      "module": null,
+      "color_category": "gpio",
+      "notes": "Available GPIO — unused by PiCar Pro"
+    },
+    {
+      "pin": 19,
+      "gpio": 10,
+      "function": "MOSI0",
+      "name": "SPI0 MOSI",
+      "module": "ws2812",
+      "color_category": "spi",
+      "notes": "SPI0 Master Out Slave In — used to drive WS2812B addressable LEDs via SPI data"
+    },
+    {
+      "pin": 20,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 21,
+      "gpio": 9,
+      "function": "MISO0",
+      "name": "SPI0 MISO",
+      "module": null,
+      "color_category": "spi",
+      "notes": "SPI0 Master In Slave Out — unused by PiCar Pro (WS2812B is write-only)"
+    },
+    {
+      "pin": 22,
+      "gpio": 25,
+      "function": "GPIO25",
+      "name": "General Purpose",
+      "module": null,
+      "color_category": "gpio",
+      "notes": "Available GPIO — unused by PiCar Pro"
+    },
+    {
+      "pin": 23,
+      "gpio": 11,
+      "function": "SCLK0",
+      "name": "SPI0 Clock / Ultrasonic Trigger",
+      "module": "hcsr04",
+      "color_category": "spi",
+      "notes": "CONFLICT: SPI0 clock is needed for WS2812B via SPI, but GPIO 11 is also used as HC-SR04 TRIG. If both SPI and ultrasonic are used simultaneously, reassign ultrasonic trigger to another GPIO. The SPI SCLK is essential for WS2812B data timing."
+    },
+    {
+      "pin": 24,
+      "gpio": 8,
+      "function": "CE0",
+      "name": "SPI0 Chip Enable 0 / Ultrasonic Echo",
+      "module": "hcsr04",
+      "color_category": "spi",
+      "notes": "CONFLICT: SPI0 CE0 is used for HC-SR04 ECHO input. If WS2812B uses SPI0, the chip select may need reconfiguration. Note: ECHO is 5V — requires voltage divider for 3.3V GPIO safety."
+    },
+    {
+      "pin": 25,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 26,
+      "gpio": 7,
+      "function": "CE1",
+      "name": "SPI0 Chip Enable 1",
+      "module": null,
+      "color_category": "spi",
+      "notes": "SPI0 chip enable 1 — available for additional SPI device (unused by PiCar Pro)"
+    },
+    {
+      "pin": 27,
+      "gpio": 0,
+      "function": "SDA0",
+      "name": "I2C0 Data (HAT ID EEPROM)",
+      "module": null,
+      "color_category": "i2c",
+      "notes": "I2C0 data — reserved for HAT ID EEPROM detection (not for general use)"
+    },
+    {
+      "pin": 28,
+      "gpio": 1,
+      "function": "SCL0",
+      "name": "I2C0 Clock (HAT ID EEPROM)",
+      "module": null,
+      "color_category": "i2c",
+      "notes": "I2C0 clock — reserved for HAT ID EEPROM detection (not for general use)"
+    },
+    {
+      "pin": 29,
+      "gpio": 5,
+      "function": "GPIO5",
+      "name": "Switch 1",
+      "module": "switch",
+      "color_category": "gpio",
+      "notes": "Switch input 1 — digital read with internal pull-up enabled"
+    },
+    {
+      "pin": 30,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 31,
+      "gpio": 6,
+      "function": "GPIO6",
+      "name": "Switch 2",
+      "module": "switch",
+      "color_category": "gpio",
+      "notes": "Switch input 2 — digital read with internal pull-up enabled"
+    },
+    {
+      "pin": 32,
+      "gpio": 12,
+      "function": "GPIO12",
+      "name": "General Purpose (PWM0)",
+      "module": null,
+      "color_category": "gpio",
+      "notes": "Available GPIO — supports hardware PWM0. Unused by PiCar Pro."
+    },
+    {
+      "pin": 33,
+      "gpio": 13,
+      "function": "GPIO13",
+      "name": "Switch 3",
+      "module": "switch",
+      "color_category": "gpio",
+      "notes": "Switch input 3 — digital read with internal pull-up enabled"
+    },
+    {
+      "pin": 34,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 35,
+      "gpio": 19,
+      "function": "GPIO19",
+      "name": "Line Tracker Right",
+      "module": "line_tracker",
+      "color_category": "gpio",
+      "notes": "Line tracker right sensor — digital input from IR reflectance sensor"
+    },
+    {
+      "pin": 36,
+      "gpio": 16,
+      "function": "GPIO16",
+      "name": "Line Tracker Center",
+      "module": "line_tracker",
+      "color_category": "gpio",
+      "notes": "Line tracker center sensor — digital input from IR reflectance sensor"
+    },
+    {
+      "pin": 37,
+      "gpio": 26,
+      "function": "GPIO26",
+      "name": "Motor A IN1",
+      "module": "l298n",
+      "color_category": "gpio",
+      "notes": "IN1_A — Motor A direction control input 1 (left motor)"
+    },
+    {
+      "pin": 38,
+      "gpio": 20,
+      "function": "GPIO20",
+      "name": "Line Tracker Left",
+      "module": "line_tracker",
+      "color_category": "gpio",
+      "notes": "Line tracker left sensor — digital input from IR reflectance sensor"
+    },
+    {
+      "pin": 39,
+      "gpio": null,
+      "function": "GND",
+      "name": "Ground",
+      "module": null,
+      "color_category": "ground",
+      "notes": "Common ground"
+    },
+    {
+      "pin": 40,
+      "gpio": 21,
+      "function": "GPIO21",
+      "name": "Motor A IN2",
+      "module": "l298n",
+      "color_category": "gpio",
+      "notes": "IN2_A — Motor A direction control input 2 (left motor)"
+    }
+  ],
+  "pin_conflicts": [
+    {
+      "gpio": 18,
+      "pin": 12,
+      "conflict": "GPIO 18 is assigned to both L298N IN2_B (motor direction) and Buzzer. Only one function can be active at a time.",
+      "resolution": "Verify in config.py which function takes priority. Consider moving buzzer to an unused GPIO if simultaneous use is needed."
+    },
+    {
+      "gpio": 11,
+      "pin": 23,
+      "conflict": "GPIO 11 is the SPI0 SCLK pin, needed for WS2812B SPI communication. It is also used as HC-SR04 TRIG.",
+      "resolution": "If WS2812B is driven via SPI0, HC-SR04 TRIG must be moved to another GPIO. Alternatively, bit-bang WS2812B data on a different GPIO."
+    },
+    {
+      "gpio": 8,
+      "pin": 24,
+      "conflict": "GPIO 8 is the SPI0 CE0 pin, part of the SPI0 bus. It is also used as HC-SR04 ECHO input.",
+      "resolution": "If SPI0 is fully used for WS2812B, HC-SR04 ECHO must be moved to another GPIO. WS2812B SPI mode may not require CE0, but bus contention should be verified."
+    }
+  ],
+  "i2c_bus": {
+    "bus_number": 1,
+    "sda_gpio": 2,
+    "scl_gpio": 3,
+    "devices": [
+      {
+        "address": "0x40",
+        "component_id": "pca9685",
+        "name": "PCA9685 Servo PWM Controller"
+      },
+      {
+        "address": "0x48",
+        "component_id": "ads7830",
+        "name": "ADS7830 8-Channel ADC"
+      },
+      {
+        "address": "0x3C",
+        "component_id": "ssd1306",
+        "name": "SSD1306 OLED Display"
+      },
+      {
+        "address": "0x68",
+        "component_id": "mpu6050",
+        "name": "MPU6050 6-Axis IMU"
+      }
+    ]
+  },
+  "spi_bus": {
+    "bus_number": 0,
+    "mosi_gpio": 10,
+    "miso_gpio": 9,
+    "sclk_gpio": 11,
+    "ce0_gpio": 8,
+    "ce1_gpio": 7,
+    "devices": [
+      {
+        "component_id": "ws2812",
+        "name": "WS2812B LED Strip (via SPI MOSI)",
+        "notes": "Uses MOSI only. SCLK required for SPI clock. CE0/CE1 not needed for data."
+      }
+    ]
+  },
+  "csi_camera": {
+    "connector": "MIPI CSI-2",
+    "device": {
+      "component_id": "camera",
+      "name": "Raspberry Pi Camera Module v2",
+      "sensor": "Sony IMX219"
+    }
+  }
+}

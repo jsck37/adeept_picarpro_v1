@@ -1,0 +1,87 @@
+{
+  "id": "camera",
+  "name": "Raspberry Pi Camera Module v2",
+  "name_ru": "Модуль камеры Raspberry Pi v2",
+  "description": "8-megapixel camera module using the Sony IMX219 sensor, connected via the MIPI CSI-2 interface. Used in PiCar Pro for real-time video streaming, object detection, line tracking (visual), and remote monitoring.",
+  "description_ru": "8-мегапиксельный модуль камеры на базе сенсора Sony IMX219, подключаемый через интерфейс MIPI CSI-2. Используется в PiCar Pro для потокового видео в реальном времени, обнаружения объектов, визуального отслеживания линии и удалённого мониторинга.",
+  "chip": "IMX219PQ (Sony Exmor R)",
+  "manufacturer": "Raspberry Pi Foundation / Sony",
+  "datasheet_url": "https://www.raspberrypi.com/documentation/accessories/camera.html",
+  "specs": {
+    "sensor": "Sony IMX219PQ Exmor R back-illuminated",
+    "resolution": "3280 × 2464 pixels (8 MP)",
+    "interface": "MIPI CSI-2 (2 data lanes)",
+    "connector": "15-pin FPC ribbon cable (CSI port on Raspberry Pi)",
+    "pixel_size": "1.12 µm × 1.12 µm",
+    "color_filter": "Bayer RGB",
+    "lens_fov": "62.2° diagonal (horizontal: 53.5°, vertical: 41.4°)",
+    "video_modes": {
+      "1080p30": "1920 × 1080 @ 30 fps",
+      "720p60": "1280 × 720 @ 60 fps",
+      "640x480_90": "640 × 480 @ 90 fps (VGA mode)",
+      "full_resolution_15": "3280 × 2464 @ 15 fps (still)"
+    },
+    "still_capture": "3280 × 2464 @ 15 fps burst",
+    "dynamic_range": "Approximately 65 dB",
+    "sensitivity": "Approximately 560 mV (green channel)",
+    "operating_temp": "-30°C to +70°C",
+    "dimensions": "25mm × 24mm × 9mm (board only)",
+    "weight": "3g (board only)",
+    "power_consumption": "~250 mW typical"
+  },
+  "pins": [
+    {
+      "pin_name": "CSI Connector Pin 1",
+      "connected_to": "3.3V power (via Raspberry Pi CSI port)",
+      "function": "Camera module power supply"
+    },
+    {
+      "pin_name": "CSI Connector Pin 2-3",
+      "connected_to": "RPi MIPI CSI-2 Data Lane 0 (SIOC/SIOD I2C for camera control)",
+      "function": "I2C control bus (SCL/SDA) for sensor configuration"
+    },
+    {
+      "pin_name": "CSI Connector Pin 4-5",
+      "connected_to": "RPi MIPI CSI-2 Data Lane 1 (clock/data)",
+      "function": "MIPI CSI-2 high-speed differential data lanes"
+    },
+    {
+      "pin_name": "CSI Connector Pin 6-7",
+      "connected_to": "RPi MIPI CSI-2 Clock Lane",
+      "function": "MIPI CSI-2 differential clock pair"
+    },
+    {
+      "pin_name": "CSI Connector GND",
+      "connected_to": "Raspberry Pi GND (via CSI connector)",
+      "function": "Common ground"
+    },
+    {
+      "pin_name": "CAM_GPIO",
+      "connected_to": "Not directly used by PiCar Pro (camera enable pin on some models)",
+      "function": "Camera shutdown/standby control (optional)"
+    }
+  ],
+  "i2c_address": null,
+  "i2c_address_alternates": [],
+  "related_modules": ["camera"],
+  "tips": [
+    "Enable the camera interface with: sudo raspi-config → Interface Options → Camera → Enable, or add 'camera_auto_detect=1' to /boot/config.txt.",
+    "For PiCar Pro, use the picamera2 library (libcamera-based) on Raspberry Pi OS Bullseye and later. The legacy picamera library is deprecated.",
+    "The flat ribbon cable must be inserted with the contacts facing AWAY from the Ethernet/USB ports on the Raspberry Pi 3B+.",
+    "For object detection, reduce resolution to 320×240 or 640×480 to increase frame rate and reduce processing time.",
+    "The camera's 62° field of view is relatively narrow. For wider coverage, consider a wide-angle lens adapter.",
+    "Night vision requires an IR-cut filter removal and IR illumination — the standard v2 module has a built-in IR-cut filter.",
+    "The MIPI CSI connector on Raspberry Pi 3B+ is located between the HDMI and audio ports.",
+    "For streaming, use MJPEG at 640×480@30fps for a good balance of quality and bandwidth, or H.264 at 1080p for high-quality recording."
+  ],
+  "tips_ru": [
+    "Включите интерфейс камеры: sudo raspi-config → Interface Options → Camera → Enable, или добавьте 'camera_auto_detect=1' в /boot/config.txt.",
+    "Для PiCar Pro используйте библиотеку picamera2 (на базе libcamera) на Raspberry Pi OS Bullseye и новее. Устаревшая библиотека picamera не поддерживается.",
+    "Шлейф должен вставляться контактами ОТ платы Ethernet/USB на Raspberry Pi 3B+.",
+    "Для обнаружения объектов уменьшите разрешение до 320×240 или 640×480 для увеличения частоты кадров и сокращения времени обработки.",
+    "Угол обзора камеры 62° относительно узкий. Для более широкого охвата рассмотрите адаптер с широкоугольным объективом.",
+    "Ночное видение требует удаления ИК-фильтра и ИК-подсветки — стандартный модуль v2 имеет встроенный ИК-фильтр.",
+    "Разъём MIPI CSI на Raspberry Pi 3B+ расположен между портами HDMI и аудио.",
+    "Для потоковой передачи используйте MJPEG 640×480@30fps для баланса качества и пропускной способности, или H.264 1080p для качественной записи."
+  ]
+}
