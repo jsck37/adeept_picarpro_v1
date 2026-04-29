@@ -127,7 +127,12 @@ class MotorController:
             self._move_pca9685(speed_norm, direction, turn, self._radius)
 
     def _move_gpio(self, speed, direction, turn, radius):
-        """Move using GPIO motors (v1)."""
+        """Move using GPIO motors (v1).
+        
+        Motor mapping: motorA = RIGHT, motorB = LEFT
+        Differential steering: turning left slows LEFT motor,
+        turning right slows RIGHT motor.
+        """
         left_speed = speed
         right_speed = speed
 
@@ -138,11 +143,11 @@ class MotorController:
             right_speed = speed * (1 - radius)
 
         if direction == 'forward':
-            self._motor_a.forward(left_speed)
-            self._motor_b.forward(right_speed)
+            self._motor_a.forward(right_speed)   # motorA = RIGHT
+            self._motor_b.forward(left_speed)    # motorB = LEFT
         elif direction == 'backward':
-            self._motor_a.backward(left_speed)
-            self._motor_b.backward(right_speed)
+            self._motor_a.backward(right_speed)  # motorA = RIGHT
+            self._motor_b.backward(left_speed)   # motorB = LEFT
 
     def _move_pca9685(self, speed, direction, turn, radius):
         """Move using PCA9685 motors (v2)."""
@@ -201,8 +206,8 @@ class MotorController:
         right_speed = max(0, min(1, right_speed))
 
         if self._motor_type == "gpio":
-            self._motor_a.forward(left_speed)
-            self._motor_b.forward(right_speed)
+            self._motor_a.forward(right_speed)   # motorA = RIGHT
+            self._motor_b.forward(left_speed)    # motorB = LEFT
         elif self._motor_type == "pca9685":
             self._m1.throttle = left_speed
             self._m2.throttle = right_speed

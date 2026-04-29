@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>PiCar Pro</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ==================== STATUS BAR (TOP — most prominent) ==================== -->
+<div class="status-bar" id="status-bar">
+  <div class="sb-item"><span class="sb-label">CPU Temp</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">CPU %</span><span class="sb-value" id="sb-cpu-usage">--</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">RAM</span><span class="sb-value" id="sb-ram">--</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">Distance</span><span class="sb-value" id="sb-distance">--</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">IMU</span><span class="sb-value" id="sb-imu">--</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">Speed</span><span class="sb-value" id="sb-speed">50%</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">Module</span><span class="sb-value" id="sb-module">Ready</span></div>
+  <div class="sb-sep"></div>
+  <div class="conn-dot" id="connection-dot"></div>
+</div>
+
+<!-- ==================== HEADER ==================== -->
+<header class="header">
+  <div class="header-logo">
+    <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
+    <span>PiCar Pro</span>
+  </div>
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="control">Control</button>
+    <button class="tab-btn" data-tab="modules">Modules</button>
+  </nav>
+</header>
+
+<!-- ==================== CONTROL TAB ==================== -->
+<div class="tab-content active" id="content-control">
+  <div class="control-layout">
+    <!-- LEFT: Camera -->
+    <div>
+      <div class="card">
+        <div class="camera-wrap">
+          <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
+          <div class="cv-badge" id="cv-badge">CV: Off</div>
+        </div>
+        <div class="cv-modes">
+          <button class="cv-btn active" data-cv="none">Off</button>
+          <button class="cv-btn" data-cv="findColor">Color</button>
+          <button class="cv-btn" data-cv="findlineCV">Line</button>
+          <button class="cv-btn" data-cv="watchDog">Motion</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Controls -->
+    <div class="controls-scroll">
+      <!-- Joystick -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+          Movement
+        </div>
+        <div class="joystick-area">
+          <div class="joystick-container" id="joystick-container">
+            <div class="joystick-base"></div>
+            <div class="joystick-crosshair"></div>
+            <div class="joystick-knob" id="joystick-knob"></div>
+          </div>
+          <div class="joystick-label" id="joystick-label">Drag knob to move</div>
+        </div>
+      </div>
+
+      <!-- Speed -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Speed
+        </div>
+        <div class="slider-row">
+          <label>Power</label>
+          <input type="range" id="speed-slider" min="0" max="100" value="50">
+          <span class="val" id="speed-val">50%</span>
+        </div>
+      </div>
+
+      <!-- Servo (3 servos: steering + camera pan/tilt, crane disabled) -->
+      <div class="card">
+        <div class="card-title collapsible-header" id="servo-header">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><line x1="14" y1="9" x2="20" y2="9"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="15" x2="20" y2="15"/></svg>
+            Servo Control
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body" id="servo-body">
+          <div class="servo-grid" id="servo-grid"></div>
+          <div class="servo-home-row">
+            <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Headlights -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          Headlights
+        </div>
+        <div class="headlight-row">
+          <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
+          <button class="headlight-btn off" id="hl-both" data-port="both">Both</button>
+          <button class="headlight-btn off" id="hl-right" data-port="2">Right</button>
+        </div>
+      </div>
+
+      <!-- LED Strip -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="20" height="4" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
+          LED Strip
+        </div>
+        <div class="led-color-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <label style="font-size:.85rem;color:#5f6368;min-width:44px">Color</label>
+          <input type="color" id="led-color" value="#ff0000" style="width:40px;height:32px;border:2px solid #dadce0;border-radius:6px;cursor:pointer;padding:0">
+          <div id="led-color-presets" style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="color-preset" data-hex="#ff0000" style="width:26px;height:26px;border-radius:50%;background:#ff0000;border:2px solid #dadce0;cursor:pointer" title="Red"></button>
+            <button class="color-preset" data-hex="#00ff00" style="width:26px;height:26px;border-radius:50%;background:#00ff00;border:2px solid #dadce0;cursor:pointer" title="Green"></button>
+            <button class="color-preset" data-hex="#0000ff" style="width:26px;height:26px;border-radius:50%;background:#0000ff;border:2px solid #dadce0;cursor:pointer" title="Blue"></button>
+            <button class="color-preset" data-hex="#ffff00" style="width:26px;height:26px;border-radius:50%;background:#ffff00;border:2px solid #dadce0;cursor:pointer" title="Yellow"></button>
+            <button class="color-preset" data-hex="#ff00ff" style="width:26px;height:26px;border-radius:50%;background:#ff00ff;border:2px solid #dadce0;cursor:pointer" title="Magenta"></button>
+            <button class="color-preset" data-hex="#00ffff" style="width:26px;height:26px;border-radius:50%;background:#00ffff;border:2px solid #dadce0;cursor:pointer" title="Cyan"></button>
+            <button class="color-preset" data-hex="#ff8800" style="width:26px;height:26px;border-radius:50%;background:#ff8800;border:2px solid #dadce0;cursor:pointer" title="Orange"></button>
+            <button class="color-preset" data-hex="#ffffff" style="width:26px;height:26px;border-radius:50%;background:#ffffff;border:2px solid #dadce0;cursor:pointer" title="White"></button>
+          </div>
+        </div>
+        <div class="btn-group" id="led-group">
+          <button class="gbtn active" data-led="off">Off</button>
+          <button class="gbtn" data-led="solid">Solid</button>
+          <button class="gbtn" data-led="breath">Breath</button>
+          <button class="gbtn" data-led="flow">Flow</button>
+          <button class="gbtn" data-led="rainbow">Rainbow</button>
+          <button class="gbtn" data-led="police">Police</button>
+          <button class="gbtn" data-led="colorWipe">Wipe</button>
+        </div>
+      </div>
+
+      <!-- Buzzer -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+          Buzzer
+        </div>
+        <div class="btn-group" id="buzzer-group">
+          <button class="gbtn" data-buzzer="beep">Beep</button>
+          <button class="gbtn" data-buzzer="alarm">Alarm</button>
+          <button class="gbtn" data-buzzer="birthday">Birthday</button>
+        </div>
+      </div>
+
+      <!-- Autonomous -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="2"/></svg>
+          Autonomous
+        </div>
+        <div class="btn-group" id="auto-group">
+          <button class="gbtn" data-auto="radarScan">Radar</button>
+          <button class="gbtn" data-auto="automatic">Drive</button>
+          <button class="gbtn" data-auto="trackLine">Line</button>
+          <button class="gbtn" data-auto="keepDistance">Distance</button>
+          <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
+        </div>
+      </div>
+
+      <!-- MPU6050 IMU -->
+      <div class="card" id="mpu-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          IMU Sensor (MPU6050)
+        </div>
+        <div id="mpu-status" style="font-size:.82rem;color:#5f6368;margin-bottom:8px">Waiting for data...</div>
+        <div class="mpu-grid" id="mpu-grid">
+          <div class="mpu-section">
+            <div class="mpu-section-title">Accelerometer (g)</div>
+            <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-ax">0.000</span></div>
+            <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-ay">0.000</span></div>
+            <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-az">0.000</span></div>
+          </div>
+          <div class="mpu-section">
+            <div class="mpu-section-title">Gyroscope (°/s)</div>
+            <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-gx">0.0</span></div>
+            <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-gy">0.0</span></div>
+            <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-gz">0.0</span></div>
+          </div>
+          <div class="mpu-section">
+            <div class="mpu-section-title">Orientation (°)</div>
+            <div class="mpu-row"><span class="mpu-label">Roll</span><span class="mpu-val" id="mpu-roll">0.0</span></div>
+            <div class="mpu-row"><span class="mpu-label">Pitch</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
+          </div>
+        </div>
+        <!-- Visual tilt indicator -->
+        <div class="mpu-tilt-wrap">
+          <canvas id="mpu-tilt-canvas" width="120" height="120"></canvas>
+          <div class="mpu-tilt-label">Tilt Indicator</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODULES TAB ==================== -->
+<div class="tab-content" id="content-modules">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Available Modules
+    </div>
+    <div class="modules-grid" id="modules-grid"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload Module
+    </div>
+    <div class="upload-area" id="upload-area">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <p>Drop .py files here or click to browse</p>
+      <input type="file" id="file-input" accept=".py" multiple>
+      <button class="btn-sm btn-primary upload-btn" id="upload-btn">Upload</button>
+      <div class="upload-progress" id="upload-progress"><div class="upload-progress-bar" id="upload-progress-bar"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

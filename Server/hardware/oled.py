@@ -1,12 +1,18 @@
 """
 OLED SSD1306 display module.
-Shows IP, battery voltage, CPU info, and robot status.
+Shows 4 lines: IP:PORT, CPU info, RAM info, command status.
+
+Display layout (SSD1306 128x64, 4 lines @ 16px each):
+- Line 1: IP:PORT (e.g., "192.168.1.100:5000")
+- Line 2: CPU: temp°C usage%
+- Line 3: RAM: used/total GB percent%
+- Line 4: Command status (running module or last command)
 
 Improvements over v1:
-- Structured display with auto-refresh
-- Shows battery voltage and network mode (from v2)
+- Structured 4-line display matching original PiCar Pro pattern
 - Thread-safe updates
 - Proper shutdown
+- No battery display (not all hardware has ADS7830)
 """
 
 import threading
@@ -33,7 +39,7 @@ class OLEDDisplay:
             self._device = ssd1306(serial, width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             self._thread.start()
-            print("[OLED] Display initialized")
+            print("[OLED] Display initialized (4-line mode)")
         except Exception as e:
             print(f"[OLED] Failed to initialize: {e}")
 
@@ -41,7 +47,7 @@ class OLEDDisplay:
         """Update a specific line of the display (0-3)."""
         if 0 <= line_num < 4:
             with self._lock:
-                self._lines[line_num] = str(text)[:21]  # Max chars per line
+                self._lines[line_num] = str(text)[:21]  # Max chars per line at 12pt
 
     def set_lines(self, lines):
         """Update all display lines at once."""
@@ -80,22 +86,22 @@ class OLEDDisplay:
 
             time.sleep(0.5)  # 2Hz refresh rate
 
-    def show_ip(self, ip_address, mode="Station"):
-        """Show IP address and network mode."""
-        self.set_lines([
-            "PiCar Pro",
-            f"IP: {ip_address}",
-            f"Mode: {mode}",
-            "Ready!",
-        ])
-
     def show_startup(self):
         """Show startup message."""
         self.set_lines([
             "PiCar Pro",
-            "Optimized v1+",
             "Starting...",
             "",
+            "",
+        ])
+
+    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent, command="Ready"):
+        """Show full status display (convenience method). RAM in MB for 1GB Pi."""
+        self.set_lines([
+            f"{ip}:{port}",
+            f"CPU:{cpu_temp}C {cpu_usage}%",
+            f"RAM:{ram_used_mb}/{ram_total_mb}M {ram_percent}%",
+            command,
         ])
 
     def shutdown(self):

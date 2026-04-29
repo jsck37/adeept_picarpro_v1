@@ -1,6 +1,15 @@
 """
 Centralized configuration for PiCar Pro v1 (optimized).
 All hardware pins, I2C addresses, and runtime parameters in one place.
+
+Hardware setup (user-specific):
+- Steering servo: PCA9685 channel 0 (front wheels left-right)
+- motorA: RIGHT motor (GPIO: EN=4, IN1=26, IN2=21)
+- motorB: LEFT motor  (GPIO: EN=17, IN1=27, IN2=18)
+- Left headlight:  Switch port 1 (GPIO 6)
+- Right headlight: Switch port 2 (GPIO 13)
+- Crane/manipulator: DISABLED (not connected)
+- WS2812 backlight + batteries + OLED + camera on shared power
 """
 
 # =============================================================================
@@ -57,20 +66,18 @@ MOTOR_M4_IN2 = 9
 # =============================================================================
 # Servo Configuration
 # =============================================================================
-SERVO_COUNT = 8
+SERVO_COUNT = 3          # Only steering + camera pan/tilt (crane DISABLED)
 SERVO_MIN_PULSE = 500   # microseconds
 SERVO_MAX_PULSE = 2400  # microseconds
 SERVO_INIT_ANGLE = 90   # default center position
 
 # Servo channel assignments
-SERVO_PAN = 0       # Camera pan
-SERVO_TILT = 1      # Camera tilt
-SERVO_ARM_BASE = 2   # Arm base rotation
-SERVO_ARM_SHOULDER = 3  # Arm shoulder
-SERVO_ARM_ELBOW = 4    # Arm elbow
-SERVO_ARM_WRIST = 5     # Arm wrist
-SERVO_ARM_GRIPPER = 6   # Arm gripper
-SERVO_SPARE = 7         # Spare
+SERVO_STEERING = 0      # Front wheel steering (left-right rotation)
+SERVO_CAM_PAN = 1       # Camera pan
+SERVO_CAM_TILT = 2      # Camera tilt
+
+# Crane/manipulator is DISABLED — not physically connected
+CRANE_ENABLED = False
 
 # =============================================================================
 # Ultrasonic Sensor
@@ -89,8 +96,13 @@ LED_SPI_DEVICE = 0
 
 # =============================================================================
 # GPIO Switches (3-port LED/relay)
+# Port 0 = GPIO 5  (unused / backlight)
+# Port 1 = GPIO 6  (LEFT headlight)
+# Port 2 = GPIO 13 (RIGHT headlight)
 # =============================================================================
 SWITCH_PINS = [5, 6, 13]
+HEADLIGHT_LEFT_PORT = 1   # port1 = left headlight
+HEADLIGHT_RIGHT_PORT = 2  # port2 = right headlight
 
 # =============================================================================
 # Line Tracker IR Sensors
@@ -145,8 +157,9 @@ HOTSPOT_PASSWORD = "12345678"
 HOTSPOT_GATEWAY = "192.168.4.1"
 
 # =============================================================================
-# Battery Monitoring
+# Battery Monitoring — DISABLED (no ADS7830 hardware module)
 # =============================================================================
+BATTERY_ENABLED = False
 BATTERY_FULL_VOLTAGE = 8.4
 BATTERY_WARNING_VOLTAGE = 6.3
 BATTERY_VOLTAGE_RATIO = 0.25  # Voltage divider ratio (R15=3k, R17=1k)

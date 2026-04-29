@@ -14,7 +14,7 @@ Improvements over v1:
 
 import threading
 import time
-from Server.config import RADAR_SCAN_SPEED
+from Server.config import RADAR_SCAN_SPEED, SERVO_STEERING
 
 
 class AutonomousController:
@@ -112,9 +112,9 @@ class AutonomousController:
         return self._radar_data
 
     def _radar_scan(self):
-        """Sweep the ultrasonic sensor from left to right, recording distances."""
+        """Sweep the steering servo from left to right, recording distances."""
         self._radar_data = []
-        scan_servo = 0  # Pan servo for radar
+        scan_servo = SERVO_STEERING  # Use steering servo for radar scan
 
         for angle_offset in range(-60, 61, 5):
             if not self._active:
@@ -135,7 +135,7 @@ class AutonomousController:
 
     def _automatic(self):
         """Autonomous obstacle avoidance mode."""
-        scan_servo = 0
+        scan_servo = SERVO_STEERING  # Use steering servo
 
         while self._active:
             distance = self.ultrasonic.get_distance()

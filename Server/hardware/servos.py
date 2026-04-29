@@ -23,10 +23,14 @@ class ServoController:
     """
     Servo controller with single PCA9685 instance.
     
-    v1 BUG: Created new busio.I2C() + PCA9685() on EVERY set_angle() call.
-    This involved kernel I2C driver interactions and was extremely slow/CPU-heavy.
+    Hardware configuration (user-specific):
+    - Channel 0: Front wheel STEERING (left-right rotation)
+    - Channel 1: Camera PAN
+    - Channel 2: Camera TILT
+    - Channels 3-7: DISABLED (crane not connected)
     
-    This version creates the PCA9685 ONCE and reuses it.
+    Safe initialization: initializes servos one by one with delays
+    to prevent I2C bus overload that could cause Pi reboots.
     """
 
     def __init__(self):
@@ -46,7 +50,11 @@ class ServoController:
         self._init_pca9685()
 
     def _init_pca9685(self):
-        """Initialize PCA9685 ONCE (not per call like v1!)."""
+        """Initialize PCA9685 ONCE (not per call like v1!).
+        
+        Safe init: one servo at a time with 50ms delay to prevent
+        I2C bus overload on Pi 3B+ that could cause reboots.
+        """
         try:
             import busio
             from adafruit_pca9685 import PCA9685
@@ -56,21 +64,26 @@ class ServoController:
             self._i2c = busio.I2C(3, 2)  # SCL=GPIO3, SDA=GPIO2
             self._pca = PCA9685(self._i2c, address=PCA9685_SERVO_ADDR)
             self._pca.frequency = PCA9685_SERVO_FREQ
+            time.sleep(0.1)  # Settle after frequency change
 
-            # Create all servo objects once
+            # Create only the servos we need (SERVO_COUNT from config)
             for i in range(SERVO_COUNT):
-                self._servos[i] = adafruit_servo.Servo(
-                    self._pca.channels[i],
-                    min_pulse=SERVO_MIN_PULSE,
-                    max_pulse=SERVO_MAX_PULSE,
-                    actuation_range=180,
-                )
-                # Set initial position
-                self._servos[i].angle = SERVO_INIT_ANGLE
+                try:
+                    self._servos[i] = adafruit_servo.Servo(
+                        self._pca.channels[i],
+                        min_pulse=SERVO_MIN_PULSE,
+                        max_pulse=SERVO_MAX_PULSE,
+                        actuation_range=180,
+                    )
+                    # Set initial position with safe ramp
+                    self._servos[i].angle = SERVO_INIT_ANGLE
+                    time.sleep(0.05)  # 50ms between servo inits to prevent I2C overload
+                except Exception as e:
+                    print(f"[Servos] Warning: failed to init servo {i}: {e}")
 
             self._pwm_initialized = True
             print(f"[Servos] PCA9685 initialized at 0x{PCA9685_SERVO_ADDR:02X}, "
-                  f"{SERVO_COUNT} servos at {PCA9685_SERVO_FREQ}Hz")
+                  f"{SERVO_COUNT} servos at {PCA9685_SERVO_FREQ}Hz (crane disabled)")
 
         except Exception as e:
             print(f"[Servos] Failed to initialize PCA9685: {e}")

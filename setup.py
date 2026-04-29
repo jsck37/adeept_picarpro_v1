@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # File name   : setup.py
-# Description : Automated setup for PiCar Pro (Flask + SSE, no React/WebSocket)
+# Description : Automated setup for PiCar Pro (Flask + WebSocket)
 # Based on    : jsck37/adeept_picarpro_v1 style + performance tuning for Pi 3B+
+# Fixes       : apt update+upgrade, pip --ignore-installed, path bugs, swap logic, hotspot
 
 import os
 import sys
@@ -10,14 +11,20 @@ import time
 import subprocess
 import shutil
 import platform
+import re
 
 # ─────────────────────────────────────────────────────
 # GLOBAL VARIABLES
 # ─────────────────────────────────────────────────────
 username = os.popen("echo ${SUDO_USER:-$(who -m | awk '{ print $1 }')}").readline().strip()
-user_home = os.popen(f'getent passwd {username} | cut -d: -f 6').readline().strip()
+if not username:
+    username = "pi"
+user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f 6').readline().strip()
+if not user_home:
+    user_home = f"/home/{username}"
 curpath = os.path.realpath(__file__)
-thisPath = "/" + os.path.dirname(curpath)
+# FIX: was "/" + dirname → produced double-slash "//home/..."
+thisPath = os.path.dirname(curpath)
 LOG_FILE = "/tmp/picarpro_setup.log"
 
 # ─────────────────────────────────────────────────────
@@ -41,22 +48,33 @@ def run_cmd(cmd, critical=True):
     print(f"  {CYN}[*]{RST} {cmd}")
     result = subprocess.run(
         cmd, shell=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        timeout=300  # 5 min timeout to prevent hangs
     )
     with open(LOG_FILE, "a") as log:
         log.write(f"\n=== CMD: {cmd} ===\n")
-        log.write(result.stdout)
+        log.write(result.stdout or "")
 
     if result.returncode != 0:
         print(f"  {RED}[!]{RST} Error (code {result.returncode}): {cmd}")
-        tail = result.stdout[-500:] if len(result.stdout) > 500 else result.stdout
+        tail = result.stdout[-500:] if result.stdout and len(result.stdout) > 500 else (result.stdout or "")
         if tail.strip():
             print(f"      {tail.strip()}")
         if critical:
             print(f"  {RED}[x]{RST} Critical error. Setup stopped to prevent system damage.")
             print(f"  {BLU}[i]{RST} Full log: {LOG_FILE}")
             sys.exit(1)
-    return result.returncode, result.stdout
+    return result.returncode, result.stdout or ""
+
+
+def run_cmd_quiet(cmd):
+    """Execute shell command, return (returncode, stdout). No printing."""
+    result = subprocess.run(
+        cmd, shell=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        timeout=60
+    )
+    return result.returncode, result.stdout or ""
 
 
 def get_debian_version():
@@ -64,15 +82,23 @@ def get_debian_version():
     try:
         with open("/etc/debian_version", "r") as f:
             version_str = f.read().strip()
-        major = int(version_str.split(".")[0])
-        return major
+        # Handle formats like "13.0" or "bookworm/sid"
+        major_str = version_str.split(".")[0]
+        if major_str.isdigit():
+            return int(major_str)
+        # Try codename mapping
+        codename_map = {"bullseye": 11, "bookworm": 12, "trixie": 13, "forky": 14}
+        for name, ver in codename_map.items():
+            if name in version_str.lower():
+                return ver
     except Exception:
-        print(f"  {YLW}[!]{RST} Could not detect Debian version, assuming 11 (Bullseye)")
-        return 11
+        pass
+    print(f"  {YLW}[!]{RST} Could not detect Debian version, assuming 12 (Bookworm)")
+    return 12
 
 
 def get_os_codename():
-    """Get OS codename (bookworm, bullseye, etc.)."""
+    """Get OS codename (bookworm, bullseye, trixie, etc.)."""
     try:
         with open("/etc/os-release", "r") as f:
             for line in f:
@@ -130,6 +156,7 @@ def append_to_config(keyword, line, config_path=None):
         print(f"  {RED}[!]{RST} Could not edit {config_path}: {e}")
 
 
+
 # ─────────────────────────────────────────────────────
 # SETUP STAGES
 # ─────────────────────────────────────────────────────
@@ -138,7 +165,7 @@ def stage_0_preflight():
     """Pre-flight checks: disk space, sudo, architecture."""
     print(f"\n{BOLD}{CYN}{'=' * 55}{RST}")
     print(f"  {BOLD}PiCar Pro Optimized Setup{RST}")
-    print(f"  {DIM}Flask + SSE | Raspberry Pi 3B+ | No React/WebSocket{RST}")
+    print(f"  {DIM}Flask + WebSocket | Raspberry Pi 3B+{RST}")
     print(f"{BOLD}{CYN}{'=' * 55}{RST}")
 
     if os.geteuid() != 0:
@@ -158,6 +185,12 @@ def stage_0_preflight():
     print(f"  {GRN}[+]{RST} User: {username}, Home: {user_home}")
     print(f"  {GRN}[+]{RST} Install path: {thisPath}")
 
+    # Validate install path
+    server_check = os.path.join(thisPath, "Server", "WebServer.py")
+    if not os.path.exists(server_check):
+        print(f"  {YLW}[!]{RST} Server/WebServer.py not found at {server_check}")
+        print(f"  {YLW}[!]{RST} Make sure setup.py is inside the picarpro/ directory")
+
     return debian_ver, codename
 
 
@@ -169,6 +202,8 @@ def stage_1_wifi(debian_ver, codename):
 
     if use_networkmanager:
         print(f"  {DIM}[i]{RST} Detected NetworkManager-based system (Bookworm+)")
+
+        # Check current connection
         _, conn_result = run_cmd(
             "nmcli -t -f ACTIVE,SSID dev wifi list | grep '^yes:'", critical=False
         )
@@ -184,15 +219,39 @@ def stage_1_wifi(debian_ver, codename):
             print(f"  {YLW}[!]{RST} SSID empty. Skipping WiFi setup.")
             return
         psk = input(f"  {YLW}?{RST} Enter WiFi Password: ").strip()
-        run_cmd(f'nmcli dev wifi connect "{ssid}" password "{psk}"', critical=False)
+
+        # FIX: Retry WiFi connection up to 3 times
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            rc, output = run_cmd(
+                f'nmcli dev wifi connect "{ssid}" password "{psk}"', critical=False
+            )
+            if rc == 0:
+                print(f"  {GRN}[+]{RST} Connected to WiFi: {ssid}")
+                break
+            else:
+                print(f"  {YLW}[!]{RST} Connection attempt {attempt}/{max_retries} failed")
+                if attempt < max_retries:
+                    print(f"  {DIM}[i]{RST} Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    print(f"  {RED}[!]{RST} Could not connect to WiFi after {max_retries} attempts")
+                    print(f"  {DIM}[i]{RST} You can configure WiFi later:")
+                    print(f"      nmcli dev wifi connect \"SSID\" password \"PASSWORD\"")
     else:
         print(f"  {DIM}[i]{RST} Using wpa_supplicant (Bullseye or earlier)")
         wpa_conf = "/etc/wpa_supplicant/wpa_supplicant.conf"
 
         if not os.path.exists(wpa_conf):
-            run_cmd(f"touch {wpa_conf}")
-            with open(wpa_conf, "w") as f:
-                f.write("ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\ncountry=US\n")
+            try:
+                with open(wpa_conf, "w") as f:
+                    f.write("ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n"
+                            "update_config=1\ncountry=US\n")
+            except PermissionError:
+                run_cmd(f"touch {wpa_conf}", critical=False)
+                with open(wpa_conf, "w") as f:
+                    f.write("ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n"
+                            "update_config=1\ncountry=US\n")
 
         ssid = input(f"  {YLW}?{RST} Enter WiFi Network Name (SSID): ").strip()
         if not ssid:
@@ -223,19 +282,41 @@ def stage_2_swap():
 
     print(f"  {DIM}[i]{RST} Creating 2GB swap file (critical for 1GB RAM)...")
 
-    run_cmd("sudo swapoff /var/swap 2>/dev/null || true", critical=False)
+    # First, disable any existing swap at /var/swap
+    run_cmd("swapoff /var/swap 2>/dev/null || true", critical=False)
 
-    # Try fallocate first (much faster than dd)
-    _, result = run_cmd("sudo fallocate -l 2G /var/swap 2>/dev/null", critical=False)
-    if not os.path.exists("/var/swap"):
-        print(f"  {DIM}[i]{RST} Using dd (slower)...")
-        run_cmd("sudo dd if=/dev/zero of=/var/swap bs=1M count=2048 status=progress")
+    # Remove old file if exists
+    if os.path.exists("/var/swap"):
+        try:
+            os.remove("/var/swap")
+        except Exception:
+            run_cmd("rm -f /var/swap", critical=False)
 
-    run_cmd("sudo chmod 600 /var/swap")
-    run_cmd("sudo mkswap /var/swap")
-    run_cmd("sudo swapon /var/swap")
+    # FIX: Try fallocate first, verify file size, fall back to dd
+    fallocate_ok = False
+    rc, _ = run_cmd("fallocate -l 2G /var/swap 2>/dev/null", critical=False)
+    if rc == 0 and os.path.exists("/var/swap"):
+        # Verify file size
+        try:
+            file_size = os.path.getsize("/var/swap")
+            if file_size >= 2 * 1024 * 1024 * 1024 - 1024 * 1024:  # within 1MB of 2GB
+                fallocate_ok = True
+                print(f"  {GRN}[+]{RST} Swap file created via fallocate ({file_size // (1024*1024)}MB)")
+            else:
+                print(f"  {YLW}[!]{RST} fallocate created undersized file ({file_size // (1024*1024)}MB), using dd instead")
+                os.remove("/var/swap")
+        except Exception:
+            fallocate_ok = False
 
-    # Make swap persistent
+    if not fallocate_ok:
+        print(f"  {DIM}[i]{RST} Using dd (slower but reliable)...")
+        run_cmd("dd if=/dev/zero of=/var/swap bs=1M count=2048 status=progress")
+
+    run_cmd("chmod 600 /var/swap")
+    run_cmd("mkswap /var/swap")
+    run_cmd("swapon /var/swap")
+
+    # Make swap persistent in /etc/fstab
     try:
         with open("/etc/fstab", "r") as f:
             fstab = f.read()
@@ -248,9 +329,10 @@ def stage_2_swap():
     except Exception as e:
         print(f"  {YLW}[!]{RST} Could not update /etc/fstab: {e}")
 
-    # Set swappiness
-    run_cmd("sudo sysctl vm.swappiness=10", critical=False)
+    # Set swappiness — low value reduces SD card wear
+    run_cmd("sysctl vm.swappiness=10", critical=False)
     try:
+        os.makedirs("/etc/sysctl.d", exist_ok=True)
         with open("/etc/sysctl.d/99-picarpro.conf", "w") as f:
             f.write("vm.swappiness=10\n")
         print(f"  {GRN}[+]{RST} Swappiness set to 10 (reduces SD card wear)")
@@ -258,30 +340,72 @@ def stage_2_swap():
         print(f"  {YLW}[!]{RST} Could not set swappiness: {e}")
 
 
-def stage_3_apt_packages():
+def stage_3_apt_packages(debian_ver, codename):
     """Install system packages via apt."""
     print(f"\n  {BLU}[3/7]{RST} Installing system packages...")
 
-    run_cmd("sudo apt-get update -qq")
+    # FIX: Use 'apt update -y && apt upgrade -y' instead of broken apt-get
+    # The old fix_apt_sources() was broken — pipe return code from 'head'
+    # masked the real apt error, so it never actually fixed anything.
+    # Trixie repos work fine (InRelease), the real issue was network.
+    update_ok = False
+    for attempt in range(1, 4):
+        rc, output = run_cmd("apt update -y", critical=False)
+        if rc == 0:
+            update_ok = True
+            break
+        print(f"  {YLW}[!]{RST} apt update attempt {attempt}/3 failed")
+        if attempt < 3:
+            print(f"  {DIM}[i]{RST} Retrying in 10 seconds...")
+            time.sleep(10)
 
+    if not update_ok:
+        print(f"  {RED}[!]{RST} apt update failed after 3 attempts")
+        print(f"  {YLW}[!]{RST} Continuing anyway — some packages may fail to install")
+        print(f"  {DIM}[i]{RST} Check your internet connection")
+    else:
+        # Upgrade installed packages (security + bug fixes)
+        print(f"  {DIM}[*]{RST} Upgrading installed packages...")
+        run_cmd("apt upgrade -y", critical=False)
+
+    # FIX: Removed python3-pyaudio (no audio input hardware, requires PortAudio)
+    # FIX: Removed python3-pigpio (not used, gpiozero handles everything)
+    # FIX: Packages adjusted for Trixie compatibility
     all_packages = [
-        "i2c-tools", "python3-smbus", "python3-gpiozero", "python3-pigpio",
-        "python3-picamera2", "python3-opencv", "opencv-data",
-        "python3-pyaudio", "network-manager",
-        "libfreetype6-dev", "libjpeg-dev", "build-essential",
+        "i2c-tools", "python3-smbus", "python3-gpiozero",
     ]
 
+    # Camera packages — different names on different Debian versions
+    if debian_ver >= 13:
+        # Trixie: picamera2 may be in pip instead
+        camera_packages = ["python3-opencv", "opencv-data"]
+    elif debian_ver >= 12:
+        camera_packages = ["python3-picamera2", "python3-opencv", "opencv-data"]
+    else:
+        # Bullseye and earlier
+        camera_packages = ["python3-picamera2", "python3-opencv", "opencv-data"]
+
+    all_packages.extend(camera_packages)
+
+    # Build tools (needed for pip compilation)
+    all_packages.extend([
+        "libfreetype6-dev", "libjpeg-dev", "build-essential",
+        "network-manager",
+    ])
+
+    # Filter out already installed packages
     missing = [p for p in all_packages if not is_package_installed(p)]
 
     if not missing:
         print(f"  {GRN}[+]{RST} All system packages already installed. Skipping.")
         return
 
-    print(f"  {DIM}[*]{RST} Installing {len(missing)} packages ({len(all_packages) - len(missing)} already present)...")
+    print(f"  {DIM}[*]{RST} Installing {len(missing)} packages "
+          f"({len(all_packages) - len(missing)} already present)...")
     pkg_str = " ".join(missing)
-    run_cmd(f"sudo apt-get install -y --no-install-recommends {pkg_str}")
-    run_cmd("sudo apt-get clean", critical=False)
-    run_cmd("sudo apt-get -y autoremove", critical=False)
+    run_cmd(f"apt-get install -y --no-install-recommends {pkg_str}", critical=False)
+    run_cmd("apt-get clean", critical=False)
+    run_cmd("apt-get -y autoremove", critical=False)
 
 
 def stage_4_pip_packages(debian_ver):
@@ -291,25 +415,26 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     # Update pip safely
+    # FIX: Use --ignore-installed to avoid "Cannot uninstall pip" error
+    # on systems where pip was installed by debian (no RECORD file)
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd("sudo wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py", critical=False)
-    run_cmd(f"sudo python3 /tmp/get-pip.py {pip_flag}", critical=False)
-    run_cmd("sudo rm -f /tmp/get-pip.py", critical=False)
+    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
+    # FIX: Removed adafruit-circuitpython-ads7830 (no battery ADC hardware)
+    # FIX: MPU6050 now installed by default (user has the hardware)
     pip_groups = [
         ("I2C/Motor/Servo",
          f"sudo -H pip3 install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
-         "adafruit-circuitpython-busdevice "
-         "adafruit-circuitpython-ads7830"),
+         "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
          f"sudo -H pip3 install {pip_flag} luma.oled spidev"),
         ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors"),
+         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets"),
         ("Vision/Video",
          f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
-        ("IMU (optional)",
+        ("IMU Sensor",
          f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
     ]
 
@@ -322,9 +447,11 @@ def stage_5_hardware_config():
     """Configure hardware: I2C, SPI, camera, GPU memory."""
     print(f"\n  {BLU}[5/7]{RST} Configuring hardware...")
 
-    run_cmd("sudo raspi-config nonint do_i2c 0", critical=False)
-    run_cmd("sudo raspi-config nonint do_spi 0", critical=False)
-    run_cmd("sudo raspi-config nonint do_camera 0", critical=False)
+    # Enable I2C, SPI, camera via raspi-config
+    # FIX: These may fail on newer OS, so all are non-critical
+    run_cmd("raspi-config nonint do_i2c 0", critical=False)
+    run_cmd("raspi-config nonint do_spi 0", critical=False)
+    run_cmd("raspi-config nonint do_camera 0", critical=False)
 
     config_path = get_boot_config_path()
     print(f"  {DIM}[*]{RST} Tuning {config_path}...")
@@ -352,7 +479,7 @@ def stage_6_wifi_hotspot(debian_ver):
 
     if not is_package_installed("network-manager"):
         print(f"  {DIM}[*]{RST} Installing NetworkManager...")
-        run_cmd("sudo apt-get install -y --no-install-recommends network-manager")
+        run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     # Configure hotspot
     default_ssid = "Adeept_Robot"
@@ -400,6 +527,7 @@ def stage_6_wifi_hotspot(debian_ver):
         print(f"  {RED}[!]{RST} Could not save config: {e}")
 
     # Create hotspot manager script
+    # FIX: Corrected the nmcli connection check logic
     hotspot_script = f"""#!/bin/bash
 # WiFi Hotspot Manager for PiCar Pro
 HOTSPOT_CONF="/etc/picarpro/hotspot.conf"
@@ -411,22 +539,25 @@ HOTSPOT_PASS="{existing_pass}"
 # Wait for NetworkManager
 for i in $(seq 1 30); do nmcli general status &>/dev/null && break; sleep 1; done
 
-# Check if already connected
+# Check if already connected to WiFi
 CONNECTED=$(nmcli -t -f ACTIVE,SSID dev wifi list 2>/dev/null | grep '^yes:' | head -1)
 [ -n "$CONNECTED" ] && exit 0
 
-# Try saved networks
+# Try saved networks first
 FIRST_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep '802-11-wireless' | grep -v "$HOTSPOT_CONN" | head -1 | cut -d: -f1)
 if [ -n "$FIRST_WIFI" ]; then
     nmcli con up id "$FIRST_WIFI" &>/dev/null
     sleep 5
 fi
 
-# Check again, start hotspot if needed
+# Check again, start hotspot if still not connected
 CONNECTED=$(nmcli -t -f ACTIVE,SSID dev wifi list 2>/dev/null | grep '^yes:' | head -1)
 if [ -z "$CONNECTED" ]; then
     echo "[PiCarPro] Starting hotspot: $HOTSPOT_SSID"
-    [ "$(nmcli con show "$HOTSPOT_CONN" &>/dev/null)" ] && nmcli con delete "$HOTSPOT_CONN" &>/dev/null
+    # FIX: Use nmcli exit code to check if connection exists, not string comparison
+    if nmcli con show "$HOTSPOT_CONN" &>/dev/null; then
+        nmcli con delete "$HOTSPOT_CONN" &>/dev/null
+    fi
     nmcli con add type wifi ifname wlan0 con-name "$HOTSPOT_CONN" autoconnect no ssid "$HOTSPOT_SSID"
     nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg
     nmcli con modify "$HOTSPOT_CONN" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS"
@@ -463,8 +594,8 @@ WantedBy=multi-user.target
     try:
         with open("/etc/systemd/system/picarpro-wifi.service", "w") as f:
             f.write(hotspot_service)
-        run_cmd("sudo systemctl daemon-reload")
-        run_cmd("sudo systemctl enable picarpro-wifi.service", critical=False)
+        run_cmd("systemctl daemon-reload")
+        run_cmd("systemctl enable picarpro-wifi.service", critical=False)
         print(f"  {GRN}[+]{RST} WiFi hotspot service enabled")
     except Exception as e:
         print(f"  {RED}[!]{RST} Error creating hotspot service: {e}")
@@ -474,21 +605,23 @@ def stage_7_systemd_service():
     """Create systemd service for auto-starting the robot."""
     print(f"\n  {BLU}[7/7]{RST} Setting up robot auto-start service...")
 
-    server_path = os.path.join(thisPath, "Server", "server.py")
+    server_path = os.path.join(thisPath, "Server", "WebServer.py")
 
     if not os.path.exists(server_path):
         print(f"  {RED}[!]{RST} Server file not found: {server_path}")
+        print(f"  {YLW}[!]{RST} Skipping service creation. Fix the path and re-run setup.")
         return
 
-    # Remove old service
+    # Remove old service if exists
     if os.path.exists("/etc/systemd/system/picarpro.service"):
-        run_cmd("sudo systemctl stop picarpro 2>/dev/null", critical=False)
-        run_cmd("sudo systemctl disable picarpro 2>/dev/null", critical=False)
-        run_cmd("sudo rm -f /etc/systemd/system/picarpro.service", critical=False)
-        run_cmd("sudo systemctl daemon-reload", critical=False)
+        run_cmd("systemctl stop picarpro 2>/dev/null", critical=False)
+        run_cmd("systemctl disable picarpro 2>/dev/null", critical=False)
+        os.remove("/etc/systemd/system/picarpro.service")
+        run_cmd("systemctl daemon-reload", critical=False)
 
+    # FIX: Use absolute python3 path and add environment for display
     service_content = f"""[Unit]
-Description=PiCar Pro Robot Server (Flask + SSE)
+Description=PiCar Pro Robot Server (Flask + WebSocket)
 After=network-online.target picarpro-wifi.service
 Wants=network-online.target picarpro-wifi.service
 
@@ -511,8 +644,8 @@ WantedBy=multi-user.target
     try:
         with open("/etc/systemd/system/picarpro.service", "w") as f:
             f.write(service_content)
-        run_cmd("sudo systemctl daemon-reload")
-        run_cmd("sudo systemctl enable picarpro.service")
+        run_cmd("systemctl daemon-reload")
+        run_cmd("systemctl enable picarpro.service")
         print(f"  {GRN}[+]{RST} Robot auto-start service created and enabled!")
     except Exception as e:
         print(f"  {RED}[!]{RST} Error creating service: {e}")
@@ -525,7 +658,7 @@ def main():
     debian_ver, codename = stage_0_preflight()
     stage_1_wifi(debian_ver, codename)
     stage_2_swap()
-    stage_3_apt_packages()
+    stage_3_apt_packages(debian_ver, codename)
     stage_4_pip_packages(debian_ver)
     stage_5_hardware_config()
     stage_6_wifi_hotspot(debian_ver)
@@ -572,19 +705,20 @@ def main():
     print(f"    Setup log:      {LOG_FILE}")
     print(f"")
     print(f"  {BOLD}To start the robot server:{RST}")
-    print(f"    {GRN}python3 Server/server.py{RST}")
+    print(f"    {GRN}python3 Server/WebServer.py{RST}")
     print(f"")
     print(f"  Or reboot to auto-start via systemd:")
     print(f"    {GRN}sudo reboot{RST}")
     print(f"")
-    print(f"  {BOLD}{CYN}Web interface:{RST}  {BOLD}http://{current_ip if '/' not in current_ip else '<IP>'}:5000{RST}")
-    print(f"  {BOLD}{CYN}About page:{RST}     {BOLD}http://{current_ip if '/' not in current_ip else '<IP>'}:5000/about{RST}")
+    ip_safe = current_ip if '/' not in current_ip else '<IP>'
+    print(f"  {BOLD}{CYN}Web interface:{RST}  {BOLD}http://{ip_safe}:5000{RST}")
+    print(f"  {BOLD}{CYN}Modules page:{RST}   {BOLD}http://{ip_safe}:5000/#modules{RST}")
     print(f"")
     print(f"  {BOLD}Key optimizations:{RST}")
     print(f"    {GRN}+{RST} I2C Fast Mode: 400kHz")
     print(f"    {GRN}+{RST} GPU memory: 128MB (was 256MB)")
     print(f"    {GRN}+{RST} Swap: 2GB (swappiness=10)")
-    print(f"    {GRN}+{RST} Flask + SSE (no WebSocket/React overhead)")
+    print(f"    {GRN}+{RST} Flask (5000) + WebSocket (8888) real-time bidirectional")
     print(f"    {GRN}+{RST} BGR888 camera (fixed red/blue color swap)")
     print(f"    {GRN}+{RST} WiFi Hotspot: auto-switching (fallback AP)")
     print(f"")
@@ -600,7 +734,7 @@ def main():
         if choice in ['y', 'yes']:
             print(f"\n  {GRN}Rebooting in 3 seconds...{RST}")
             time.sleep(3)
-            os.system("sudo reboot")
+            os.system("reboot")
             break
         elif choice in ['n', 'no', '']:
             print(f"\n  {DIM}Reboot cancelled. Run manually: sudo reboot{RST}")
