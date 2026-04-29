@@ -55,7 +55,7 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 @media(max-width:900px){.control-layout{grid-template-columns:1fr}}
 
 /* ========== CAMERA ========== */
-.camera-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;max-height:380px}
+.camera-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;max-height:520px}
 .camera-wrap img{width:100%;height:100%;object-fit:contain;display:block}
 .cv-badge{position:absolute;top:8px;left:8px;background:rgba(26,115,232,.9);color:#fff;padding:3px 10px;border-radius:5px;font-size:.72rem;font-weight:600;backdrop-filter:blur(4px);pointer-events:none;display:none}
 .cv-badge.visible{display:block}
@@ -189,5 +189,5 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
   .joystick-knob{width:42px;height:42px}
   .servo-grid{grid-template-columns:1fr}
   .modules-grid{grid-template-columns:1fr}
-  .camera-wrap{max-height:260px}
+  .camera-wrap{max-height:320px}
 }

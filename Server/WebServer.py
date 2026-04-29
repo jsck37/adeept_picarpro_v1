@@ -232,7 +232,7 @@ class SharedState:
             self.camera = Camera()
 
     def get_status(self):
-        """Gather current robot status as dict (no battery — module not present)."""
+        """Gather current robot status as dict."""
         info = SystemInfo.get_all()
         ram = info['ram']
         return {
@@ -250,6 +250,22 @@ class SharedState:
             "running_module": self.module_runner.running_module,
             "speed": self.speed,
             "crane_enabled": CRANE_ENABLED,
+            # Hardware availability — lets UI show "Not connected" badges
+            "hw": {
+                "motors":     self.motors._initialized if self.motors else False,
+                "servos":     self.servos._pwm_initialized if self.servos else False,
+                "leds":       self.leds._initialized if self.leds else False,
+                "buzzer":     self.buzzer._initialized if self.buzzer else False,
+                "switches":   self.switches._initialized if self.switches else False,
+                "ultrasonic": self.ultrasonic._initialized if self.ultrasonic else False,
+                "mpu6050":    self.mpu6050.initialized if self.mpu6050 else False,
+                "oled":       self.oled._initialized if self.oled else False,
+                "camera":     self.camera is not None,
+                "autonomous":  (self.autonomous is not None
+                                and self.motors._initialized
+                                and self.ultrasonic._initialized)
+                               if self.autonomous else False,
+            },
         }
 
     def shutdown_hardware(self):

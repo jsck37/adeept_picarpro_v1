@@ -33,6 +33,7 @@ class MotorController:
         self._direction = 0  # -1=backward, 0=stop, 1=forward
         self._turn = "no"
         self._radius = 0.5
+        self._initialized = False
 
         if HARDWARE_VERSION == 1:
             self._init_gpio_motors()
@@ -53,6 +54,7 @@ class MotorController:
                 enable=MOTOR_B_EN, pwm=True
             )
             self._motor_type = "gpio"
+            self._initialized = True
             print("[Motors] Initialized GPIO motors (v1 hardware)")
         except Exception as e:
             print(f"[Motors] Failed to initialize GPIO motors: {e}")
@@ -86,6 +88,7 @@ class MotorController:
 
             self._pca = pca
             self._motor_type = "pca9685"
+            self._initialized = True
             print("[Motors] Initialized PCA9685 motors (v2 hardware)")
         except Exception as e:
             print(f"[Motors] Failed to initialize PCA9685 motors: {e}")

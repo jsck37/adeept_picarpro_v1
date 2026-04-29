@@ -22,6 +22,7 @@ class UltrasonicSensor:
         self._samples = []
         self._sample_count = 5
         self._lock = threading.Lock()
+        self._initialized = False
 
         try:
             from gpiozero import DistanceSensor
@@ -30,6 +31,7 @@ class UltrasonicSensor:
                 trigger=ULTRASONIC_TRIGGER,
                 max_distance=ULTRASONIC_MAX_DISTANCE,
             )
+            self._initialized = True
             print("[Ultra] Ultrasonic sensor initialized")
         except Exception as e:
             print(f"[Ultra] Failed to initialize: {e}")

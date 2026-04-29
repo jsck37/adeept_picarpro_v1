@@ -17,11 +17,10 @@ var lastSentDir = 'stop';
 var moveThrottle = 0;
 
 // Hardware availability (updated from server status)
-var hwAvailable = {
-  headlights: true,
-  leds: true,
-  buzzer: true,
-  mpu6050: true,
+var hw = {
+  motors: false, servos: false, leds: false, buzzer: false,
+  switches: false, ultrasonic: false, mpu6050: false,
+  oled: false, camera: false, autonomous: false,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -55,6 +54,52 @@ document.querySelectorAll('.collapsible-header').forEach(function(header) {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  HARDWARE AVAILABILITY — show/hide "Not connected" badges
+// ═══════════════════════════════════════════════════════════════
+function updateHardwareUI(hardwareStatus) {
+  if (!hardwareStatus) return;
+  hw = hardwareStatus;
+
+  // Servo Control
+  toggleHwSection('servo-status', 'servo-controls', hw.servos);
+  // Headlights (need switches)
+  toggleHwSection('hl-status', 'hl-controls', hw.switches);
+  // LED Strip
+  toggleHwSection('led-status', 'led-controls', hw.leds);
+  // Buzzer
+  toggleHwSection('buzzer-status', 'buzzer-controls', hw.buzzer);
+  // Autonomous (needs motors + ultrasonic)
+  toggleHwSection('auto-status', 'auto-controls', hw.autonomous);
+  // MPU6050
+  var mpuStatusEl = document.getElementById('mpu-status');
+  var mpuControlsEl = document.getElementById('mpu-controls');
+  if (hw.mpu6050) {
+    mpuStatusEl.className = 'hw-status connected';
+    mpuStatusEl.textContent = 'Connected';
+    mpuStatusEl.style.display = '';
+    mpuControlsEl.style.display = '';
+  } else {
+    mpuStatusEl.className = 'hw-status not-connected';
+    mpuStatusEl.textContent = 'MPU6050 not connected';
+    mpuStatusEl.style.display = '';
+    mpuControlsEl.style.display = 'none';
+  }
+}
+
+function toggleHwSection(statusId, controlsId, available) {
+  var statusEl = document.getElementById(statusId);
+  var controlsEl = document.getElementById(controlsId);
+  if (!statusEl || !controlsEl) return;
+  if (available) {
+    statusEl.style.display = 'none';
+    controlsEl.style.display = '';
+  } else {
+    statusEl.style.display = '';
+    controlsEl.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  WEBSOCKET CONNECTION (port 8888)
 // ═══════════════════════════════════════════════════════════════
 var ws = null;
@@ -77,11 +122,8 @@ function wsConnect() {
         var data = JSON.parse(e.data);
         var msgType = data.type || '';
         var msgData = data.data || {};
-        if (msgType === 'status') {
-          updateStatus(msgData);
-        } else if (msgType === 'response') {
-          if (msgData.error) toast(msgData.error, 'error');
-        }
+        if (msgType === 'status') updateStatus(msgData);
+        else if (msgType === 'response' && msgData.error) toast(msgData.error, 'error');
       } catch(err) {}
     };
     ws.onclose = function() {
@@ -89,10 +131,7 @@ function wsConnect() {
       wsReconnectTimer = setTimeout(wsConnect, 3000);
     };
     ws.onerror = function() { ws.close(); };
-  } catch(e) {
-    usePolling = true;
-    startPolling();
-  }
+  } catch(e) { usePolling = true; startPolling(); }
 }
 
 function sendCommand(cmd, params) {
@@ -107,11 +146,7 @@ function sendCommand(cmd, params) {
     };
     var url = urlMap[cmd];
     if (url) {
-      fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(params)
-      }).catch(function() {});
+      fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(params) }).catch(function() {});
     }
   }
 }
@@ -120,38 +155,30 @@ function sendCommand(cmd, params) {
 //  POLLING / SSE FALLBACK
 // ═══════════════════════════════════════════════════════════════
 var pollTimer = null;
-
 function startPolling() {
   if (pollTimer) return;
   function poll() {
     fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
-      updateStatus(d);
-      document.getElementById('connection-dot').classList.remove('offline');
-    }).catch(function() {
-      document.getElementById('connection-dot').classList.add('offline');
-    });
+      updateStatus(d); document.getElementById('connection-dot').classList.remove('offline');
+    }).catch(function() { document.getElementById('connection-dot').classList.add('offline'); });
     pollTimer = setTimeout(poll, 1500);
   }
   poll();
 }
-
 function startSSE() {
   try {
     var source = new EventSource('/api/status/stream');
     source.onmessage = function(e) {
       try { var d = JSON.parse(e.data); updateStatus(d); document.getElementById('connection-dot').classList.remove('offline'); } catch(err) {}
     };
-    source.onerror = function() {
-      document.getElementById('connection-dot').classList.add('offline');
-      source.close();
-      startPolling();
-    };
+    source.onerror = function() { document.getElementById('connection-dot').classList.add('offline'); source.close(); startPolling(); };
   } catch(e) { startPolling(); }
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  STATUS UPDATE
 // ═══════════════════════════════════════════════════════════════
+var firstStatus = true;
 function updateStatus(d) {
   if (!d) return;
   if (d.cpu_temp !== undefined) document.getElementById('sb-cpu-temp').textContent = d.cpu_temp + '\u00B0C';
@@ -167,19 +194,22 @@ function updateStatus(d) {
   }
   if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
   if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
-  if (d.running_module) {
-    document.getElementById('sb-module').textContent = d.running_module;
-  } else {
-    document.getElementById('sb-module').textContent = 'Ready';
+  document.getElementById('sb-module').textContent = d.running_module || 'Ready';
+
+  // Hardware availability (update once on first status)
+  if (d.hw) {
+    updateHardwareUI(d.hw);
+    if (firstStatus) { firstStatus = false; }
   }
 
-  // MPU6050 IMU data
+  // MPU6050
   var mpu = d.mpu6050;
   if (mpu) {
-    hwAvailable.mpu6050 = true;
     document.getElementById('sb-imu').textContent = 'R:' + mpu.roll + '\u00B0 P:' + mpu.pitch + '\u00B0';
-    document.getElementById('mpu-status').textContent = 'Connected';
-    document.getElementById('mpu-status').className = 'hw-status connected';
+    var mpuStatusEl = document.getElementById('mpu-status');
+    mpuStatusEl.textContent = 'Connected';
+    mpuStatusEl.className = 'hw-status connected';
+    document.getElementById('mpu-controls').style.display = '';
     document.getElementById('mpu-ax').textContent = mpu.accel.x.toFixed(3);
     document.getElementById('mpu-ay').textContent = mpu.accel.y.toFixed(3);
     document.getElementById('mpu-az').textContent = mpu.accel.z.toFixed(3);
@@ -191,8 +221,6 @@ function updateStatus(d) {
     drawTiltIndicator(mpu.roll, mpu.pitch);
   } else {
     document.getElementById('sb-imu').textContent = 'N/A';
-    document.getElementById('mpu-status').textContent = 'MPU6050 not connected';
-    document.getElementById('mpu-status').className = 'hw-status not-connected';
   }
 }
 
@@ -207,19 +235,15 @@ function drawTiltIndicator(roll, pitch) {
   var w = tiltCanvas.width, h = tiltCanvas.height;
   var cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 8;
   tiltCtx.clearRect(0, 0, w, h);
-  // Outer circle
   tiltCtx.beginPath(); tiltCtx.arc(cx, cy, r, 0, Math.PI * 2);
   tiltCtx.fillStyle = '#f8f9fa'; tiltCtx.fill();
   tiltCtx.strokeStyle = '#dadce0'; tiltCtx.lineWidth = 2; tiltCtx.stroke();
-  // Crosshair
   tiltCtx.beginPath();
   tiltCtx.moveTo(cx - r, cy); tiltCtx.lineTo(cx + r, cy);
   tiltCtx.moveTo(cx, cy - r); tiltCtx.lineTo(cx, cy + r);
   tiltCtx.strokeStyle = '#e0e0e0'; tiltCtx.lineWidth = 1; tiltCtx.stroke();
-  // Level zone
   tiltCtx.beginPath(); tiltCtx.arc(cx, cy, r * 0.3, 0, Math.PI * 2);
   tiltCtx.strokeStyle = '#34a853'; tiltCtx.lineWidth = 1; tiltCtx.stroke();
-  // Dot
   var dotX = cx + (roll / 90) * r;
   var dotY = cy - (pitch / 90) * r;
   var dx = dotX - cx, dy = dotY - cy;
@@ -273,42 +297,11 @@ document.querySelectorAll('.cv-btn').forEach(function(btn) {
 // ═══════════════════════════════════════════════════════════════
 var speedSlider = document.getElementById('speed-slider');
 var speedVal = document.getElementById('speed-val');
-speedSlider.addEventListener('input', function() {
-  speedVal.textContent = speedSlider.value + '%';
-});
-speedSlider.addEventListener('change', function() {
-  sendCommand('speed', { value: parseInt(speedSlider.value) });
-});
+speedSlider.addEventListener('input', function() { speedVal.textContent = speedSlider.value + '%'; });
+speedSlider.addEventListener('change', function() { sendCommand('speed', { value: parseInt(speedSlider.value) }); });
 
 // ═══════════════════════════════════════════════════════════════
-//  SERVO SPEED SLIDERS (separate speed per servo)
-// ═══════════════════════════════════════════════════════════════
-var servoSpeedGrid = document.getElementById('servo-speed-grid');
-servoDefs.forEach(function(sd) {
-  var row = document.createElement('div');
-  row.className = 'slider-row';
-  row.innerHTML =
-    '<label>' + sd.name + '</label>' +
-    '<input type="range" min="' + sd.min + '" max="' + sd.max + '" value="' + sd.init + '" data-servo-speed="' + sd.id + '">' +
-    '<span class="val" id="sv-speed-' + sd.id + '">' + sd.init + '\u00B0</span>';
-  servoSpeedGrid.appendChild(row);
-});
-
-servoSpeedGrid.addEventListener('input', function(e) {
-  if (e.target.dataset.servoSpeed === undefined) return;
-  var idx = parseInt(e.target.dataset.servoSpeed);
-  document.getElementById('sv-speed-' + idx).textContent = e.target.value + '\u00B0';
-});
-
-servoSpeedGrid.addEventListener('change', function(e) {
-  if (e.target.dataset.servoSpeed === undefined) return;
-  var idx = parseInt(e.target.dataset.servoSpeed);
-  var val = parseInt(e.target.value);
-  sendCommand('servo', { id: idx, angle: val });
-});
-
-// ═══════════════════════════════════════════════════════════════
-//  JOYSTICK
+//  JOYSTICK (touch/mouse + WASD keyboard)
 // ═══════════════════════════════════════════════════════════════
 var joystickContainer = document.getElementById('joystick-container');
 var joystickKnob = document.getElementById('joystick-knob');
@@ -360,40 +353,107 @@ function updateJoystick(clientX, clientY) {
   }
 }
 
+function moveKnobToDirection(dir) {
+  // Move the visual knob to indicate direction
+  var center = getJoystickCenter();
+  var dist = center.r * 0.7;
+  var dx = 0, dy = 0;
+  switch (dir) {
+    case 'forward':         dy = -dist; break;
+    case 'backward':        dy = dist; break;
+    case 'left':            dx = -dist; break;
+    case 'right':           dx = dist; break;
+    case 'forward_left':    dx = -dist * 0.7; dy = -dist * 0.7; break;
+    case 'forward_right':   dx = dist * 0.7;  dy = -dist * 0.7; break;
+    case 'backward_left':   dx = -dist * 0.7; dy = dist * 0.7;  break;
+    case 'backward_right':  dx = dist * 0.7;  dy = dist * 0.7;  break;
+    default: break;
+  }
+  joystickKnob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+  joystickKnob.classList.add('dragging');
+}
+
 function resetJoystick() {
   joystickKnob.classList.add('spring-back');
   joystickKnob.style.transform = 'translate(-50%, -50%)';
-  joystickLabel.textContent = 'Drag knob to move';
+  joystickLabel.textContent = 'Drag knob or W/A/S/D';
   sendCommand('move', { dir: 'stop' });
   lastSentDir = 'stop';
-  setTimeout(function() { joystickKnob.classList.remove('spring-back'); }, 300);
+  setTimeout(function() { joystickKnob.classList.remove('spring-back'); joystickKnob.classList.remove('dragging'); }, 300);
 }
 
+// Touch/mouse joystick
 joystickKnob.addEventListener('pointerdown', function(e) {
   e.preventDefault();
   joystickDragging = true;
   joystickKnob.classList.add('dragging');
   joystickKnob.setPointerCapture(e.pointerId);
 });
-
 document.addEventListener('pointermove', function(e) {
   if (!joystickDragging) return;
   if (joystickRafId) cancelAnimationFrame(joystickRafId);
   joystickRafId = requestAnimationFrame(function() { updateJoystick(e.clientX, e.clientY); });
 });
-
 document.addEventListener('pointerup', function() {
   if (!joystickDragging) return;
   joystickDragging = false;
-  joystickKnob.classList.remove('dragging');
   resetJoystick();
 });
-
 document.addEventListener('pointercancel', function() {
   if (!joystickDragging) return;
   joystickDragging = false;
-  joystickKnob.classList.remove('dragging');
   resetJoystick();
+});
+
+// ── WASD keyboard control ──
+var keysDown = {};
+var wasdTimer = null;
+
+function wasdGetDirection() {
+  var w = keysDown['w'] || keysDown['arrowup'];
+  var a = keysDown['a'] || keysDown['arrowleft'];
+  var s = keysDown['s'] || keysDown['arrowdown'];
+  var d = keysDown['d'] || keysDown['arrowright'];
+  if (w && a) return 'forward_left';
+  if (w && d) return 'forward_right';
+  if (s && a) return 'backward_left';
+  if (s && d) return 'backward_right';
+  if (w) return 'forward';
+  if (s) return 'backward';
+  if (a) return 'left';
+  if (d) return 'right';
+  return 'stop';
+}
+
+function wasdUpdate() {
+  var dir = wasdGetDirection();
+  if (dir !== lastSentDir) {
+    moveKnobToDirection(dir);
+    joystickLabel.textContent = dirLabels[dir] || dir;
+    sendCommand('move', { dir: dir });
+    lastSentDir = dir;
+    moveThrottle = Date.now();
+  }
+  if (dir === 'stop') {
+    resetJoystick();
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  var key = e.key.toLowerCase();
+  if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].indexOf(key) === -1) return;
+  // Ignore if typing in an input
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  keysDown[key] = true;
+  wasdUpdate();
+});
+
+document.addEventListener('keyup', function(e) {
+  var key = e.key.toLowerCase();
+  if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].indexOf(key) === -1) return;
+  delete keysDown[key];
+  wasdUpdate();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -432,10 +492,6 @@ document.getElementById('servo-home').addEventListener('click', function() {
     var slider = servoGrid.querySelector('[data-servo="' + sd.id + '"]');
     if (slider) slider.value = sd.init;
     document.getElementById('sv-' + sd.id).textContent = sd.init + '\u00B0';
-    // Also update the speed slider
-    var speedSlider = servoSpeedGrid.querySelector('[data-servo-speed="' + sd.id + '"]');
-    if (speedSlider) speedSlider.value = sd.init;
-    document.getElementById('sv-speed-' + sd.id).textContent = sd.init + '\u00B0';
   });
   sendCommand('servo_home', {});
 });
@@ -444,43 +500,27 @@ document.getElementById('servo-home').addEventListener('click', function() {
 //  HEADLIGHTS
 // ═══════════════════════════════════════════════════════════════
 function updateHeadlightUI() {
-  var leftBtn = document.getElementById('hl-left');
-  var rightBtn = document.getElementById('hl-right');
-  var bothBtn = document.getElementById('hl-both');
-  leftBtn.className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
-  rightBtn.className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
-  bothBtn.className = 'headlight-btn ' + (hlLeft && hlRight ? 'on' : 'off');
+  document.getElementById('hl-left').className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
+  document.getElementById('hl-right').className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
+  document.getElementById('hl-both').className = 'headlight-btn ' + (hlLeft && hlRight ? 'on' : 'off');
 }
 
 document.getElementById('hl-left').addEventListener('click', function() {
-  hlLeft = !hlLeft;
-  sendCommand('switch', { id: 1, state: hlLeft });
-  updateHeadlightUI();
+  hlLeft = !hlLeft; sendCommand('switch', { id: 1, state: hlLeft }); updateHeadlightUI();
 });
-
 document.getElementById('hl-right').addEventListener('click', function() {
-  hlRight = !hlRight;
-  sendCommand('switch', { id: 2, state: hlRight });
-  updateHeadlightUI();
+  hlRight = !hlRight; sendCommand('switch', { id: 2, state: hlRight }); updateHeadlightUI();
 });
-
 document.getElementById('hl-both').addEventListener('click', function() {
-  var newState = !(hlLeft && hlRight);
-  hlLeft = newState;
-  hlRight = newState;
-  sendCommand('switch', { id: 1, state: hlLeft });
-  sendCommand('switch', { id: 2, state: hlRight });
-  updateHeadlightUI();
+  var ns = !(hlLeft && hlRight); hlLeft = ns; hlRight = ns;
+  sendCommand('switch', { id: 1, state: hlLeft }); sendCommand('switch', { id: 2, state: hlRight }); updateHeadlightUI();
 });
 
 // ═══════════════════════════════════════════════════════════════
 //  LED STRIP
 // ═══════════════════════════════════════════════════════════════
 function hexToRgb(hex) {
-  var r = parseInt(hex.slice(1,3), 16);
-  var g = parseInt(hex.slice(3,5), 16);
-  var b = parseInt(hex.slice(5,7), 16);
-  return [r, g, b];
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
 }
 
 var ledColorInput = document.getElementById('led-color');
@@ -489,33 +529,26 @@ document.querySelectorAll('.color-preset').forEach(function(btn) {
   btn.addEventListener('click', function() {
     ledColorInput.value = btn.dataset.hex;
     if (currentLedMode !== 'off' && currentLedMode !== 'rainbow' && currentLedMode !== 'police') {
-      var rgb = hexToRgb(ledColorInput.value);
-      sendCommand('led', { mode: currentLedMode, color: rgb });
+      sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
     }
   });
 });
-
 ledColorInput.addEventListener('input', function() {
   if (currentLedMode === 'solid' || currentLedMode === 'breath' || currentLedMode === 'colorWipe') {
-    var rgb = hexToRgb(ledColorInput.value);
-    sendCommand('led', { mode: currentLedMode, color: rgb });
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
   }
 });
-
 ledColorInput.addEventListener('change', function() {
   if (currentLedMode !== 'off' && currentLedMode !== 'rainbow' && currentLedMode !== 'police') {
-    var rgb = hexToRgb(ledColorInput.value);
-    sendCommand('led', { mode: currentLedMode, color: rgb });
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
   }
 });
-
 document.querySelectorAll('#led-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('#led-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     currentLedMode = btn.dataset.led;
-    var rgb = hexToRgb(ledColorInput.value);
-    sendCommand('led', { mode: currentLedMode, color: rgb });
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
   });
 });
 
@@ -523,9 +556,7 @@ document.querySelectorAll('#led-group .gbtn').forEach(function(btn) {
 //  BUZZER
 // ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    sendCommand('buzzer', { melody: btn.dataset.buzzer });
-  });
+  btn.addEventListener('click', function() { sendCommand('buzzer', { melody: btn.dataset.buzzer }); });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -554,12 +585,7 @@ async function loadModules() {
     var uploads = data.uploads || [];
     currentRunningModule = data.running;
     var all = modules.concat(uploads);
-
-    if (all.length === 0) {
-      grid.innerHTML = '<div style="color:#5f6368;font-size:.82rem">No modules found</div>';
-      return;
-    }
-
+    if (all.length === 0) { grid.innerHTML = '<div style="color:#5f6368;font-size:.82rem">No modules found</div>'; return; }
     grid.innerHTML = '';
     all.forEach(function(mod) {
       var isRunning = currentRunningModule === mod.id || currentRunningModule === mod.name;
@@ -570,46 +596,33 @@ async function loadModules() {
         '<div class="module-header">' +
           '<div class="module-icon">' + (mod.icon || '\u2699') + '</div>' +
           '<div class="module-info"><h3>' + (mod.name || mod.id) + '</h3>' +
-          '<p>' + (mod.desc || '') + '</p></div>' +
-        '</div>' +
+          '<p>' + (mod.desc || '') + '</p></div></div>' +
         (tags ? '<div class="module-tags">' + tags + '</div>' : '') +
         '<div class="module-actions">' +
           (isRunning
-            ? '<button class="btn-sm btn-danger" data-mod-stop="1">Stop</button>' +
-              '<span style="font-size:.75rem;color:#34a853;font-weight:600">Running</span>'
-            : '<button class="btn-sm btn-primary" data-mod-run="' + mod.id + '">Run</button>'
-          ) +
+            ? '<button class="btn-sm btn-danger" data-mod-stop="1">Stop</button><span style="font-size:.75rem;color:#34a853;font-weight:600">Running</span>'
+            : '<button class="btn-sm btn-primary" data-mod-run="' + mod.id + '">Run</button>') +
         '</div>';
       grid.appendChild(card);
     });
-
     grid.querySelectorAll('[data-mod-run]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var mid = btn.dataset.modRun;
         sendCommand('module_start', { id: mid });
-        fetch('/api/modules/start', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ id: mid })
-        }).then(function(r) { return r.json(); }).then(function(d) {
-          if (d.ok) { toast('Module started: ' + mid, 'success'); setTimeout(loadModules, 500); }
-          else { toast('Error: ' + (d.message || 'Failed'), 'error'); }
-        }).catch(function() { toast('Module started: ' + mid, 'success'); setTimeout(loadModules, 500); });
+        fetch('/api/modules/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: mid }) })
+          .then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); }
+            else { toast('Error: ' + (d.message || 'Failed'), 'error'); }
+          }).catch(function() { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); });
       });
     });
-
     grid.querySelectorAll('[data-mod-stop]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         sendCommand('module_stop', {});
-        fetch('/api/modules/stop', { method: 'POST' }).then(function() {
-          toast('Module stopped', 'success');
-          setTimeout(loadModules, 500);
-        });
+        fetch('/api/modules/stop', { method: 'POST' }).then(function() { toast('Stopped', 'success'); setTimeout(loadModules, 500); });
       });
     });
-  } catch(e) {
-    grid.innerHTML = '<div style="color:#ea4335;font-size:.82rem">Error loading modules</div>';
-  }
+  } catch(e) { grid.innerHTML = '<div style="color:#ea4335;font-size:.82rem">Error loading modules</div>'; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -629,31 +642,18 @@ uploadBtn.addEventListener('click', function(e) { e.stopPropagation(); if (fileI
 
 function uploadFiles(files) {
   uploadProgress.classList.add('visible');
-  var completed = 0;
-  var total = files.length;
+  var completed = 0, total = files.length;
   for (var i = 0; i < files.length; i++) {
     (function(file) {
-      var fd = new FormData();
-      fd.append('file', file);
+      var fd = new FormData(); fd.append('file', file);
       var xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/modules/upload');
       xhr.upload.onprogress = function(e) {
-        if (e.lengthComputable) {
-          var pct = Math.round((completed / total) * 100 + (e.loaded / e.total) * (100 / total));
-          uploadProgressBar.style.width = pct + '%';
-        }
+        if (e.lengthComputable) uploadProgressBar.style.width = Math.round((completed / total) * 100 + (e.loaded / e.total) * (100 / total)) + '%';
       };
       xhr.onload = function() {
         completed++;
-        if (completed === total) {
-          uploadProgressBar.style.width = '100%';
-          setTimeout(function() {
-            uploadProgress.classList.remove('visible');
-            uploadProgressBar.style.width = '0%';
-            toast('Upload complete!', 'success');
-            loadModules();
-          }, 500);
-        }
+        if (completed === total) { uploadProgressBar.style.width = '100%'; setTimeout(function() { uploadProgress.classList.remove('visible'); uploadProgressBar.style.width = '0%'; toast('Upload complete!', 'success'); loadModules(); }, 500); }
       };
       xhr.onerror = function() { toast('Upload failed', 'error'); };
       xhr.send(fd);

@@ -12,6 +12,7 @@ class SwitchController:
     def __init__(self):
         self._leds = []
         self._states = [False, False, False]
+        self._initialized = False
 
         try:
             from gpiozero import LED
@@ -20,6 +21,7 @@ class SwitchController:
                 led = LED(pin)
                 led.off()
                 self._leds.append(led)
+            self._initialized = True
             print(f"[Switch] {len(self._leds)} switches initialized")
         except Exception as e:
             print(f"[Switch] Failed to initialize: {e}")
