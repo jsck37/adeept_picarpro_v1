@@ -255,7 +255,7 @@ class Camera(BaseCamera):
             self._picam.set_control("flip_v", True)
 
         self._picam.start()
-        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps (BGR888)")
+        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps quality={CAMERA_JPEG_QUALITY}% (BGR888)")
 
     def frames(self):
         """Generator that yields JPEG-encoded frames."""

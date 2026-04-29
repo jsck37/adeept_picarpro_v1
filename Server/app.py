@@ -39,10 +39,13 @@ def create_app(state):
     os.makedirs(upload_dir, exist_ok=True)
 
     # ── Flask app ─────────────────────────────────────────────────────────
+    # Disable built-in static serving — we serve dist/ files via explicit
+    # send_from_directory routes below. This is more reliable than
+    # static_url_path='' which can conflict with other routes.
     app = Flask(
         __name__,
         template_folder=dist_dir,
-        static_folder=dist_dir,
+        static_folder=None,
     )
     app.config['SECRET_KEY'] = 'picarpro_secret'
 
@@ -63,6 +66,31 @@ def create_app(state):
     def page_index():
         """Main control page."""
         return render_template("index.html")
+
+    @app.route("/favicon.ico")
+    def favicon():
+        """Return empty 204 to suppress 404 errors for favicon."""
+        return "", 204
+
+    # ── Static files from dist/ (explicit routes — no Flask static magic) ──
+
+    @app.route("/style.css")
+    def serve_css():
+        """Serve the main stylesheet."""
+        return send_from_directory(dist_dir, "style.css", mimetype="text/css")
+
+    @app.route("/app.js")
+    def serve_js():
+        """Serve the main application script."""
+        return send_from_directory(dist_dir, "app.js", mimetype="application/javascript")
+
+    @app.route("/<path:filename>")
+    def serve_dist_file(filename):
+        """Catch-all: serve any other file from dist/ (images, fonts, etc.)."""
+        filepath = os.path.join(dist_dir, filename)
+        if os.path.isfile(filepath):
+            return send_from_directory(dist_dir, filename)
+        return "", 404
 
     # ═════════════════════════════════════════════════════════════════════
     #  CAMERA MJPEG STREAM

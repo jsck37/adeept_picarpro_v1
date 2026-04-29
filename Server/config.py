@@ -120,8 +120,8 @@ BUZZER_PIN = 18
 # Camera Configuration
 # =============================================================================
 CAMERA_RESOLUTION = (640, 480)
-CAMERA_FPS = 20           # Target frame rate (was unlimited in v1!)
-CAMERA_JPEG_QUALITY = 70  # 0-100, lower = less CPU usage
+CAMERA_FPS = 30           # Target frame rate (was unlimited in v1!)
+CAMERA_JPEG_QUALITY = 90  # 0-100, higher = better image quality
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL = False
 
