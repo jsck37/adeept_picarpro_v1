@@ -1,31 +1,22 @@
-// ═══════════════════════════════════════════════════════════════
-//  PiCar Pro — Front-end application
-// ═══════════════════════════════════════════════════════════════
-
-// ── Servo definitions (3 servos, crane disabled) ──
 var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
 ];
 
-// ── State ──
 var hlLeft = false;
 var hlRight = false;
 var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
+var demoMode = false;
 
-// Hardware availability (updated from server status)
 var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
   switches: false, ultrasonic: false, mpu6050: false,
   oled: false, camera: false, autonomous: false,
 };
 
-// ═══════════════════════════════════════════════════════════════
-//  TOAST
-// ═══════════════════════════════════════════════════════════════
 function toast(msg, type) {
   type = type || 'info';
   var container = document.getElementById('toast-container');
@@ -39,9 +30,6 @@ function toast(msg, type) {
   }, 3000);
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  COLLAPSIBLE SECTIONS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.collapsible-header').forEach(function(header) {
   header.addEventListener('click', function() {
     var targetId = header.dataset.target;
@@ -53,27 +41,17 @@ document.querySelectorAll('.collapsible-header').forEach(function(header) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  HARDWARE AVAILABILITY — show/hide "Not connected" badges
-// ═══════════════════════════════════════════════════════════════
 function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
-
-  // Servo Control
   toggleHwSection('servo-status', 'servo-controls', hw.servos);
-  // Headlights (need switches)
   toggleHwSection('hl-status', 'hl-controls', hw.switches);
-  // LED Strip
   toggleHwSection('led-status', 'led-controls', hw.leds);
-  // Buzzer
   toggleHwSection('buzzer-status', 'buzzer-controls', hw.buzzer);
-  // Autonomous (needs motors + ultrasonic)
   toggleHwSection('auto-status', 'auto-controls', hw.autonomous);
-  // MPU6050
   var mpuStatusEl = document.getElementById('mpu-status');
   var mpuControlsEl = document.getElementById('mpu-controls');
-  if (hw.mpu6050) {
+  if (hw.mpu6050 || demoMode) {
     mpuStatusEl.className = 'hw-status connected';
     mpuStatusEl.textContent = 'Connected';
     mpuStatusEl.style.display = '';
@@ -90,7 +68,7 @@ function toggleHwSection(statusId, controlsId, available) {
   var statusEl = document.getElementById(statusId);
   var controlsEl = document.getElementById(controlsId);
   if (!statusEl || !controlsEl) return;
-  if (available) {
+  if (available || demoMode) {
     statusEl.style.display = 'none';
     controlsEl.style.display = '';
   } else {
@@ -99,9 +77,6 @@ function toggleHwSection(statusId, controlsId, available) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  WEBSOCKET CONNECTION (port 8888)
-// ═══════════════════════════════════════════════════════════════
 var ws = null;
 var wsReconnectTimer = null;
 var usePolling = false;
@@ -151,9 +126,6 @@ function sendCommand(cmd, params) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  POLLING / SSE FALLBACK
-// ═══════════════════════════════════════════════════════════════
 var pollTimer = null;
 function startPolling() {
   if (pollTimer) return;
@@ -175,9 +147,6 @@ function startSSE() {
   } catch(e) { startPolling(); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  STATUS UPDATE
-// ═══════════════════════════════════════════════════════════════
 var firstStatus = true;
 function updateStatus(d) {
   if (!d) return;
@@ -196,13 +165,12 @@ function updateStatus(d) {
   if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
   document.getElementById('sb-module').textContent = d.running_module || 'Ready';
 
-  // Hardware availability (update once on first status)
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
   }
 
-  // MPU6050
+  if (d.module_status) updateModuleStatus(d.module_status);
   var mpu = d.mpu6050;
   if (mpu) {
     document.getElementById('sb-imu').textContent = 'R:' + mpu.roll + '\u00B0 P:' + mpu.pitch + '\u00B0';
@@ -224,9 +192,6 @@ function updateStatus(d) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MPU6050 TILT INDICATOR
-// ═══════════════════════════════════════════════════════════════
 var tiltCanvas = document.getElementById('mpu-tilt-canvas');
 var tiltCtx = tiltCanvas ? tiltCanvas.getContext('2d') : null;
 
@@ -258,15 +223,9 @@ function drawTiltIndicator(roll, pitch) {
   tiltCtx.fillStyle = '#5f6368'; tiltCtx.fill();
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CONNECT
-// ═══════════════════════════════════════════════════════════════
 wsConnect();
 setTimeout(startSSE, 500);
 
-// ═══════════════════════════════════════════════════════════════
-//  TAB SWITCHING
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.tab-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -277,9 +236,6 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  CV MODE BUTTONS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.cv-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.cv-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -292,17 +248,11 @@ document.querySelectorAll('.cv-btn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  MOTOR SPEED SLIDER
-// ═══════════════════════════════════════════════════════════════
 var speedSlider = document.getElementById('speed-slider');
 var speedVal = document.getElementById('speed-val');
 speedSlider.addEventListener('input', function() { speedVal.textContent = speedSlider.value + '%'; });
 speedSlider.addEventListener('change', function() { sendCommand('speed', { value: parseInt(speedSlider.value) }); });
 
-// ═══════════════════════════════════════════════════════════════
-//  JOYSTICK (touch/mouse + WASD keyboard)
-// ═══════════════════════════════════════════════════════════════
 var joystickContainer = document.getElementById('joystick-container');
 var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
@@ -354,7 +304,6 @@ function updateJoystick(clientX, clientY) {
 }
 
 function moveKnobToDirection(dir) {
-  // Move the visual knob to indicate direction
   var center = getJoystickCenter();
   var dist = center.r * 0.7;
   var dx = 0, dy = 0;
@@ -377,12 +326,13 @@ function resetJoystick() {
   joystickKnob.classList.add('spring-back');
   joystickKnob.style.transform = 'translate(-50%, -50%)';
   joystickLabel.textContent = 'Drag knob or W/A/S/D';
-  sendCommand('move', { dir: 'stop' });
+  if (lastSentDir !== 'stop') {
+    sendCommand('move', { dir: 'stop' });
+  }
   lastSentDir = 'stop';
   setTimeout(function() { joystickKnob.classList.remove('spring-back'); joystickKnob.classList.remove('dragging'); }, 300);
 }
 
-// Touch/mouse joystick
 joystickKnob.addEventListener('pointerdown', function(e) {
   e.preventDefault();
   joystickDragging = true;
@@ -405,15 +355,14 @@ document.addEventListener('pointercancel', function() {
   resetJoystick();
 });
 
-// ── WASD keyboard control ──
 var keysDown = {};
 var wasdTimer = null;
 
 function wasdGetDirection() {
-  var w = keysDown['w'] || keysDown['arrowup'];
-  var a = keysDown['a'] || keysDown['arrowleft'];
-  var s = keysDown['s'] || keysDown['arrowdown'];
-  var d = keysDown['d'] || keysDown['arrowright'];
+  var w = keysDown['KeyW'] || keysDown['ArrowUp'];
+  var a = keysDown['KeyA'] || keysDown['ArrowLeft'];
+  var s = keysDown['KeyS'] || keysDown['ArrowDown'];
+  var d = keysDown['KeyD'] || keysDown['ArrowRight'];
   if (w && a) return 'forward_left';
   if (w && d) return 'forward_right';
   if (s && a) return 'backward_left';
@@ -439,26 +388,22 @@ function wasdUpdate() {
   }
 }
 
+var MOVE_CODES = ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+
 document.addEventListener('keydown', function(e) {
-  var key = e.key.toLowerCase();
-  if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].indexOf(key) === -1) return;
-  // Ignore if typing in an input
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (MOVE_CODES.indexOf(e.code) === -1) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   e.preventDefault();
-  keysDown[key] = true;
+  keysDown[e.code] = true;
   wasdUpdate();
 });
 
 document.addEventListener('keyup', function(e) {
-  var key = e.key.toLowerCase();
-  if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].indexOf(key) === -1) return;
-  delete keysDown[key];
+  if (MOVE_CODES.indexOf(e.code) === -1) return;
+  delete keysDown[e.code];
   wasdUpdate();
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  SERVO CONTROL (angle sliders + home)
-// ═══════════════════════════════════════════════════════════════
 var servoGrid = document.getElementById('servo-grid');
 var servoValues = [];
 
@@ -496,9 +441,6 @@ document.getElementById('servo-home').addEventListener('click', function() {
   sendCommand('servo_home', {});
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  HEADLIGHTS
-// ═══════════════════════════════════════════════════════════════
 function updateHeadlightUI() {
   document.getElementById('hl-left').className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
   document.getElementById('hl-right').className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
@@ -516,9 +458,6 @@ document.getElementById('hl-both').addEventListener('click', function() {
   sendCommand('switch', { id: 1, state: hlLeft }); sendCommand('switch', { id: 2, state: hlRight }); updateHeadlightUI();
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  LED STRIP
-// ═══════════════════════════════════════════════════════════════
 function hexToRgb(hex) {
   return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
 }
@@ -552,16 +491,10 @@ document.querySelectorAll('#led-group .gbtn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  BUZZER
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() { sendCommand('buzzer', { melody: btn.dataset.buzzer }); });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  AUTONOMOUS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('#auto-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
@@ -570,10 +503,33 @@ document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULES
-// ═══════════════════════════════════════════════════════════════
 var currentRunningModule = null;
+var moduleStatuses = {};
+
+function updateModuleStatus(statusData) {
+  if (!statusData) return;
+  moduleStatuses = statusData;
+  Object.keys(statusData).forEach(function(mid) {
+    var card = document.querySelector('[data-module-id="' + mid + '"]');
+    if (!card) return;
+    var badge = card.querySelector('.module-status-badge');
+    if (!badge) return;
+    var s = statusData[mid];
+    if (s === 'running') {
+      badge.className = 'module-status-badge running';
+      badge.textContent = 'Running';
+    } else if (s === 'error') {
+      badge.className = 'module-status-badge error';
+      badge.textContent = 'Error';
+    } else if (s === 'exited') {
+      badge.className = 'module-status-badge exited';
+      badge.textContent = 'Exited';
+    } else {
+      badge.className = 'module-status-badge';
+      badge.textContent = '';
+    }
+  });
+}
 
 async function loadModules() {
   var grid = document.getElementById('modules-grid');
@@ -589,9 +545,14 @@ async function loadModules() {
     grid.innerHTML = '';
     all.forEach(function(mod) {
       var isRunning = currentRunningModule === mod.id || currentRunningModule === mod.name;
+      var statusKey = mod.id || mod.name;
+      var mstatus = moduleStatuses[statusKey] || (isRunning ? 'running' : '');
       var card = document.createElement('div');
       card.className = 'module-card' + (isRunning ? ' running' : '');
+      card.dataset.moduleId = statusKey;
       var tags = (mod.hardware || []).map(function(h) { return '<span class="module-tag">' + h + '</span>'; }).join('');
+      var statusBadge = '<span class="module-status-badge ' + (mstatus || '') + '">' +
+        (mstatus === 'running' ? 'Running' : mstatus === 'error' ? 'Error' : mstatus === 'exited' ? 'Exited' : '') + '</span>';
       card.innerHTML =
         '<div class="module-header">' +
           '<div class="module-icon">' + (mod.icon || '\u2699') + '</div>' +
@@ -599,8 +560,9 @@ async function loadModules() {
           '<p>' + (mod.desc || '') + '</p></div></div>' +
         (tags ? '<div class="module-tags">' + tags + '</div>' : '') +
         '<div class="module-actions">' +
+          statusBadge +
           (isRunning
-            ? '<button class="btn-sm btn-danger" data-mod-stop="1">Stop</button><span style="font-size:.75rem;color:#34a853;font-weight:600">Running</span>'
+            ? '<button class="btn-sm btn-danger" data-mod-stop="1">Stop</button>'
             : '<button class="btn-sm btn-primary" data-mod-run="' + mod.id + '">Run</button>') +
         '</div>';
       grid.appendChild(card);
@@ -608,26 +570,49 @@ async function loadModules() {
     grid.querySelectorAll('[data-mod-run]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var mid = btn.dataset.modRun;
+        var card = btn.closest('.module-card');
+        var badge = card.querySelector('.module-status-badge');
+        badge.className = 'module-status-badge starting';
+        badge.textContent = 'Starting...';
+        btn.disabled = true;
         sendCommand('module_start', { id: mid });
         fetch('/api/modules/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: mid }) })
           .then(function(r) { return r.json(); }).then(function(d) {
-            if (d.ok) { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); }
-            else { toast('Error: ' + (d.message || 'Failed'), 'error'); }
-          }).catch(function() { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); });
+            if (d.ok) {
+              badge.className = 'module-status-badge running';
+              badge.textContent = 'Running';
+              toast('Started: ' + mid, 'success');
+              setTimeout(loadModules, 1500);
+            } else {
+              badge.className = 'module-status-badge error';
+              badge.textContent = 'Error';
+              toast('Error: ' + (d.message || 'Failed'), 'error');
+              btn.disabled = false;
+            }
+          }).catch(function() {
+            badge.className = 'module-status-badge running';
+            badge.textContent = 'Running';
+            toast('Started: ' + mid, 'success');
+            setTimeout(loadModules, 1500);
+          });
       });
     });
     grid.querySelectorAll('[data-mod-stop]').forEach(function(btn) {
       btn.addEventListener('click', function() {
+        var card = btn.closest('.module-card');
+        var badge = card.querySelector('.module-status-badge');
+        if (badge) { badge.className = 'module-status-badge'; badge.textContent = 'Stopping...'; }
         sendCommand('module_stop', {});
-        fetch('/api/modules/stop', { method: 'POST' }).then(function() { toast('Stopped', 'success'); setTimeout(loadModules, 500); });
+        fetch('/api/modules/stop', { method: 'POST' }).then(function() {
+          if (badge) { badge.className = 'module-status-badge exited'; badge.textContent = 'Exited'; }
+          toast('Stopped', 'success');
+          setTimeout(loadModules, 1000);
+        });
       });
     });
   } catch(e) { grid.innerHTML = '<div style="color:#ea4335;font-size:.82rem">Error loading modules</div>'; }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  FILE UPLOAD
-// ═══════════════════════════════════════════════════════════════
 var uploadArea = document.getElementById('upload-area');
 var fileInput = document.getElementById('file-input');
 var uploadBtn = document.getElementById('upload-btn');
@@ -659,4 +644,14 @@ function uploadFiles(files) {
       xhr.send(fd);
     })(files[i]);
   }
+}
+
+var demoToggle = document.getElementById('demo-toggle');
+if (demoToggle) {
+  demoToggle.addEventListener('change', function() {
+    demoMode = demoToggle.checked;
+    var label = document.getElementById('demo-label');
+    if (label) label.textContent = demoMode ? 'Demo ON' : 'Demo';
+    updateHardwareUI(hw);
+  });
 }

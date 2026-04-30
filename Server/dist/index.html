@@ -8,7 +8,6 @@
 </head>
 <body>
 
-<!-- ==================== STATUS BAR ==================== -->
 <div class="status-bar" id="status-bar">
   <div class="sb-item"><span class="sb-label">CPU</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
   <div class="sb-sep"></div>
@@ -27,7 +26,6 @@
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
-<!-- ==================== HEADER ==================== -->
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
@@ -36,17 +34,19 @@
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
     <button class="tab-btn" data-tab="modules">Modules</button>
+    <label class="demo-switch" title="Demo mode: ignore hardware status for UI testing">
+      <span class="demo-switch-label" id="demo-label">Demo</span>
+      <input type="checkbox" id="demo-toggle">
+      <span class="demo-slider"></span>
+    </label>
   </nav>
 </header>
 
-<!-- ==================== CONTROL TAB ==================== -->
 <div class="tab-content active" id="content-control">
   <div class="control-layout">
 
-    <!-- ========== LEFT COLUMN ========== -->
     <div class="col-left">
 
-      <!-- Camera -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="camera-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -63,7 +63,6 @@
         </div>
       </div>
 
-      <!-- OpenCV Modes -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="cv-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -82,7 +81,6 @@
         </div>
       </div>
 
-      <!-- Autonomous -->
       <div class="card" id="card-autonomous">
         <div class="card-title collapsible-header open" data-target="auto-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -105,12 +103,10 @@
         </div>
       </div>
 
-    </div><!-- /col-left -->
+    </div>
 
-    <!-- ========== RIGHT COLUMN ========== -->
     <div class="col-right">
 
-      <!-- Movement (Joystick + WASD) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -131,7 +127,6 @@
         </div>
       </div>
 
-      <!-- Speed (motor only) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="speed-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -149,7 +144,6 @@
         </div>
       </div>
 
-      <!-- Servo Control -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="servo-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -169,7 +163,6 @@
         </div>
       </div>
 
-      <!-- IMU Sensor (MPU6050) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -208,7 +201,6 @@
         </div>
       </div>
 
-      <!-- Headlights -->
       <div class="card" id="card-headlights">
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -229,7 +221,6 @@
         </div>
       </div>
 
-      <!-- LED Strip -->
       <div class="card" id="card-led">
         <div class="card-title collapsible-header open" data-target="led-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -268,7 +259,6 @@
         </div>
       </div>
 
-      <!-- Buzzer -->
       <div class="card" id="card-buzzer">
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -289,11 +279,10 @@
         </div>
       </div>
 
-    </div><!-- /col-right -->
+    </div>
   </div>
 </div>
 
-<!-- ==================== MODULES TAB ==================== -->
 <div class="tab-content" id="content-modules">
   <div class="card">
     <div class="card-title collapsible-header open" data-target="modules-list-body">
@@ -327,7 +316,6 @@
   </div>
 </div>
 
-<!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
 <script src="app.js"></script>
