@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""PiCar Pro Flask App — web frontend + MJPEG camera stream."""
+"""
+PiCar Pro Flask App — serves web frontend + MJPEG camera stream
+
+Architecture (matching original):
+- Flask app on port 5000: serves templates/index.html + MJPEG stream
+- This is started by WebServer.py in a background thread
+- Real-time WebSocket control is handled separately by WebServer.py on port 8888
+- REST API endpoints provided as fallback when WebSocket is not available
+"""
 
 import json
 import os
@@ -8,20 +16,32 @@ import time
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 from Server.camera.camera_opencv import Camera
-from Server.config import FLASK_PORT, DEFAULT_SPEED, SERVO_COUNT
+from Server.config import FLASK_PORT, DEFAULT_SPEED, SERVO_COUNT, SWITCH_PINS
 from Server.modules import get_module_list
 
 
 def create_app(state):
+    """
+    Build and return the Flask application.
 
+    Args:
+        state: SharedState instance from WebServer.py (provides access to hardware, etc.)
+    """
+
+    # ── Paths ─────────────────────────────────────────────────────────────
     server_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.dirname(server_dir)
     dist_dir = os.path.join(server_dir, "dist")
     upload_dir = os.path.join(server_dir, "modules", "uploads")
     docs_dir = os.path.join(project_dir, "docs")
 
+    # Ensure directories exist
     os.makedirs(upload_dir, exist_ok=True)
 
+    # ── Flask app ─────────────────────────────────────────────────────────
+    # Disable built-in static serving — we serve dist/ files via explicit
+    # send_from_directory routes below. This is more reliable than
+    # static_url_path='' which can conflict with other routes.
     app = Flask(
         __name__,
         template_folder=dist_dir,
@@ -29,36 +49,56 @@ def create_app(state):
     )
     app.config['SECRET_KEY'] = 'picarpro_secret'
 
+    # ═════════════════════════════════════════════════════════════════════
+    #  CORS helper
+    # ═════════════════════════════════════════════════════════════════════
+
     @app.after_request
     def add_cors(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
+    # ═════════════════════════════════════════════════════════════════════
+    #  PAGE ROUTES
+    # ═════════════════════════════════════════════════════════════════════
+
     @app.route("/")
     def page_index():
+        """Main control page."""
         return render_template("index.html")
 
     @app.route("/favicon.ico")
     def favicon():
+        """Return empty 204 to suppress 404 errors for favicon."""
         return "", 204
+
+    # ── Static files from dist/ (explicit routes — no Flask static magic) ──
 
     @app.route("/style.css")
     def serve_css():
+        """Serve the main stylesheet."""
         return send_from_directory(dist_dir, "style.css", mimetype="text/css")
 
     @app.route("/app.js")
     def serve_js():
+        """Serve the main application script."""
         return send_from_directory(dist_dir, "app.js", mimetype="application/javascript")
 
     @app.route("/<path:filename>")
     def serve_dist_file(filename):
+        """Catch-all: serve any other file from dist/ (images, fonts, etc.)."""
         filepath = os.path.join(dist_dir, filename)
         if os.path.isfile(filepath):
             return send_from_directory(dist_dir, filename)
         return "", 404
 
+    # ═════════════════════════════════════════════════════════════════════
+    #  CAMERA MJPEG STREAM
+    # ═════════════════════════════════════════════════════════════════════
+
     @app.route("/video_feed")
     def video_feed():
+        """MJPEG stream endpoint — the browser's <img> points here."""
         state.init_camera()
 
         def generate():
@@ -75,12 +115,18 @@ def create_app(state):
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
 
+    # ═════════════════════════════════════════════════════════════════════
+    #  REST API (fallback for when WebSocket is not available)
+    # ═════════════════════════════════════════════════════════════════════
+
     @app.route("/api/status", methods=["GET"])
     def api_status():
+        """JSON status snapshot (fallback polling)."""
         return jsonify(state.get_status())
 
     @app.route("/api/status/stream", methods=["GET"])
     def api_status_stream():
+        """SSE endpoint — pushes robot status every 1 second (fallback)."""
         def event_stream():
             while state.running:
                 data = json.dumps(state.get_status())
@@ -92,6 +138,8 @@ def create_app(state):
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # ── Movement (HTTP fallback) ──────────────────────────────────────
 
     @app.route("/cmd/move", methods=["POST"])
     def cmd_move():
@@ -179,10 +227,11 @@ def create_app(state):
         data = request.get_json(silent=True) or {}
         sid = int(data.get("id", 0))
         switch_state = data.get("state", False)
-        if 0 <= sid < 3:
+        max_switches = len(SWITCH_PINS) if state.switches._initialized else 0
+        if 0 <= sid < max_switches:
             state.switches.on(sid) if switch_state else state.switches.off(sid)
             return jsonify({"ok": True})
-        return jsonify({"ok": False}), 400
+        return jsonify({"ok": False, "error": f"Switch id must be 0-{max_switches - 1}"}), 400
 
     @app.route("/cmd/cv_mode", methods=["POST"])
     def cmd_cv_mode():
@@ -212,6 +261,8 @@ def create_app(state):
                 state.autonomous.start(func)
             return jsonify({"ok": True, "func": func})
         return jsonify({"ok": False}), 400
+
+    # ── Module HTTP endpoints (fallback) ──────────────────────────────
 
     @app.route("/api/modules", methods=["GET"])
     def api_modules():
@@ -255,16 +306,21 @@ def create_app(state):
         f.save(os.path.join(upload_dir, safe_name))
         return jsonify({"ok": True, "filename": safe_name})
 
-    @app.route("/docs/components/<path:name>")
-    def docs_component(name):
-        return send_from_directory(os.path.join(docs_dir, "components"), name)
-
-    @app.route("/docs/pinout.json")
-    def docs_pinout():
-        return send_from_directory(docs_dir, "pinout.json")
+    # ── Documentation (JSON files for Info tab) ────────────────────────
 
     @app.route("/docs/index.json")
     def docs_index():
-        return send_from_directory(docs_dir, "index.json")
+        return send_from_directory(docs_dir, "index.json", mimetype="application/json")
+
+    @app.route("/docs/pinout.json")
+    def docs_pinout():
+        return send_from_directory(docs_dir, "pinout.json", mimetype="application/json")
+
+    @app.route("/docs/components/<path:name>")
+    def docs_component(name):
+        return send_from_directory(
+            os.path.join(docs_dir, "components"), name,
+            mimetype="application/json",
+        )
 
     return app

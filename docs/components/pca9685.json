@@ -2,8 +2,8 @@
   "id": "pca9685",
   "name": "PCA9685 16-Channel PWM Servo Controller",
   "name_ru": "PCA9685 16-канальный ШИМ-контроллер сервоприводов",
-  "description": "16-channel, 12-bit PWM/servo driver with I2C interface. Used to drive up to 16 servo motors or PWM-controlled devices with minimal GPIO usage. In PiCar Pro it controls 8 channels: pan, tilt, arm base, shoulder, elbow, wrist, gripper, and one spare channel.",
-  "description_ru": "16-канальный 12-битный ШИМ/серво-драйвер с интерфейсом I2C. Используется для управления до 16 сервоприводами или ШИМ-устройствами с минимальным использованием GPIO. В PiCar Pro управляет 8 каналами: панорама, наклон, основание руки, плечо, локоть, запястье, захват и один резервный канал.",
+  "description": "16-channel, 12-bit PWM/servo driver with I2C interface. Used to drive up to 16 servo motors or PWM-controlled devices with minimal GPIO usage. In PiCar Pro it controls 3 channels: steering (channel 0), camera pan (channel 1), and camera tilt (channel 2). The crane/manipulator is disabled.",
+  "description_ru": "16-канальный 12-битный ШИМ/серво-драйвер с интерфейсом I2C. Используется для управления до 16 сервоприводами или ШИМ-устройствами с минимальным использованием GPIO. В PiCar Pro управляет 3 каналами: рулевое управление (канал 0), панорама камеры (канал 1) и наклон камеры (канал 2). Кран/манипулятор отключён.",
   "chip": "PCA9685",
   "manufacturer": "NXP Semiconductors",
   "datasheet_url": "https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf",
@@ -58,48 +58,23 @@
     },
     {
       "pin_name": "PWM0",
-      "connected_to": "Pan servo",
-      "function": "Camera pan servo signal"
+      "connected_to": "Steering servo",
+      "function": "Front wheel steering (30=right, 90=center, 150=left)"
     },
     {
       "pin_name": "PWM1",
-      "connected_to": "Tilt servo",
-      "function": "Camera tilt servo signal"
+      "connected_to": "Camera pan servo",
+      "function": "Camera horizontal pan"
     },
     {
       "pin_name": "PWM2",
-      "connected_to": "Arm base servo",
-      "function": "Robotic arm base rotation"
-    },
-    {
-      "pin_name": "PWM3",
-      "connected_to": "Arm shoulder servo",
-      "function": "Robotic arm shoulder joint"
-    },
-    {
-      "pin_name": "PWM4",
-      "connected_to": "Arm elbow servo",
-      "function": "Robotic arm elbow joint"
-    },
-    {
-      "pin_name": "PWM5",
-      "connected_to": "Arm wrist servo",
-      "function": "Robotic arm wrist joint"
-    },
-    {
-      "pin_name": "PWM6",
-      "connected_to": "Gripper servo",
-      "function": "Robotic arm gripper open/close"
-    },
-    {
-      "pin_name": "PWM7",
-      "connected_to": "Spare",
-      "function": "Unused spare PWM channel"
+      "connected_to": "Camera tilt servo",
+      "function": "Camera vertical tilt"
     }
   ],
   "i2c_address": "0x40",
   "i2c_address_alternates": ["0x41", "0x42", "0x43", "0x44", "0x45", "0x46", "0x47", "0x48", "0x49", "0x4A", "0x4B", "0x4C", "0x4D", "0x4E", "0x4F", "0x50", "0x51", "0x52", "0x53", "0x54", "0x55", "0x56", "0x57", "0x58", "0x59", "0x5A", "0x5B", "0x5C", "0x5D", "0x5E", "0x5F", "0x60", "0x61", "0x62", "0x63", "0x64", "0x65", "0x66", "0x67", "0x68", "0x69", "0x6A", "0x6B", "0x6C", "0x6D", "0x6E", "0x6F", "0x70", "0x71", "0x72", "0x73", "0x74", "0x75", "0x76", "0x77", "0x78", "0x79", "0x7A", "0x7B", "0x7C", "0x7D", "0x7E", "0x7F"],
-  "related_modules": ["servo", "camera", "arm"],
+  "related_modules": ["servo", "camera", "steering"],
   "tips": [
     "Always use an external 5V power supply for servos — do not power them from the Raspberry Pi's 5V pin to avoid brownouts.",
     "The default I2C address 0x40 is set with all address jumpers (A0-A5) open/LOW. Solder jumpers to change the address.",

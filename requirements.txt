@@ -10,7 +10,8 @@ adafruit-circuitpython-busdevice
 # OLED Display
 luma.oled
 
-# SPI (WS2812 LED strip)
+# WS2812 LED Strip (primary: rpi_ws281x DMA/PWM; fallback: spidev)
+rpi_ws281x
 spidev
 
 # Web Server
@@ -21,10 +22,7 @@ websockets
 # Vision / Video
 numpy
 psutil
-imutils
-pybase64
 pillow
-pyzmq
 
-# IMU Sensor
+# IMU Sensor (optional — MPU6050 hardware driver uses smbus from apt)
 mpu6050-raspberrypi

@@ -8,6 +8,7 @@
 </head>
 <body>
 
+<!-- ==================== STATUS BAR ==================== -->
 <div class="status-bar" id="status-bar">
   <div class="sb-item"><span class="sb-label">CPU</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
   <div class="sb-sep"></div>
@@ -26,6 +27,7 @@
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
+<!-- ==================== HEADER ==================== -->
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
@@ -33,20 +35,19 @@
   </div>
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
+    <button class="tab-btn" data-tab="info">Info</button>
     <button class="tab-btn" data-tab="modules">Modules</button>
-    <label class="demo-switch" title="Demo mode: ignore hardware status for UI testing">
-      <span class="demo-switch-label" id="demo-label">Demo</span>
-      <input type="checkbox" id="demo-toggle">
-      <span class="demo-slider"></span>
-    </label>
   </nav>
 </header>
 
+<!-- ==================== CONTROL TAB ==================== -->
 <div class="tab-content active" id="content-control">
   <div class="control-layout">
 
+    <!-- ========== LEFT COLUMN ========== -->
     <div class="col-left">
 
+      <!-- Camera -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="camera-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -63,6 +64,7 @@
         </div>
       </div>
 
+      <!-- OpenCV Modes -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="cv-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -81,16 +83,16 @@
         </div>
       </div>
 
+      <!-- Autonomous -->
       <div class="card" id="card-autonomous">
         <div class="card-title collapsible-header open" data-target="auto-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="2"/></svg>
-            Autonomous
+            Autonomous<span class="hw-missing-tag" id="auto-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="auto-body">
-          <div class="hw-status not-connected" id="auto-status" style="display:none">Not connected — requires motors + ultrasonic</div>
           <div id="auto-controls">
             <div class="btn-group" id="auto-group">
               <button class="gbtn" data-auto="radarScan">Radar</button>
@@ -103,10 +105,12 @@
         </div>
       </div>
 
-    </div>
+    </div><!-- /col-left -->
 
+    <!-- ========== RIGHT COLUMN ========== -->
     <div class="col-right">
 
+      <!-- Movement (Wheel Joystick + Camera Joystick side by side) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -116,17 +120,36 @@
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="move-body">
-          <div class="joystick-area">
-            <div class="joystick-container" id="joystick-container">
-              <div class="joystick-base"></div>
-              <div class="joystick-crosshair"></div>
-              <div class="joystick-knob" id="joystick-knob"></div>
+          <div class="dual-joystick-row">
+            <!-- Wheel Joystick -->
+            <div class="joystick-area">
+              <div class="joystick-container" id="joystick-container">
+                <div class="joystick-base"></div>
+                <div class="joystick-crosshair"></div>
+                <div class="joystick-knob" id="joystick-knob"></div>
+              </div>
+              <div class="joystick-label" id="joystick-label">Wheels — WASD</div>
             </div>
-            <div class="joystick-label" id="joystick-label">Drag knob or W/A/S/D</div>
+            <!-- Camera Joystick -->
+            <div class="joystick-area">
+              <div class="cam-joystick-container" id="cam-joystick-container">
+                <div class="cam-joystick-base"></div>
+                <div class="cam-joystick-crosshair"></div>
+                <div class="cam-joystick-knob" id="cam-joystick-knob"></div>
+                <div class="cam-joystick-labels">
+                  <span class="cam-lbl cam-lbl-up">Up</span>
+                  <span class="cam-lbl cam-lbl-down">Down</span>
+                  <span class="cam-lbl cam-lbl-left">Left</span>
+                  <span class="cam-lbl cam-lbl-right">Right</span>
+                </div>
+              </div>
+              <div class="cam-joystick-label" id="cam-joystick-label">Camera — Arrows</div>
+            </div>
           </div>
         </div>
       </div>
 
+      <!-- Speed (motor only) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="speed-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -144,16 +167,16 @@
         </div>
       </div>
 
+      <!-- Servo Control -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="servo-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><line x1="14" y1="9" x2="20" y2="9"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="15" x2="20" y2="15"/></svg>
-            Servo Control
+            Servo Control<span class="hw-missing-tag" id="servo-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="servo-body">
-          <div class="hw-status not-connected" id="servo-status" style="display:none">PCA9685 not connected</div>
           <div id="servo-controls">
             <div class="servo-grid" id="servo-grid"></div>
             <div class="servo-home-row">
@@ -163,17 +186,17 @@
         </div>
       </div>
 
+      <!-- IMU Sensor (MPU6050) -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            IMU Sensor (MPU6050)
+            IMU Sensor (MPU6050)<span class="hw-missing-tag" id="mpu-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="mpu-body">
-          <div class="hw-status not-connected" id="mpu-status">MPU6050 not connected</div>
-          <div id="mpu-controls" style="display:none">
+          <div id="mpu-controls">
             <div class="mpu-grid" id="mpu-grid">
               <div class="mpu-section">
                 <div class="mpu-section-title">Accelerometer (g)</div>
@@ -193,24 +216,20 @@
                 <div class="mpu-row"><span class="mpu-label">Pitch</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
               </div>
             </div>
-            <div class="mpu-tilt-wrap">
-              <canvas id="mpu-tilt-canvas" width="120" height="120"></canvas>
-              <div class="mpu-tilt-label">Tilt Indicator</div>
-            </div>
           </div>
         </div>
       </div>
 
+      <!-- Headlights -->
       <div class="card" id="card-headlights">
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Headlights
+            Headlights<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="hl-body">
-          <div class="hw-status not-connected" id="hl-status" style="display:none">GPIO switches not connected</div>
           <div id="hl-controls">
             <div class="headlight-row">
               <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
@@ -221,16 +240,16 @@
         </div>
       </div>
 
+      <!-- LED Strip -->
       <div class="card" id="card-led">
         <div class="card-title collapsible-header open" data-target="led-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="20" height="4" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
-            LED Strip
+            LED Strip<span class="hw-missing-tag" id="led-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="led-body">
-          <div class="hw-status not-connected" id="led-status" style="display:none">SPI/WS2812 not connected</div>
           <div id="led-controls">
             <div class="led-color-row">
               <label class="led-color-label">Color</label>
@@ -259,16 +278,16 @@
         </div>
       </div>
 
+      <!-- Buzzer -->
       <div class="card" id="card-buzzer">
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
-            Buzzer
+            Buzzer<span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="buzzer-body">
-          <div class="hw-status not-connected" id="buzzer-status" style="display:none">GPIO buzzer not connected</div>
           <div id="buzzer-controls">
             <div class="btn-group" id="buzzer-group">
               <button class="gbtn" data-buzzer="beep">Beep</button>
@@ -279,10 +298,28 @@
         </div>
       </div>
 
+    </div><!-- /col-right -->
+  </div>
+</div>
+
+<!-- ==================== INFO TAB ==================== -->
+<div class="tab-content" id="content-info">
+  <div class="info-layout">
+    <div class="info-sidebar" id="info-sidebar">
+      <div class="info-nav">
+        <button class="info-nav-btn active" data-doc="overview">Overview</button>
+        <button class="info-nav-btn" data-doc="pinout">Pinout</button>
+      </div>
+      <div class="info-nav-sep">Components</div>
+      <div id="info-component-nav"></div>
+    </div>
+    <div class="info-main" id="info-main">
+      <div class="info-loading">Loading documentation...</div>
     </div>
   </div>
 </div>
 
+<!-- ==================== MODULES TAB ==================== -->
 <div class="tab-content" id="content-modules">
   <div class="card">
     <div class="card-title collapsible-header open" data-target="modules-list-body">
@@ -316,6 +353,7 @@
   </div>
 </div>
 
+<!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
 <script src="app.js"></script>

@@ -16,7 +16,9 @@ import re
 # ─────────────────────────────────────────────────────
 # GLOBAL VARIABLES
 # ─────────────────────────────────────────────────────
-username = os.popen("echo ${SUDO_USER:-$(who -m | awk '{ print $1 }')}").readline().strip()
+username = os.environ.get('SUDO_USER', '').strip()
+if not username:
+    username = os.popen('whoami').readline().strip()
 if not username:
     username = "pi"
 user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f 6').readline().strip()
@@ -273,8 +275,14 @@ def stage_2_swap():
     print(f"\n  {BLU}[2/7]{RST} Configuring swap file...")
 
     # Check current swap
-    _, sw_result = run_cmd("free -m | awk '/Swap/{print $2}'", critical=False)
-    current_swap = int(sw_result.strip()) if sw_result.strip().isdigit() else 0
+    _, sw_result = run_cmd("free -m | grep Swap", critical=False)
+    current_swap = 0
+    try:
+        parts = sw_result.strip().split()
+        if len(parts) >= 2:
+            current_swap = int(parts[1])
+    except (ValueError, IndexError):
+        pass
 
     if current_swap >= 1900:
         print(f"  {GRN}[+]{RST} Swap already configured ({current_swap}MB). Skipping.")
@@ -283,6 +291,9 @@ def stage_2_swap():
     print(f"  {DIM}[i]{RST} Creating 2GB swap file (critical for 1GB RAM)...")
 
     # First, disable any existing swap at /var/swap
+    # Stop dphys-swapfile if running (conflicts with custom swap)
+    run_cmd("systemctl stop dphys-swapfile 2>/dev/null || true", critical=False)
+    run_cmd("systemctl disable dphys-swapfile 2>/dev/null || true", critical=False)
     run_cmd("swapoff /var/swap 2>/dev/null || true", critical=False)
 
     # Remove old file if exists
@@ -429,7 +440,7 @@ def stage_4_pip_packages(debian_ver):
          "adafruit-circuitpython-motor "
          "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
-         f"sudo -H pip3 install {pip_flag} luma.oled spidev"),
+         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
          f"sudo -H pip3 install {pip_flag} flask flask_cors websockets"),
         ("Vision/Video",
@@ -458,7 +469,9 @@ def stage_5_hardware_config():
 
     append_to_config("i2c_arm=on", "dtparam=i2c_arm=on", config_path)
     append_to_config("i2c_arm_baudrate", "dtparam=i2c_arm_baudrate=400000", config_path)
-    append_to_config("spi0-0cs", "dtoverlay=spi0-0cs,cs0_pin=8,cs1_pin=7", config_path)
+    # NOTE: Do NOT add spi0-0cs overlay — it claims GPIO 8 and 11,
+    # which conflict with the HC-SR04 ultrasonic sensor (Echo=GPIO8, Trig=GPIO11).
+    # WS2812 uses rpi_ws281x (PWM/DMA on GPIO 10) instead of SPI.
     append_to_config("gpu_mem=", "gpu_mem=128", config_path)
 
     debian_ver = get_debian_version()
@@ -627,8 +640,8 @@ Wants=network-online.target picarpro-wifi.service
 
 [Service]
 Type=simple
-User={username}
-Group={username}
+User=root
+Group=root
 WorkingDirectory={thisPath}
 ExecStart=/usr/bin/python3 {server_path}
 Restart=on-failure
@@ -719,7 +732,7 @@ def main():
     print(f"    {GRN}+{RST} GPU memory: 128MB (was 256MB)")
     print(f"    {GRN}+{RST} Swap: 2GB (swappiness=10)")
     print(f"    {GRN}+{RST} Flask (5000) + WebSocket (8888) real-time bidirectional")
-    print(f"    {GRN}+{RST} BGR888 camera (fixed red/blue color swap)")
+    print(f"    {GRN}+{RST} RGB888 camera with BGR conversion (fixed color swap)")
     print(f"    {GRN}+{RST} WiFi Hotspot: auto-switching (fallback AP)")
     print(f"")
     print(f"  {BOLD}Service management:{RST}")

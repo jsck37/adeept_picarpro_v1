@@ -87,22 +87,23 @@ ULTRASONIC_ECHO = 8
 ULTRASONIC_MAX_DISTANCE = 2.0  # meters
 
 # =============================================================================
-# WS2812 LED Strip
+# WS2812 LED Strip — uses rpi_ws281x (DMA/PWM on GPIO 10)
+# NOT using SPI — SPI claims GPIO 8/11, conflicting with ultrasonic sensor
 # =============================================================================
 LED_COUNT = 16
 LED_BRIGHTNESS = 255
-LED_SPI_BUS = 0
-LED_SPI_DEVICE = 0
+# LED_PIN = 10 is defined in hardware/leds_ws2812.py (rpi_ws281x config)
 
 # =============================================================================
-# GPIO Switches (3-port LED/relay)
-# Port 0 = GPIO 5  (unused / backlight)
-# Port 1 = GPIO 6  (LEFT headlight)
-# Port 2 = GPIO 13 (RIGHT headlight)
+# GPIO Switches (2-port LED/headlight)
+# Port 0 = GPIO 6  (LEFT headlight)
+# Port 1 = GPIO 13 (RIGHT headlight)
+# NOTE: GPIO 5 (RobotHat port 0/3) is used by the BUZZER
+# In Adeept PiCar Pro kit: buzzer connects to 3-pin port (GPIO 5)
 # =============================================================================
-SWITCH_PINS = [5, 6, 13]
-HEADLIGHT_LEFT_PORT = 1   # port1 = left headlight
-HEADLIGHT_RIGHT_PORT = 2  # port2 = right headlight
+SWITCH_PINS = [6, 13]
+HEADLIGHT_LEFT_PORT = 0   # port0 = left headlight (GPIO 6)
+HEADLIGHT_RIGHT_PORT = 1  # port1 = right headlight (GPIO 13)
 
 # =============================================================================
 # Line Tracker IR Sensors
@@ -112,16 +113,18 @@ LINE_MIDDLE_PIN = 16
 LINE_RIGHT_PIN = 19
 
 # =============================================================================
-# Buzzer
+# Buzzer — connects to RobotHat 3-pin port (GPIO 5)
+# In Adeept PiCar Pro: buzzer plugs into the 3-pin connector
+# where wire colors match (port 0/3 on RobotHat = GPIO 5)
 # =============================================================================
-BUZZER_PIN = 18
+BUZZER_PIN = 5
 
 # =============================================================================
 # Camera Configuration
 # =============================================================================
 CAMERA_RESOLUTION = (640, 480)
 CAMERA_FPS = 30           # Target frame rate (was unlimited in v1!)
-CAMERA_JPEG_QUALITY = 90  # 0-100, higher = better image quality
+CAMERA_JPEG_QUALITY = 80  # 0-100; 80 is sufficient for streaming, saves CPU on Pi 3B+
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL = False
 
@@ -139,9 +142,11 @@ CV_COLOR_UPPER_V = 255
 # Line following scan positions
 CV_LINE_POS_1 = 440  # Bottom scan line
 CV_LINE_POS_2 = 380  # Upper scan line
+CV_LINE_THRESHOLD = 80   # Binary threshold for line detection (0-255)
 
 # Watchdog motion detection sensitivity
 CV_WATCHDOG_THRESHOLD = 25
+CV_WATCHDOG_BLUR_SIZE = (7, 7)  # GaussianBlur kernel (7x7 vs 21x21 — faster on Pi 3B+)
 
 # =============================================================================
 # Network Configuration

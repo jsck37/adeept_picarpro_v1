@@ -2,6 +2,11 @@
 MPU6050 IMU sensor module for PiCar Pro.
 Reads accelerometer (X/Y/Z in g) and gyroscope (X/Y/Z in deg/s).
 Uses smbus (I2C) — lightweight, no extra pip dependency.
+
+Fixes:
+- Scans both 0x68 (AD0=LOW) and 0x69 (AD0=HIGH) addresses
+- I2C bus detection (tries bus 1, then bus 0)
+- Diagnostic error messages for common issues
 """
 
 import threading
@@ -33,8 +38,12 @@ class MPU6050Controller:
     ACCEL_SCALE = 16384.0
     GYRO_SCALE = 131.0
 
+    # Possible I2C addresses (AD0 pin state)
+    POSSIBLE_ADDRS = [0x68, 0x69]
+
     def __init__(self):
         self._bus = None
+        self._addr = None
         self._running = False
         self._initialized = False
         self._thread = None
@@ -48,52 +57,114 @@ class MPU6050Controller:
 
         self._init_sensor()
 
+    def _detect_i2c_bus(self):
+        """Detect available I2C bus. Returns bus number or None."""
+        import subprocess
+        for bus_num in [I2C_BUS, 0]:
+            dev_path = f"/dev/i2c-{bus_num}"
+            if bus_num >= 0:
+                try:
+                    with open(dev_path, 'rb'):
+                        pass
+                    # Try a quick scan
+                    result = subprocess.run(
+                        ['i2cdetect', '-y', str(bus_num)],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        return bus_num
+                except (FileNotFoundError, PermissionError, OSError):
+                    pass
+        return None
+
+    def _detect_address(self, bus, preferred_addr):
+        """Scan for MPU6050 on I2C bus. Returns found address or None."""
+        # Try preferred address first
+        addrs_to_try = [preferred_addr] + [a for a in self.POSSIBLE_ADDRS if a != preferred_addr]
+
+        for addr in addrs_to_try:
+            try:
+                who_am_i = bus.read_byte_data(addr, self.REG_WHO_AM_I)
+                if who_am_i == 0x68:
+                    return addr
+                elif who_am_i != 0:
+                    print(f"[MPU6050] Found device at 0x{addr:02X} with WHO_AM_I=0x{who_am_i:02X} "
+                          f"(not MPU6050, expected 0x68)")
+            except Exception:
+                pass
+        return None
+
     def _init_sensor(self):
         """Initialize MPU6050 via I2C and start background reading."""
         try:
             import smbus
-            self._bus = smbus.SMBus(I2C_BUS)
 
-            # Check WHO_AM_I (should return 0x68)
-            who_am_i = self._bus.read_byte_data(MPU6050_ADDR, self.REG_WHO_AM_I)
-            if who_am_i != 0x68:
-                print(f"[MPU6050] WHO_AM_I=0x{who_am_i:02X}, expected 0x68. "
-                      f"Sensor may not be connected at 0x{MPU6050_ADDR:02X}")
+            # Detect I2C bus
+            bus_num = self._detect_i2c_bus()
+            if bus_num is None:
+                print("[MPU6050] No I2C bus found!")
+                print("[MPU6050] Fix: sudo raspi-config → Interface Options → I2C → Enable")
+                print("[MPU6050] Then reboot and check: i2cdetect -y 1")
                 return
 
+            self._bus = smbus.SMBus(bus_num)
+
+            # Detect MPU6050 address
+            addr = self._detect_address(self._bus, MPU6050_ADDR)
+            if addr is None:
+                print(f"[MPU6050] No MPU6050 found on I2C bus {bus_num}")
+                print(f"[MPU6050] Scanned addresses: {[f'0x{a:02X}' for a in self.POSSIBLE_ADDRS]}")
+                print("[MPU6050] Fixes to try:")
+                print("[MPU6050]   1. Check wiring: SDA→GPIO2(pin3), SCL→GPIO3(pin5), VCC→3.3V, GND→GND")
+                print("[MPU6050]   2. Run: i2cdetect -y 1  (should show device at 0x68 or 0x69)")
+                print("[MPU6050]   3. If address is 0x69, set MPU6050_ADDR=0x69 in config.py")
+                print("[MPU6050]   4. Make sure I2C is enabled: sudo raspi-config → I2C → Enable")
+                return
+
+            self._addr = addr
+
             # Wake up MPU6050 (clear sleep bit)
-            self._bus.write_byte_data(MPU6050_ADDR, self.REG_PWR_MGMT_1, 0x00)
+            self._bus.write_byte_data(self._addr, self.REG_PWR_MGMT_1, 0x00)
             time.sleep(0.1)
 
             # Configure:
             # - Accelerometer: ±2g (register 0x1C = 0x00)
             # - Gyroscope: ±250°/s (register 0x1B = 0x00)
-            self._bus.write_byte_data(MPU6050_ADDR, 0x1C, 0x00)
-            self._bus.write_byte_data(MPU6050_ADDR, 0x1B, 0x00)
+            self._bus.write_byte_data(self._addr, 0x1C, 0x00)
+            self._bus.write_byte_data(self._addr, 0x1B, 0x00)
 
             # Configure DLPF (Digital Low Pass Filter) — reduce noise
             # 0x1A = 0x03 → ~44Hz bandwidth, 4.9ms delay
-            self._bus.write_byte_data(MPU6050_ADDR, 0x1A, 0x03)
+            self._bus.write_byte_data(self._addr, 0x1A, 0x03)
 
             # Set sample rate divider: 1kHz / (1+9) = 100Hz
-            self._bus.write_byte_data(MPU6050_ADDR, 0x19, 0x09)
+            self._bus.write_byte_data(self._addr, 0x19, 0x09)
 
             self._initialized = True
-            print(f"[MPU6050] Initialized at 0x{MPU6050_ADDR:02X} on I2C bus {I2C_BUS}")
+            print(f"[MPU6050] Initialized at 0x{self._addr:02X} on I2C bus {bus_num}")
 
             # Start background reading thread
             self._running = True
             self._thread = threading.Thread(target=self._read_loop, daemon=True)
             self._thread.start()
 
+        except ImportError:
+            print("[MPU6050] smbus module not installed!")
+            print("[MPU6050] Fix: sudo apt install python3-smbus i2c-tools")
+        except FileNotFoundError:
+            print("[MPU6050] I2C device not found!")
+            print("[MPU6050] Fix: sudo raspi-config → Interface Options → I2C → Enable, then reboot")
+        except PermissionError:
+            print("[MPU6050] Permission denied accessing I2C!")
+            print("[MPU6050] Fix: run with sudo, or add user to i2c group: sudo usermod -aG i2c $USER")
         except Exception as e:
             print(f"[MPU6050] Failed to initialize: {e}")
             print("[MPU6050] IMU will not be available (non-critical)")
 
     def _read_word(self, addr):
         """Read a signed 16-bit word from two consecutive registers."""
-        high = self._bus.read_byte_data(MPU6050_ADDR, addr)
-        low = self._bus.read_byte_data(MPU6050_ADDR, addr + 1)
+        high = self._bus.read_byte_data(self._addr, addr)
+        low = self._bus.read_byte_data(self._addr, addr + 1)
         val = (high << 8) | low
         if val >= 0x8000:
             val -= 0x10000
@@ -166,10 +237,10 @@ class MPU6050Controller:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1.0)
-        if self._bus is not None:
+        if self._bus is not None and self._addr is not None:
             try:
                 # Put MPU6050 to sleep
-                self._bus.write_byte_data(MPU6050_ADDR, self.REG_PWR_MGMT_1, 0x40)
+                self._bus.write_byte_data(self._addr, self.REG_PWR_MGMT_1, 0x40)
             except Exception:
                 pass
         print("[MPU6050] Shutdown complete")

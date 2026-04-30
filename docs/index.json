@@ -123,19 +123,19 @@
       "id": "buzzer",
       "name": "Active Buzzer",
       "name_ru": "Активный зуммер",
-      "description": "Buzzer for audio feedback — connected to GPIO 18 (shared with IN2_B)",
-      "description_ru": "Зуммер для звуковой обратной связи — подключён к GPIO 18 (совместно с IN2_B)",
-      "pins_used": ["GPIO18"],
+      "description": "Buzzer for audio feedback — connected to GPIO 5 (RobotHat 3-pin port 0/3)",
+      "description_ru": "Зуммер для звуковой обратной связи — подключён к GPIO 5 (3-пиновый порт RobotHat 0/3)",
+      "pins_used": ["GPIO5"],
       "i2c_address": null,
       "related_modules": ["buzzer"]
     },
     {
       "id": "switch",
-      "name": "Tactile Switches",
-      "name_ru": "Тактильные кнопки",
-      "description": "3 tactile switches for user input — GPIO 5, 6, 13",
-      "description_ru": "3 тактильные кнопки для пользовательского ввода — GPIO 5, 6, 13",
-      "pins_used": ["GPIO5", "GPIO6", "GPIO13"],
+      "name": "Headlight Switches",
+      "name_ru": "Выключатели фар",
+      "description": "2 LED/headlight switches — GPIO 6 (left), GPIO 13 (right). GPIO 5 is reserved for buzzer.",
+      "description_ru": "2 выключателя LED/фар — GPIO 6 (левая), GPIO 13 (правая). GPIO 5 зарезервирован для зуммера.",
+      "pins_used": ["GPIO6", "GPIO13"],
       "i2c_address": null,
       "related_modules": ["switch"]
     },
@@ -205,7 +205,7 @@
     "buzzer": {
       "module": "buzzer",
       "pins": {
-        "BUZZER": {"gpio": 18, "pin": 12, "function": "Buzzer output (shared with IN2_B!)"}
+        "BUZZER": {"gpio": 5, "pin": 29, "function": "Buzzer output (RobotHat 3-pin port 0/3)"}
       }
     }
   }

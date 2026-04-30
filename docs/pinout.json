@@ -116,10 +116,10 @@
       "pin": 12,
       "gpio": 18,
       "function": "GPIO18",
-      "name": "Motor B IN2 / Buzzer",
-      "module": "l298n, buzzer",
+      "name": "Motor B IN2",
+      "module": "l298n",
       "color_category": "gpio",
-      "notes": "CONFLICT: Used as IN2_B for motor direction AND buzzer output. GPIO 18 supports hardware PWM0 — suitable for buzzer tone generation. Verify configuration to avoid conflict."
+      "notes": "IN2_B — Motor B direction control input 2 (right motor). NOTE: Buzzer has been moved to GPIO 5 (RobotHat 3-pin port) to avoid this conflict."
     },
     {
       "pin": 13,
@@ -269,10 +269,10 @@
       "pin": 29,
       "gpio": 5,
       "function": "GPIO5",
-      "name": "Switch 1",
-      "module": "switch",
+      "name": "Buzzer Output",
+      "module": "buzzer",
       "color_category": "gpio",
-      "notes": "Switch input 1 — digital read with internal pull-up enabled"
+      "notes": "Buzzer output — connected to RobotHat 3-pin port 0/3. Active buzzer for audio feedback."
     },
     {
       "pin": 30,
@@ -287,10 +287,10 @@
       "pin": 31,
       "gpio": 6,
       "function": "GPIO6",
-      "name": "Switch 2",
+      "name": "Left Headlight",
       "module": "switch",
       "color_category": "gpio",
-      "notes": "Switch input 2 — digital read with internal pull-up enabled"
+      "notes": "Switch port 0 — left headlight LED control"
     },
     {
       "pin": 32,
@@ -305,10 +305,10 @@
       "pin": 33,
       "gpio": 13,
       "function": "GPIO13",
-      "name": "Switch 3",
+      "name": "Right Headlight",
       "module": "switch",
       "color_category": "gpio",
-      "notes": "Switch input 3 — digital read with internal pull-up enabled"
+      "notes": "Switch port 1 — right headlight LED control"
     },
     {
       "pin": 34,
@@ -378,8 +378,8 @@
     {
       "gpio": 18,
       "pin": 12,
-      "conflict": "GPIO 18 is assigned to both L298N IN2_B (motor direction) and Buzzer. Only one function can be active at a time.",
-      "resolution": "Verify in config.py which function takes priority. Consider moving buzzer to an unused GPIO if simultaneous use is needed."
+      "conflict": "GPIO 18 was previously shared between L298N IN2_B (motor direction) and Buzzer. Buzzer has been moved to GPIO 5 (RobotHat 3-pin port 0/3) to resolve this conflict.",
+      "resolution": "RESOLVED: Buzzer is now on GPIO 5. GPIO 18 is dedicated to motor IN2_B only."
     },
     {
       "gpio": 11,

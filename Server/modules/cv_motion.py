@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Motion Detection — OpenCV watchdog for motion detection."""
+"""Motion Detection — OpenCV watchdog for motion detection.
+Optimized: RGB->GRAY directly (skips intermediate BGR conversion),
+reduced blur kernel, minimum contour area filter.
+"""
 
 import sys
 import os
@@ -30,12 +33,14 @@ def main():
         )
         picam.configure(config)
         picam.start()
+        time.sleep(0.5)  # Camera warmup
     except Exception as e:
         print(f"  Camera error: {e}")
         return
 
+    # Reduced history for Pi 3B+ RAM savings
     bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-        history=500, varThreshold=25, detectShadows=True
+        history=200, varThreshold=25, detectShadows=True
     )
 
     app = Flask(__name__)
@@ -49,17 +54,23 @@ def main():
                 if frame is None:
                     continue
 
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-                gray = cv2.GaussianBlur(gray, (21, 21), 0)
+                # Optimize: convert RGB->GRAY directly (skip BGR intermediate)
+                gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                gray = cv2.GaussianBlur(gray, (7, 7), 0)
 
                 fg_mask = bg_subtractor.apply(gray)
                 _, thresh = cv2.threshold(fg_mask, 25, 255, cv2.THRESH_BINARY)
-                thresh = cv2.dilate(thresh, None, iterations=2)
+                thresh = cv2.dilate(thresh, None, iterations=1)
 
                 contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                if contours:
+                # Filter tiny noise contours
+                significant = [c for c in contours if cv2.contourArea(c) > 500]
+
+                # Convert RGB->BGR only for display/encoding (needed once per frame)
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+                if significant:
                     cv2.putText(frame_bgr, "MOTION DETECTED", (10, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 

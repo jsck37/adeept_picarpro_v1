@@ -1,17 +1,19 @@
 """
 GPIO switch/LED control module.
-Controls 3 on-board LEDs or relay switches.
+Controls 2 headlight switches (GPIO 6, 13).
+GPIO 5 is reserved for the buzzer (RobotHat 3-pin port 0/3).
 """
 
 from Server.config import SWITCH_PINS
 
 
 class SwitchController:
-    """3-port LED/relay switch controller via gpiozero."""
+    """2-port LED/headlight switch controller via gpiozero (GPIO 6, 13).
+    Note: GPIO 5 is reserved for the buzzer (RobotHat port 0/3)."""
 
     def __init__(self):
         self._leds = []
-        self._states = [False, False, False]
+        self._states = [False] * len(SWITCH_PINS)
         self._initialized = False
 
         try:
@@ -22,7 +24,7 @@ class SwitchController:
                 led.off()
                 self._leds.append(led)
             self._initialized = True
-            print(f"[Switch] {len(self._leds)} switches initialized")
+            print(f"[Switch] {len(self._leds)} switches initialized (GPIO: {SWITCH_PINS})")
         except Exception as e:
             print(f"[Switch] Failed to initialize: {e}")
 

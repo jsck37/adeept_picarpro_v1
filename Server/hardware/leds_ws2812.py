@@ -1,20 +1,33 @@
 """
-WS2812 RGB LED strip control via SPI.
-Backported from v2: uses spidev instead of rpi_ws281x for better Pi 5 compatibility.
+WS2812 RGB LED strip control via rpi_ws281x (PWM/DMA).
+Uses GPIO 10 for data — standard RobotHat configuration.
 
-v1 used rpi_ws281x which requires DMA and kernel module - problematic on newer kernels.
-v2 uses SPI (spidev) which is more reliable and compatible.
+Why rpi_ws281x instead of SPI (spidev):
+- SPI claims GPIO 8 (CS0) and GPIO 11 (SCLK), which conflict with
+  the HC-SR04 ultrasonic sensor (Echo=GPIO8, Trig=GPIO11)
+- rpi_ws281x uses DMA/PWM on GPIO 10 only — no SPI conflict
+- This is the same approach used by the original Adeept software
+
+Requires: rpi_ws281x (pip install rpi_ws281x), root access for DMA
 """
 
 import time
 import threading
-from Server.config import LED_COUNT, LED_BRIGHTNESS, LED_SPI_BUS, LED_SPI_DEVICE
+from Server.config import LED_COUNT, LED_BRIGHTNESS
+
+
+# WS2812 configuration for rpi_ws281x
+LED_PIN = 10        # GPIO 10 (SPI0_MOSI on RobotHat)
+LED_FREQ_HZ = 800000
+LED_DMA = 10
+LED_INVERT = False
+LED_CHANNEL = 0
 
 
 class LEDController:
     """
-    WS2812 LED strip controller using SPI.
-    
+    WS2812 LED strip controller using rpi_ws281x (DMA/PWM).
+
     Supports light modes:
     - breath: Pulsing brightness
     - flowing: Color cycling along strip
@@ -27,6 +40,7 @@ class LEDController:
     def __init__(self):
         self._strip = None
         self._spi = None
+        self._use_spi = False
         self._running = True
         self._mode = "solid"
         self._color = (255, 0, 0)  # Default red
@@ -35,42 +49,69 @@ class LEDController:
         self._flag.set()
         self._initialized = False
 
-        self._init_spi()
+        self._init_strip()
 
-    def _init_spi(self):
-        """Initialize SPI for WS2812 communication."""
+    def _init_strip(self):
+        """Initialize WS2812 via rpi_ws281x."""
         try:
-            import spidev
+            import rpi_ws281x as ws
 
-            self._spi = spidev.SpiDev()
-            self._spi.open(LED_SPI_BUS, LED_SPI_DEVICE)
-            self._spi.max_speed_hz = 4000000  # WS2812 requires ~3.2MHz
-            self._spi.mode = 0
+            self._strip = ws.PixelStrip(
+                LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA,
+                LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL
+            )
+            self._strip.begin()
 
             self._pixels = [(0, 0, 0)] * LED_COUNT
             self._initialized = True
-            print(f"[LEDs] SPI WS2812 initialized: {LED_COUNT} LEDs")
+            print(f"[LEDs] WS2812 initialized via rpi_ws281x: {LED_COUNT} LEDs on GPIO {LED_PIN}")
 
             # Start animation thread
             self._thread.start()
 
+        except ImportError:
+            print("[LEDs] rpi_ws281x not installed! Install with: pip3 install rpi_ws281x")
+            print("[LEDs] Also requires root access (sudo) for DMA")
+            self._try_spi_fallback()
         except Exception as e:
-            print(f"[LEDs] Failed to initialize SPI: {e}")
-            print("[LEDs] Try: sudo raspi-config -> Interface Options -> SPI -> Enable")
+            print(f"[LEDs] Failed to initialize rpi_ws281x: {e}")
+            print("[LEDs] Common fixes:")
+            print("[LEDs]   1. Run with sudo (rpi_ws281x needs DMA access)")
+            print("[LEDs]   2. Install: pip3 install rpi_ws281x")
+            print("[LEDs]   3. Check WS2812 wiring: DIN → GPIO10 (pin 19)")
+            self._try_spi_fallback()
 
-    def _ws2812_encode(self, pixels):
-        """Encode pixel data into WS2812 SPI format."""
+    def _try_spi_fallback(self):
+        """Fallback: try SPI (spidev) if rpi_ws281x is not available."""
+        try:
+            import spidev
+
+            self._spi = spidev.SpiDev()
+            self._spi.open(0, 0)
+            self._spi.max_speed_hz = 4000000
+            self._spi.mode = 0
+
+            self._pixels = [(0, 0, 0)] * LED_COUNT
+            self._use_spi = True
+            self._initialized = True
+            print(f"[LEDs] SPI fallback: WS2812 initialized via spidev ({LED_COUNT} LEDs)")
+            print("[LEDs] WARNING: SPI mode may conflict with ultrasonic sensor on GPIO 8/11")
+
+            self._thread.start()
+
+        except Exception as e:
+            print(f"[LEDs] SPI fallback also failed: {e}")
+
+    def _ws2812_spi_encode(self, pixels):
+        """Encode pixel data into WS2812 SPI format (fallback only)."""
         data = bytearray()
         for r, g, b in pixels:
-            # WS2812 expects GRB order
             for byte in [g, r, b]:
-                # Each bit becomes 3 SPI bits: 1=110, 0=100
                 for bit in range(7, -1, -1):
                     if byte & (1 << bit):
                         data.extend(b'\x06')  # 110
                     else:
                         data.extend(b'\x04')  # 100
-        # Reset signal (low for >50us)
         data.extend(b'\x00' * 60)
         return data
 
@@ -80,17 +121,29 @@ class LEDController:
             return
 
         try:
-            scaled = []
-            for r, g, b in self._pixels:
+            if self._use_spi:
+                # SPI fallback path
+                scaled = []
+                for r, g, b in self._pixels:
+                    brightness = LED_BRIGHTNESS / 255.0
+                    scaled.append((
+                        int(r * brightness),
+                        int(g * brightness),
+                        int(b * brightness),
+                    ))
+                data = self._ws2812_spi_encode(scaled)
+                self._spi.writebytes(data)
+            else:
+                # rpi_ws281x path
                 brightness = LED_BRIGHTNESS / 255.0
-                scaled.append((
-                    int(r * brightness),
-                    int(g * brightness),
-                    int(b * brightness),
-                ))
-
-            data = self._ws2812_encode(scaled)
-            self._spi.writebytes(data)
+                for i, (r, g, b) in enumerate(self._pixels):
+                    self._strip.setPixelColor(
+                        i,
+                        int(r * brightness) << 16 |
+                        int(g * brightness) << 8 |
+                        int(b * brightness)
+                    )
+                self._strip.show()
         except Exception as e:
             print(f"[LEDs] Write error: {e}")
 
@@ -111,7 +164,7 @@ class LEDController:
     def set_mode(self, mode, color=(255, 0, 0)):
         """
         Set the light animation mode.
-        
+
         Args:
             mode: 'breath', 'flowing', 'rainbow', 'police', 'colorWipe', 'solid', 'off'
             color: RGB tuple for modes that use it
@@ -195,7 +248,6 @@ class LEDController:
         """Red/blue alternating (police lights)."""
         half = LED_COUNT // 2
         while self._flag.is_set() and self._mode == "police":
-            # Red on left, blue on right
             for i in range(half):
                 self._pixels[i] = (255, 0, 0)
             for i in range(half, LED_COUNT):
@@ -203,7 +255,6 @@ class LEDController:
             self.show()
             time.sleep(0.15)
 
-            # Swap
             for i in range(half):
                 self._pixels[i] = (0, 0, 255)
             for i in range(half, LED_COUNT):
@@ -243,7 +294,13 @@ class LEDController:
         self._flag.set()  # Unblock thread
         time.sleep(0.1)
         self.clear()
-        if self._spi is not None:
+        if self._strip is not None:
+            try:
+                # rpi_ws281x cleanup
+                pass
+            except Exception:
+                pass
+        if hasattr(self, '_spi') and self._spi is not None:
             try:
                 self._spi.close()
             except Exception:
