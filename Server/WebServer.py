@@ -306,7 +306,9 @@ state = SharedState()
 # ═════════════════════════════════════════════════════════════════════════════
 
 def oled_update_loop():
-    """Update OLED every 1.5 seconds with IP, port, CPU, RAM, command."""
+    """Update OLED every 1.5 seconds with IP, port, CPU, RAM.
+    Line 4 is always the scrolling marquee (handled by OLEDDisplay internally).
+    """
     ip = get_ip_address()
     port = FLASK_PORT
 
@@ -314,16 +316,13 @@ def oled_update_loop():
         try:
             info = SystemInfo.get_all()
             ram = info['ram']
-            cmd = state.module_runner.last_command
-            mod = state.module_runner.running_module
-
-            line1 = f"{ip}:{port}"
-            line2 = f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%"
-            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"
-            line4 = mod if mod else cmd
 
             if state.oled:
-                state.oled.set_lines([line1, line2, line3, line4])
+                state.oled.show_status(
+                    ip, port,
+                    info['cpu_temp'], info['cpu_usage'],
+                    ram['used_mb'], ram['total_mb'], ram['percent'],
+                )
         except Exception as e:
             print(f"[OLED] Update error: {e}")
 

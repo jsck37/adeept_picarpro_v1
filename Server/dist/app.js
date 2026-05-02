@@ -15,7 +15,6 @@ var hlRight = false;
 var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
-
 // Hardware availability
 var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
@@ -60,7 +59,7 @@ function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
   toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
-  toggleHwSection(null, 'servo-missing-tag', hw.servos);
+  toggleHwSection('card-drive', 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
@@ -261,7 +260,6 @@ var joystickContainer = document.getElementById('joystick-container');
 var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
 var joystickDragging = false;
-var joystickRafId = null;
 
 function getJoystickCenter() {
   var rect = joystickContainer.getBoundingClientRect();
@@ -304,6 +302,8 @@ function updateJoystick(clientX, clientY) {
     sendCommand('move', { dir: dir });
     lastSentDir = dir;
     moveThrottle = now;
+    // Sync steering servo with joystick left/right
+    syncSteeringFromDirection(dir, dx, maxR);
   }
 }
 
@@ -326,12 +326,40 @@ function moveKnobToDirection(dir) {
   joystickKnob.classList.add('dragging');
 }
 
+// ── Steering servo sync: map direction → steering angle ──
+// Steering servo: id 0, range 30-150, init 90. 30°=right, 90°=center, 150°=left
+function syncSteeringFromDirection(dir, dx, maxR) {
+  var angle = 90; // center
+  if (dir === 'left' || dir === 'forward_left' || dir === 'backward_left') {
+    // Map dx proportionally: more left = higher angle (up to 150)
+    var ratio = maxR > 0 ? Math.min(1, Math.abs(dx) / maxR) : 1;
+    angle = Math.round(90 + ratio * 60); // 90 → 150
+  } else if (dir === 'right' || dir === 'forward_right' || dir === 'backward_right') {
+    var ratio = maxR > 0 ? Math.min(1, Math.abs(dx) / maxR) : 1;
+    angle = Math.round(90 - ratio * 60); // 90 → 30
+  }
+  angle = Math.max(30, Math.min(150, angle));
+  if (angle !== servoValues[0]) {
+    servoValues[0] = angle;
+    sendCommand('servo', { id: 0, angle: angle });
+    var slider = servoGrid.querySelector('[data-servo="0"]');
+    if (slider) slider.value = angle;
+    document.getElementById('sv-0').textContent = angle + '\u00B0';
+  }
+}
+
 function resetJoystick() {
   joystickKnob.classList.add('spring-back');
   joystickKnob.style.transform = 'translate(-50%, -50%)';
   joystickLabel.textContent = 'Wheels — WASD';
   sendCommand('move', { dir: 'stop' });
   lastSentDir = 'stop';
+  // Return steering servo to center
+  servoValues[0] = 90;
+  sendCommand('servo', { id: 0, angle: 90 });
+  var slider = servoGrid.querySelector('[data-servo="0"]');
+  if (slider) slider.value = 90;
+  document.getElementById('sv-0').textContent = '90\u00B0';
   setTimeout(function() { joystickKnob.classList.remove('spring-back'); joystickKnob.classList.remove('dragging'); }, 300);
 }
 
@@ -343,8 +371,7 @@ joystickKnob.addEventListener('pointerdown', function(e) {
 });
 document.addEventListener('pointermove', function(e) {
   if (!joystickDragging) return;
-  if (joystickRafId) cancelAnimationFrame(joystickRafId);
-  joystickRafId = requestAnimationFrame(function() { updateJoystick(e.clientX, e.clientY); });
+  updateJoystick(e.clientX, e.clientY);
 });
 document.addEventListener('pointerup', function() {
   if (!joystickDragging) return;
@@ -359,7 +386,6 @@ document.addEventListener('pointercancel', function() {
 
 // ── WASD keyboard control — wheels only (using e.code for layout independence) ──
 var keysDown = {};
-var wasdTimer = null;
 
 function wasdGetDirection() {
   var w = keysDown['w'];
@@ -385,6 +411,12 @@ function wasdUpdate() {
     sendCommand('move', { dir: dir });
     lastSentDir = dir;
     moveThrottle = Date.now();
+    // Sync steering servo with WASD left/right
+    var center = getJoystickCenter();
+    var knobDx = 0;
+    if (dir === 'left' || dir === 'forward_left' || dir === 'backward_left') knobDx = -center.r;
+    else if (dir === 'right' || dir === 'forward_right' || dir === 'backward_right') knobDx = center.r;
+    syncSteeringFromDirection(dir, knobDx, center.r);
   }
   if (dir === 'stop') {
     resetJoystick();
@@ -487,15 +519,13 @@ document.addEventListener('keyup', function(e) {
   // Arrow → camera
   if (ARROW_CODES.indexOf(code) !== -1) {
     delete arrowKeysDown[code];
-    // if no arrows held anymore, reset camera joystick knob
+    // if no arrows held anymore, stop repeating but keep knob position
     var anyArrow = arrowKeysDown['arrowup'] || arrowKeysDown['arrowdown'] || arrowKeysDown['arrowleft'] || arrowKeysDown['arrowright'];
     if (!anyArrow) {
       if (camArrowTimer) { clearInterval(camArrowTimer); camArrowTimer = null; }
       camJoystickKnob.classList.remove('dragging');
-      camJoystickKnob.classList.add('spring-back');
-      camJoystickKnob.style.transform = 'translate(-50%, -50%)';
-      camJoystickLabel.textContent = 'Camera \u2014 Arrows';
-      setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); }, 300);
+      // Knob stays at current pan/tilt position
+      camJoystickLabel.textContent = 'Pan:' + camPanAngle + '\u00B0 Tilt:' + camTiltAngle + '\u00B0';
     }
   }
 });
@@ -547,7 +577,6 @@ var camJoystickContainer = document.getElementById('cam-joystick-container');
 var camJoystickKnob = document.getElementById('cam-joystick-knob');
 var camJoystickLabel = document.getElementById('cam-joystick-label');
 var camJoystickDragging = false;
-var camJoystickRafId = null;
 var camPanAngle = 90;
 var camTiltAngle = 90;
 var camThrottle = 0;
@@ -587,10 +616,9 @@ function updateCamJoystick(clientX, clientY) {
 }
 
 function resetCamJoystick() {
-  camJoystickKnob.classList.add('spring-back');
-  camJoystickKnob.style.transform = 'translate(-50%, -50%)';
-  camJoystickLabel.textContent = 'Camera \u2014 Arrows';
-  setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); camJoystickKnob.classList.remove('dragging'); }, 300);
+  // Knob stays where it was — camera keeps its position
+  camJoystickKnob.classList.remove('dragging');
+  camJoystickLabel.textContent = 'Pan:' + camPanAngle + '\u00B0 Tilt:' + camTiltAngle + '\u00B0';
 }
 
 camJoystickKnob.addEventListener('pointerdown', function(e) {
@@ -601,8 +629,7 @@ camJoystickKnob.addEventListener('pointerdown', function(e) {
 });
 document.addEventListener('pointermove', function(e) {
   if (!camJoystickDragging) return;
-  if (camJoystickRafId) cancelAnimationFrame(camJoystickRafId);
-  camJoystickRafId = requestAnimationFrame(function() { updateCamJoystick(e.clientX, e.clientY); });
+  updateCamJoystick(e.clientX, e.clientY);
 });
 document.addEventListener('pointerup', function() {
   if (!camJoystickDragging) return;
@@ -876,33 +903,33 @@ function renderDocPage(page) {
 function renderOverview() {
   var d = docsData.index;
   var html = '<div class="info-title">' + esc(d.project) + ' v' + esc(d.version) + '</div>';
-  html += '<div class="info-subtitle">' + esc(d.description) + '</div>';
+  html += '<div class="info-subtitle">' + esc(d.description_ru || d.description) + '</div>';
 
   // Board info
   html += '<div class="info-section">';
-  html += '<div class="info-section-title">Board Information</div>';
-  html += '<div class="info-field"><span class="info-field-label">Board</span><span class="info-field-value">' + esc(d.board) + '</span></div>';
-  html += '<div class="info-field"><span class="info-field-label">Generated</span><span class="info-field-value">' + esc(d.generated) + '</span></div>';
+  html += '<div class="info-section-title">Информация о плате</div>';
+  html += '<div class="info-field"><span class="info-field-label">Плата</span><span class="info-field-value">' + esc(d.board) + '</span></div>';
+  html += '<div class="info-field"><span class="info-field-label">Дата</span><span class="info-field-value">' + esc(d.generated) + '</span></div>';
   html += '</div>';
 
   // Components
   html += '<div class="info-section">';
-  html += '<div class="info-section-title">Components (' + d.components.length + ')</div>';
+  html += '<div class="info-section-title">Компоненты (' + d.components.length + ')</div>';
   d.components.forEach(function(c) {
     html += '<div class="info-field" style="margin-bottom:10px;padding:8px 12px;background:#f8f9fa;border-radius:6px">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
     html += '<strong style="color:#1a73e8;font-size:.9rem">' + esc(c.id.toUpperCase()) + '</strong>';
-    html += '<span style="font-size:.82rem;color:#202124">' + esc(c.name) + '</span>';
+    html += '<span style="font-size:.82rem;color:#202124">' + esc(c.name_ru || c.name) + '</span>';
     html += '</div>';
-    html += '<div style="font-size:.8rem;color:#5f6368">' + esc(c.description) + '</div>';
+    html += '<div style="font-size:.8rem;color:#5f6368">' + esc(c.description_ru || c.description) + '</div>';
     if (c.i2c_address) {
       html += '<div style="font-size:.75rem;color:#5f6368;margin-top:3px">I2C: <code style="background:#e8f0fe;padding:1px 5px;border-radius:3px">' + esc(c.i2c_address) + '</code></div>';
     }
     if (c.pins_used && c.pins_used.length > 0) {
-      html += '<div style="font-size:.75rem;color:#5f6368;margin-top:2px">Pins: ' + c.pins_used.map(function(p) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(p) + '</code>'; }).join(' ') + '</div>';
+      html += '<div style="font-size:.75rem;color:#5f6368;margin-top:2px">Пины: ' + c.pins_used.map(function(p) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(p) + '</code>'; }).join(' ') + '</div>';
     }
     if (c.datasheet_url) {
-      html += '<div style="font-size:.75rem;margin-top:3px"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">Datasheet</a></div>';
+      html += '<div style="font-size:.75rem;margin-top:3px"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">Документация</a></div>';
     }
     html += '</div>';
   });
@@ -912,10 +939,10 @@ function renderOverview() {
   if (d.i2c_bus_summary) {
     var bus = d.i2c_bus_summary;
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">I2C Bus Summary</div>';
-    html += '<div class="info-field"><span class="info-field-label">Bus</span><span class="info-field-value">' + esc(String(bus.bus)) + '</span></div>';
-    html += '<div class="info-field"><span class="info-field-label">SDA Pin</span><span class="info-field-value">GPIO ' + esc(String(bus.sda_pin)) + '</span></div>';
-    html += '<div class="info-field"><span class="info-field-label">SCL Pin</span><span class="info-field-value">GPIO ' + esc(String(bus.scl_pin)) + '</span></div>';
+    html += '<div class="info-section-title">Шина I2C</div>';
+    html += '<div class="info-field"><span class="info-field-label">Шина</span><span class="info-field-value">' + esc(String(bus.bus)) + '</span></div>';
+    html += '<div class="info-field"><span class="info-field-label">SDA</span><span class="info-field-value">GPIO ' + esc(String(bus.sda_pin)) + '</span></div>';
+    html += '<div class="info-field"><span class="info-field-label">SCL</span><span class="info-field-value">GPIO ' + esc(String(bus.scl_pin)) + '</span></div>';
     html += '<div class="i2c-device-grid" style="margin-top:8px">';
     (bus.devices || []).forEach(function(dev) {
       html += '<div class="i2c-device"><span class="i2c-device-addr">' + esc(dev.address) + '</span> <span class="i2c-device-name">' + esc(dev.name) + '</span></div>';
@@ -926,11 +953,11 @@ function renderOverview() {
   // Additional Hardware
   if (d.additional_hardware && d.additional_hardware.length > 0) {
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">Additional Hardware</div>';
+    html += '<div class="info-section-title">Дополнительное оборудование</div>';
     d.additional_hardware.forEach(function(h) {
       html += '<div class="info-field" style="margin-bottom:8px;padding:6px 12px;background:#f8f9fa;border-radius:6px">';
-      html += '<strong style="color:#1a73e8">' + esc(h.id.toUpperCase()) + '</strong> — ' + esc(h.name);
-      html += '<div style="font-size:.8rem;color:#5f6368;margin-top:2px">' + esc(h.description) + '</div>';
+      html += '<strong style="color:#1a73e8">' + esc(h.id.toUpperCase()) + '</strong> — ' + esc(h.name_ru || h.name);
+      html += '<div style="font-size:.8rem;color:#5f6368;margin-top:2px">' + esc(h.description_ru || h.description) + '</div>';
       html += '</div>';
     });
     html += '</div>';
@@ -942,12 +969,18 @@ function renderOverview() {
 function renderPinout() {
   var d = docsData.pinout;
   var colors = d.color_categories || {};
-  var html = '<div class="info-title">' + esc(d.description) + '</div>';
+  var html = '<div class="info-title">Распиновка GPIO — Raspberry Pi 3B+</div>';
   html += '<div class="info-subtitle">' + esc(d.board) + ' | SoC: ' + esc(d.soc) + ' | Rev ' + esc(d.revision) + '</div>';
 
+  // Pinout diagram image
   html += '<div class="info-section">';
-  html += '<div class="info-section-title">GPIO Pinout</div>';
-  html += '<table class="pin-table"><thead><tr><th>Pin</th><th>GPIO</th><th>Function</th><th>Name</th><th>Module</th></tr></thead><tbody>';
+  html += '<div class="info-section-title">Схема пинов</div>';
+  html += '<img src="rpi_pinout.png" alt="RPi 3B+ GPIO Pinout" style="width:100%;max-width:900px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2)">';
+  html += '</div>';
+
+  html += '<div class="info-section">';
+  html += '<div class="info-section-title">Таблица GPIO</div>';
+  html += '<table class="pin-table"><thead><tr><th>Пин</th><th>GPIO</th><th>Функция</th><th>Название</th><th>Модуль</th></tr></thead><tbody>';
   (d.pins || []).forEach(function(p) {
     var color = colors[p.color_category] || '#5f6368';
     html += '<tr>';
@@ -963,12 +996,12 @@ function renderPinout() {
   // Pin conflicts
   if (d.pin_conflicts && d.pin_conflicts.length > 0) {
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">Pin Conflicts</div>';
+    html += '<div class="info-section-title">Конфликты пинов</div>';
     d.pin_conflicts.forEach(function(c) {
       html += '<div style="margin-bottom:10px;padding:8px 12px;background:#fef7e0;border-radius:6px;font-size:.84rem">';
-      html += '<div style="font-weight:600;color:#b06000">GPIO ' + esc(String(c.gpio)) + ' (Pin ' + esc(String(c.pin)) + ')</div>';
+      html += '<div style="font-weight:600;color:#b06000">GPIO ' + esc(String(c.gpio)) + ' (Пин ' + esc(String(c.pin)) + ')</div>';
       html += '<div style="color:#5f6368;margin-top:2px">' + esc(c.conflict) + '</div>';
-      html += '<div style="color:#137333;margin-top:3px;font-weight:500">Resolution: ' + esc(c.resolution) + '</div>';
+      html += '<div style="color:#137333;margin-top:3px;font-weight:500">Решение: ' + esc(c.resolution) + '</div>';
       html += '</div>';
     });
     html += '</div>';
@@ -978,7 +1011,7 @@ function renderPinout() {
   if (d.i2c_bus) {
     var bus = d.i2c_bus;
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">I2C Bus</div>';
+    html += '<div class="info-section-title">Шина I2C</div>';
     html += '<div class="i2c-device-grid">';
     (bus.devices || []).forEach(function(dev) {
       html += '<div class="i2c-device"><span class="i2c-device-addr">' + esc(dev.address) + '</span> <span class="i2c-device-name">' + esc(dev.name) + '</span></div>';
@@ -987,11 +1020,12 @@ function renderPinout() {
   }
 
   // Legend
+  var legendLabels = {power: 'Питание', ground: 'Земля', i2c: 'I2C', spi: 'SPI', uart: 'UART', gpio: 'GPIO'};
   html += '<div class="info-section">';
-  html += '<div class="info-section-title">Color Legend</div>';
+  html += '<div class="info-section-title">Легенда</div>';
   html += '<div style="display:flex;flex-wrap:wrap;gap:12px">';
   Object.keys(colors).forEach(function(cat) {
-    html += '<div style="display:flex;align-items:center;gap:5px;font-size:.82rem"><span class="pin-color" style="background:' + colors[cat] + '"></span>' + esc(cat) + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:5px;font-size:.82rem"><span class="pin-color" style="background:' + colors[cat] + '"></span>' + esc(legendLabels[cat] || cat) + '</div>';
   });
   html += '</div></div>';
 
@@ -1000,31 +1034,31 @@ function renderPinout() {
 
 function renderComponent(compId) {
   var c = docsData.components[compId];
-  if (!c) return '<div class="info-loading">Documentation not available for ' + esc(compId) + '</div>';
+  if (!c) return '<div class="info-loading">Документация недоступна для ' + esc(compId) + '</div>';
 
-  var html = '<div class="info-title">' + esc(c.name || compId) + '</div>';
-  html += '<div class="info-subtitle">' + esc(c.description || '') + '</div>';
+  var html = '<div class="info-title">' + esc(c.name_ru || c.name || compId) + '</div>';
+  html += '<div class="info-subtitle">' + esc(c.description_ru || c.description || '') + '</div>';
 
   // Chip info
   html += '<div class="info-section">';
-  html += '<div class="info-section-title">General</div>';
-  if (c.chip) html += '<div class="info-field"><span class="info-field-label">Chip</span><span class="info-field-value">' + esc(c.chip) + '</span></div>';
-  if (c.manufacturer) html += '<div class="info-field"><span class="info-field-label">Manufacturer</span><span class="info-field-value">' + esc(c.manufacturer) + '</span></div>';
-  if (c.i2c_address) html += '<div class="info-field"><span class="info-field-label">I2C Address</span><span class="info-field-value"><code style="background:#e8f0fe;padding:1px 5px;border-radius:3px">' + esc(c.i2c_address) + '</code></span></div>';
+  html += '<div class="info-section-title">Общая информация</div>';
+  if (c.chip) html += '<div class="info-field"><span class="info-field-label">Чип</span><span class="info-field-value">' + esc(c.chip) + '</span></div>';
+  if (c.manufacturer) html += '<div class="info-field"><span class="info-field-label">Производитель</span><span class="info-field-value">' + esc(c.manufacturer) + '</span></div>';
+  if (c.i2c_address) html += '<div class="info-field"><span class="info-field-label">Адрес I2C</span><span class="info-field-value"><code style="background:#e8f0fe;padding:1px 5px;border-radius:3px">' + esc(c.i2c_address) + '</code></span></div>';
   if (c.i2c_address_alternates && c.i2c_address_alternates.length > 0) {
-    html += '<div class="info-field"><span class="info-field-label">Alt Addresses</span><span class="info-field-value">' + c.i2c_address_alternates.map(function(a) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(a) + '</code>'; }).join(' ') + '</span></div>';
+    html += '<div class="info-field"><span class="info-field-label">Альт. адреса</span><span class="info-field-value">' + c.i2c_address_alternates.map(function(a) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(a) + '</code>'; }).join(' ') + '</span></div>';
   }
-  if (c.datasheet_url) html += '<div class="info-field"><span class="info-field-label">Datasheet</span><span class="info-field-value"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">' + esc(c.datasheet_url) + '</a></span></div>';
-  if (c.related_modules) html += '<div class="info-field"><span class="info-field-label">Related Modules</span><span class="info-field-value">' + c.related_modules.map(function(m) { return '<code style="background:#e8f0fe;padding:1px 4px;border-radius:3px">' + esc(m) + '</code>'; }).join(' ') + '</span></div>';
+  if (c.datasheet_url) html += '<div class="info-field"><span class="info-field-label">Документация</span><span class="info-field-value"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">' + esc(c.datasheet_url) + '</a></span></div>';
+  if (c.related_modules) html += '<div class="info-field"><span class="info-field-label">Связанные модули</span><span class="info-field-value">' + c.related_modules.map(function(m) { return '<code style="background:#e8f0fe;padding:1px 4px;border-radius:3px">' + esc(m) + '</code>'; }).join(' ') + '</span></div>';
   html += '</div>';
 
   // Specs
   if (c.specs) {
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">Specifications</div>';
+    html += '<div class="info-section-title">Характеристики</div>';
     html += '<div class="specs-grid">';
     Object.keys(c.specs).forEach(function(key) {
-      var label = key.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+      var label = (c.specs_ru && c.specs_ru[key]) ? c.specs_ru[key] : key.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
       html += '<div class="spec-item"><span class="spec-key">' + esc(label) + '</span><span class="spec-val">' + esc(String(c.specs[key])) + '</span></div>';
     });
     html += '</div></div>';
@@ -1033,23 +1067,24 @@ function renderComponent(compId) {
   // Pins
   if (c.pins && c.pins.length > 0) {
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">Pin Connections</div>';
+    html += '<div class="info-section-title">Подключение пинов</div>';
     html += '<div class="comp-pins-list">';
     c.pins.forEach(function(p) {
       html += '<div class="comp-pin">';
       html += '<div class="comp-pin-name">' + esc(p.pin_name) + '</div>';
       if (p.connected_to) html += '<div class="comp-pin-conn">' + esc(p.connected_to) + '</div>';
-      if (p.function) html += '<div class="comp-pin-func">' + esc(p.function) + '</div>';
+      var funcText = p.function_ru || p.function || '';
+      if (funcText) html += '<div class="comp-pin-func">' + esc(funcText) + '</div>';
       html += '</div>';
     });
     html += '</div></div>';
   }
 
-  // Tips
-  var tips = c.tips || [];
+  // Tips (prefer Russian)
+  var tips = c.tips_ru || c.tips || [];
   if (tips.length > 0) {
     html += '<div class="info-section">';
-    html += '<div class="info-section-title">Tips</div>';
+    html += '<div class="info-section-title">Советы</div>';
     html += '<ul class="tips-list">';
     tips.forEach(function(t) {
       html += '<li>' + esc(t) + '</li>';

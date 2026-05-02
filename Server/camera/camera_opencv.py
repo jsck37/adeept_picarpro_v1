@@ -277,7 +277,6 @@ class Camera(BaseCamera):
         self.cv_thread = CVThread()
         self.cv_thread.start()
         self._picam = None
-        self._overlay_data = {}
         super().__init__(target_fps=CAMERA_FPS)
 
     def _init_camera(self):

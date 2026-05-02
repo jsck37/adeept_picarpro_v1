@@ -153,8 +153,9 @@ CV_WATCHDOG_BLUR_SIZE = (7, 7)  # GaussianBlur kernel (7x7 vs 21x21 — faster o
 # =============================================================================
 WEBSOCKET_PORT = 8888
 FLASK_PORT = 5000
-ZMQ_PORT = 5555
-GUI_SERVER_PORT = 10223
+# ZMQ and GUI ports kept for reference (not used by current Flask+WS server)
+# ZMQ_PORT = 5555
+# GUI_SERVER_PORT = 10223
 
 # WiFi Hotspot
 HOTSPOT_SSID = "Adeept_Robot"

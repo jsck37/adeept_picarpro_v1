@@ -21,7 +21,11 @@ from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
 
 
 class OLEDDisplay:
-    """SSD1306 OLED display controller with auto-refresh."""
+    """SSD1306 OLED display controller with auto-refresh and scrolling marquee."""
+
+    # Marquee text for line 4
+    MARQUEE_TEXT = "modded by turik from 8241117 <3"
+    MARQUEE_WIDTH = 21  # Max visible chars per line at 12pt
 
     def __init__(self):
         self._device = None
@@ -30,6 +34,7 @@ class OLEDDisplay:
         self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._refresh_loop, daemon=True)
         self._initialized = False
+        self._marquee_pos = 0
 
         try:
             from luma.core.interface.serial import i2c
@@ -55,6 +60,21 @@ class OLEDDisplay:
             for i, line in enumerate(lines[:4]):
                 self._lines[i] = str(line)[:21]
 
+    def _scroll_text(self, text, pos):
+        """Get visible window of scrolling text at given position.
+        Adds 3-space gap between repeats for readability.
+        """
+        if len(text) <= self.MARQUEE_WIDTH:
+            return text  # Short enough — no scrolling needed
+        padded = text + "   "  # 3-space gap between repeats
+        total = len(padded)
+        pos = pos % total
+        result = padded[pos:pos + self.MARQUEE_WIDTH]
+        # Wrap around if needed
+        if len(result) < self.MARQUEE_WIDTH:
+            result += padded[:self.MARQUEE_WIDTH - len(result)]
+        return result
+
     def _refresh_loop(self):
         """Periodically refresh the OLED display."""
         from PIL import Image, ImageDraw, ImageFont
@@ -76,15 +96,22 @@ class OLEDDisplay:
                 with self._lock:
                     lines = self._lines[:]
 
-                for i, line in enumerate(lines):
-                    draw.text((0, i * 16), line, fill=255, font=font)
+                for i in range(3):
+                    draw.text((0, i * 16), lines[i], fill=255, font=font)
+
+                # Line 4: scrolling marquee
+                marquee_visible = self._scroll_text(self.MARQUEE_TEXT, self._marquee_pos)
+                draw.text((0, 48), marquee_visible, fill=255, font=font)
 
                 self._device.display(image)
+
+                # Advance marquee position
+                self._marquee_pos += 1
 
             except Exception as e:
                 print(f"[OLED] Refresh error: {e}")
 
-            time.sleep(0.5)  # 2Hz refresh rate
+            time.sleep(0.3)  # ~3Hz for smooth scrolling
 
     def show_startup(self):
         """Show startup message."""
@@ -95,13 +122,12 @@ class OLEDDisplay:
             "",
         ])
 
-    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent, command="Ready"):
-        """Show full status display (convenience method). RAM in MB for 1GB Pi."""
+    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent):
+        """Show status display (3 lines). Line 4 is always the scrolling marquee."""
         self.set_lines([
             f"{ip}:{port}",
             f"CPU:{cpu_temp}C {cpu_usage}%",
             f"RAM:{ram_used_mb}/{ram_total_mb}M {ram_percent}%",
-            command,
         ])
 
     def shutdown(self):
