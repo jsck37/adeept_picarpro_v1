@@ -23,13 +23,9 @@ def main():
         freq = BuzzerController.NOTES.get(note, 0)
         if freq > 0:
             print(f"  {note} ({freq}Hz)")
-            try:
-                from gpiozero.tones import Tone
-                buzzer._buzzer.play(Tone(freq))
-            except Exception:
-                pass
+            buzzer.play_melody("beep")
             time.sleep(dur)
-            buzzer._buzzer.stop()
+            buzzer.stop()
             time.sleep(0.1)
 
     buzzer.shutdown()

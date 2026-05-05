@@ -1,15 +1,4 @@
-"""
-OLED SSD1306 display module.
-Shows 4 lines: IP:PORT, CPU info, RAM info, scrolling text.
-
-Display layout (SSD1306 128x64, 4 lines @ 16px each):
-- Line 1: IP:PORT (e.g., "192.168.1.100:5000")
-- Line 2: CPU: temp°C usage%
-- Line 3: RAM: used/total MB percent%
-- Line 4: Scrolling marquee text ("modded by turik from 8241117 <3")
-
-The 4th line is always the scrolling marquee — no program status shown.
-"""
+"""OLED SSD1306 display — 4 lines: IP, CPU, RAM, scrolling text."""
 
 import threading
 import time
@@ -17,10 +6,9 @@ from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
 
 
 class OLEDDisplay:
-    """SSD1306 OLED display controller with auto-refresh and scrolling text."""
 
     SCROLL_TEXT = "modded by turik from 8241117 <3"
-    SCROLL_WIDTH = 21  # visible chars per line at 12pt
+    SCROLL_WIDTH = 21
 
     def __init__(self):
         self._device = None
@@ -31,43 +19,36 @@ class OLEDDisplay:
         self._initialized = False
         self._scroll_pos = 0
         self._scroll_text = self.SCROLL_TEXT
-        self._scroll_pad = "   "  # spacing between repetitions
+        self._scroll_pad = "   "
 
         try:
             from luma.core.interface.serial import i2c
             from luma.oled.device import ssd1306
-
             serial = i2c(port=1, address=OLED_I2C_ADDR)
             self._device = ssd1306(serial, width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             self._thread.start()
-            print("[OLED] Display initialized (scrolling text mode)")
+            print("[OLED] Initialized (scrolling text)")
         except Exception as e:
-            print(f"[OLED] Failed to initialize: {e}")
+            print(f"[OLED] Init failed: {e}")
 
     def set_line(self, line_num, text):
-        """Update a specific line of the display (0-3)."""
         if 0 <= line_num < 4:
             with self._lock:
-                self._lines[line_num] = str(text)[:21]  # Max chars per line at 12pt
+                self._lines[line_num] = str(text)[:21]
 
     def set_lines(self, lines):
-        """Update all display lines at once."""
         with self._lock:
             for i, line in enumerate(lines[:4]):
                 self._lines[i] = str(line)[:21]
 
     def _get_scroll_window(self):
-        """Get current scrolling text window for line 4."""
-        # Create a long repeated string so scroll wraps seamlessly
         full = self._scroll_text + self._scroll_pad
-        repeated = full * 3  # repeat 3x for seamless wrap
+        repeated = full * 3
         pos = self._scroll_pos % len(full)
-        window = repeated[pos:pos + self.SCROLL_WIDTH]
-        return window
+        return repeated[pos:pos + self.SCROLL_WIDTH]
 
     def _refresh_loop(self):
-        """Periodically refresh the OLED display with scrolling text on line 4."""
         from PIL import Image, ImageDraw, ImageFont
 
         while self._running:
@@ -78,16 +59,14 @@ class OLEDDisplay:
             try:
                 image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
                 draw = ImageDraw.Draw(image)
-
                 try:
                     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
                 except Exception:
                     font = ImageFont.load_default()
 
                 with self._lock:
-                    lines = self._lines[:3]  # lines 0-2 (IP, CPU, RAM)
+                    lines = self._lines[:3]
 
-                # Line 4: scrolling text
                 scroll_line = self._get_scroll_window()
 
                 for i, line in enumerate(lines):
@@ -95,38 +74,18 @@ class OLEDDisplay:
                 draw.text((0, 3 * 16), scroll_line, fill=255, font=font)
 
                 self._device.display(image)
-
-                # Advance scroll position
                 self._scroll_pos += 1
 
             except Exception as e:
                 print(f"[OLED] Refresh error: {e}")
 
-            time.sleep(0.3)  # ~3Hz refresh for smooth scrolling
-
-    def show_startup(self):
-        """Show startup message."""
-        self.set_lines([
-            "PiCar Pro",
-            "Starting...",
-            "",
-            "",
-        ])
-
-    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent, command="Ready"):
-        """Show status display (lines 1-3 only; line 4 is always scrolling text)."""
-        self.set_lines([
-            f"{ip}:{port}",
-            f"CPU:{cpu_temp}C {cpu_usage}%",
-            f"RAM:{ram_used_mb}/{ram_total_mb}M {ram_percent}%",
-        ])
+            time.sleep(0.3)
 
     def shutdown(self):
-        """Clear display and release resources."""
         self._running = False
         if self._initialized and self._device is not None:
             try:
                 self._device.cleanup()
             except Exception:
                 pass
-        print("[OLED] Shutdown complete")
+        print("[OLED] Shutdown")

@@ -1,19 +1,7 @@
-"""
-Camera + OpenCV processing module.
-Optimized from v1:
-- Single JPEG encoding per frame (v1 encoded twice!)
-- FPS control via BaseCamera
-- Cleaner CV mode switching
-- No redundant Picamera2 instances
-- Better resource management
+"""Camera + OpenCV processing module.
 
-v2 optimizations:
-- Fixed BGR/RGB color swap (RGB888 + explicit conversion)
-- Morphological OPEN instead of erode+dilate (faster)
-- Reduced GaussianBlur kernel for watchdog (Pi 3B+ friendly)
-- Configurable line threshold
-- Frame skip when CV lags (avoids memory buildup)
-- Reduced BG subtractor history (less RAM)
+RGB888 format for correct colors, single JPEG encoding, FPS control,
+frame skip when CV lags (Pi 3B+ friendly).
 """
 
 import threading
@@ -259,18 +247,10 @@ class CVThread(threading.Thread):
 
 
 class Camera(BaseCamera):
-    """
-    PiCamera2 + OpenCV camera with efficient JPEG streaming.
+    """PiCamera2 + OpenCV with JPEG streaming.
 
-    Key optimizations over v1:
-    - Single JPEG encoding per frame (v1 did cv2.imencode TWICE)
-    - FPS control (v1 had no throttle = max CPU)
-    - Single Picamera2 instance (v1 created multiple competing instances)
-    - Cleaner CV thread management
-
-    v2 fix: Uses RGB888 format (guaranteed correct on all Pi firmware)
-    and converts to BGR for OpenCV. BGR888 causes color swap on many
-    Raspberry Pi OS / libcamera versions.
+    Uses RGB888 format and converts to BGR for OpenCV.
+    Single JPEG encoding, FPS control, CV thread.
     """
 
     def __init__(self):

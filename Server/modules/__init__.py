@@ -1,14 +1,4 @@
-"""
-PiCar Pro Modules — auto-discovery of all .py scripts.
-
-Modules are found automatically:
-1. All .py files in Server/modules/ (built-in examples)
-2. All .py files in Server/uploads/ (user-uploaded scripts)
-
-Meta-information (name, description, icon, hardware) is read from
-the script's docstring or from the METADATA dict below.
-Files without an entry in METADATA get auto-generated info from filename.
-"""
+"""PiCar Pro Modules — auto-discovery of .py scripts."""
 
 import os
 

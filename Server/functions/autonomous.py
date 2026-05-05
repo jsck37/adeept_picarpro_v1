@@ -1,16 +1,4 @@
-"""
-Autonomous robot functions.
-- radarScan: Sweep ultrasonic sensor and build distance map
-- automatic: Autonomous obstacle avoidance
-- trackLine: IR line following
-- keepDistance: Maintain fixed distance from obstacle
-
-Improvements over v1:
-- Clean class-based design (no global variables)
-- Proper thread management with pause/resume
-- Shared hardware references instead of duplicate instances
-- Non-blocking operation
-"""
+"""Autonomous robot functions — radar scan, obstacle avoidance, line following, keep distance."""
 
 import threading
 import time
@@ -18,12 +6,7 @@ from Server.config import RADAR_SCAN_SPEED, SERVO_STEERING
 
 
 class AutonomousController:
-    """
-    Autonomous robot functions controller.
-    
-    All autonomous modes run in a background thread with pause/resume control.
-    Hardware references are passed in (not created anew).
-    """
+    """Autonomous functions controller with background thread."""
 
     def __init__(self, motors, servos, ultrasonic):
         """

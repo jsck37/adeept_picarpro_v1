@@ -1,14 +1,4 @@
-"""
-Servo control module for PiCar Pro.
-CRITICAL OPTIMIZATION: Single PCA9685 instance, reused for all servo operations.
-v1 created a new I2C bus + PCA9685 object on EVERY set_angle() call!
-
-Optimizations:
-- Single PCA9685 instance (initialized once, reused forever)
-- Proper threading with smooth movement
-- No self-modifying code (v1 replace_num wrote to RPIservo.py source)
-- Clean servo angle calibration stored in config
-"""
+"""Servo control — PCA9685 with single instance, smooth movement."""
 
 import threading
 import time
@@ -20,17 +10,12 @@ from Server.config import (
 
 
 class ServoController:
-    """
-    Servo controller with single PCA9685 instance.
-    
-    Hardware configuration (user-specific):
-    - Channel 0: Front wheel STEERING (left-right rotation)
-    - Channel 1: Camera PAN
-    - Channel 2: Camera TILT
-    - Channels 3-7: DISABLED (crane not connected)
-    
-    Safe initialization: initializes servos one by one with delays
-    to prevent I2C bus overload that could cause Pi reboots.
+    """PCA9685 servo controller.
+
+    Channels:
+    - 0: Steering
+    - 1: Camera pan
+    - 2: Camera tilt
     """
 
     def __init__(self):
@@ -50,11 +35,7 @@ class ServoController:
         self._init_pca9685()
 
     def _init_pca9685(self):
-        """Initialize PCA9685 ONCE (not per call like v1!).
-        
-        Safe init: one servo at a time with 50ms delay to prevent
-        I2C bus overload on Pi 3B+ that could cause reboots.
-        """
+        """Initialize PCA9685 once with safe servo init sequence."""
         try:
             import busio
             from adafruit_pca9685 import PCA9685

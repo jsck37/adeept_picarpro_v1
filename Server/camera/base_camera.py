@@ -1,7 +1,4 @@
-"""
-Base camera class with FPS control and efficient frame management.
-Optimized from v1: added frame rate limiting, removed duplicate encoding.
-"""
+"""Base camera class with FPS control and frame management."""
 
 import threading
 import time
@@ -17,14 +14,7 @@ class CameraEvent(threading.Event):
 
 
 class BaseCamera:
-    """
-    Base camera class that runs a background thread for frame capture.
-    
-    Improvements over v1:
-    - FPS limiting via target_fps parameter (v1 had no limit = 100% CPU)
-    - Single frame storage with proper thread synchronization
-    - Clean startup/shutdown
-    """
+    """Base camera class — background thread for frame capture with FPS limiting."""
 
     thread = None           # Background capture thread
     frame = None            # Current JPEG frame bytes

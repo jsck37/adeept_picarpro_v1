@@ -1,17 +1,4 @@
-"""
-Voice command module (backported from v2).
-Uses Sherpa-NCNN for offline speech recognition.
-
-Supported voice commands:
-- lookleft, lookright: Camera pan
-- armup, armdown: Arm shoulder
-- handup, handdown: Arm elbow
-- grab, loose: Gripper
-- stop: Emergency stop
-
-Note: Requires sherpa-ncnn to be installed separately.
-See: https://github.com/k2-fsa/sherpa-ncnn
-"""
+"""Voice command module — Sherpa-NCNN offline speech recognition."""
 
 import threading
 import time
@@ -21,12 +8,7 @@ from Server.config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
 
 
 class VoiceCommandController:
-    """
-    Offline voice command recognition using Sherpa-NCNN.
-    
-    Runs speech recognition in a background thread and executes
-    recognized commands on the robot hardware.
-    """
+    """Offline voice command recognition via Sherpa-NCNN."""
 
     # Supported voice commands mapping
     COMMAND_MAP = {

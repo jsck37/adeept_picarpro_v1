@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""
-PiCar Pro WebServer — Main entry point (matching original architecture)
-
-Architecture (matches original adeept_picarpro):
-- Flask (port 5000): Serves web frontend + MJPEG camera stream
-- WebSocket server (port 8888): asyncio + websockets library for real-time control
-- WebServer.py is the main entry: initializes hardware, starts Flask in a thread,
-  then runs the asyncio WebSocket server in the main loop
-
-Key differences from old server.py:
-- Separate Flask (app.py) and WebSocket (here) instead of combined flask-socketio
-- Uses `websockets` library (asyncio) instead of flask-socketio
-- Flask runs in a thread, WebSocket server runs in the main asyncio loop
-- WebSocket receives JSON commands, processes them, sends responses
-"""
+"""PiCar Pro WebServer — Flask (5000) + WebSocket (8888)."""
 
 import asyncio
 import json
@@ -25,7 +11,6 @@ import sys
 import threading
 import time
 
-# Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
@@ -33,13 +18,11 @@ try:
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
-    print("[WebServer] WARNING: websockets library not installed!")
-    print("[WebServer] Install with: pip3 install websockets")
+    print("[WebServer] websockets not installed!")
 
 from Server.config import (
     FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
     SERVO_COUNT, SERVO_INIT_ANGLE, CRANE_ENABLED,
-    HEADLIGHT_LEFT_PORT, HEADLIGHT_RIGHT_PORT,
     SERVO_STEERING, SWITCH_PINS,
 )
 from Server.hardware.motors import MotorController
@@ -58,12 +41,7 @@ from Server.utils.system_info import SystemInfo
 from Server.modules import get_module_list, get_module_by_id, get_module_path
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Module Runner — manages running example scripts via subprocess
-# ═════════════════════════════════════════════════════════════════════════════
-
 class ModuleRunner:
-    """Run and manage example module scripts in subprocesses."""
 
     def __init__(self):
         self._process = None
@@ -72,22 +50,17 @@ class ModuleRunner:
         self._last_command = "Ready"
 
     def start(self, module_id):
-        """Start a module by ID. Returns (success, message)."""
         with self._lock:
             self.stop()
-
             path = get_module_path(module_id)
             if path is None:
                 return False, f"Module '{module_id}' not found"
-
             if not os.path.isfile(path):
                 return False, f"Module file not found: {path}"
-
             try:
                 self._process = subprocess.Popen(
                     [sys.executable, path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     cwd=os.path.dirname(os.path.dirname(os.path.dirname(path))),
                 )
                 self._current_module = module_id
@@ -97,18 +70,14 @@ class ModuleRunner:
                 return False, str(e)
 
     def start_upload(self, filepath):
-        """Start an uploaded script by path. Returns (success, message)."""
         with self._lock:
             self.stop()
-
             if not os.path.isfile(filepath):
                 return False, f"File not found: {filepath}"
-
             try:
                 self._process = subprocess.Popen(
                     [sys.executable, filepath],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 )
                 name = os.path.basename(filepath)
@@ -119,7 +88,6 @@ class ModuleRunner:
                 return False, str(e)
 
     def stop(self):
-        """Stop the currently running module."""
         with self._lock:
             if self._process is not None:
                 self._process.terminate()
@@ -136,13 +104,11 @@ class ModuleRunner:
                 self._last_command = "Stopped"
 
     def set_command(self, cmd):
-        """Set the last command description for OLED display."""
         with self._lock:
             self._last_command = cmd
 
     @property
     def running_module(self):
-        """Return the currently running module ID, or None."""
         with self._lock:
             if self._process is not None and self._process.poll() is None:
                 return self._current_module
@@ -153,20 +119,14 @@ class ModuleRunner:
 
     @property
     def last_command(self):
-        """Return the last command description."""
         with self._lock:
             return self._last_command
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  Servo Calibration Persistence
-# ═════════════════════════════════════════════════════════════════════════════
 
 SERVO_CAL_FILE = os.path.join(os.path.dirname(__file__), "servo_cal.json")
 
 
 def load_servo_cal():
-    """Load servo calibration angles from JSON file."""
     try:
         if os.path.isfile(SERVO_CAL_FILE):
             with open(SERVO_CAL_FILE, "r") as f:
@@ -178,20 +138,14 @@ def load_servo_cal():
 
 
 def save_servo_cal(init_angles):
-    """Save servo calibration angles to JSON file."""
     try:
         with open(SERVO_CAL_FILE, "w") as f:
             json.dump({"init_angles": init_angles}, f, indent=2)
     except Exception as e:
-        print(f"[ServoCal] Failed to save: {e}")
+        print(f"[ServoCal] Save failed: {e}")
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  Helper: get the robot's own IP address
-# ═════════════════════════════════════════════════════════════════════════════
 
 def get_ip_address():
-    """Get the robot's IP address for display on OLED."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -202,12 +156,7 @@ def get_ip_address():
         return "0.0.0.0"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Global shared state (accessible from both Flask and WebSocket handlers)
-# ═════════════════════════════════════════════════════════════════════════════
-
 class SharedState:
-    """Thread-safe shared state for the robot."""
 
     def __init__(self):
         self.speed = DEFAULT_SPEED
@@ -227,12 +176,10 @@ class SharedState:
         self.ws_clients = set()
 
     def init_camera(self):
-        """Initialize camera (lazy — only when first needed)."""
         if self.camera is None:
             self.camera = Camera()
 
     def get_status(self):
-        """Gather current robot status as dict."""
         info = SystemInfo.get_all()
         ram = info['ram']
         return {
@@ -250,7 +197,6 @@ class SharedState:
             "running_module": self.module_runner.running_module,
             "speed": self.speed,
             "crane_enabled": CRANE_ENABLED,
-            # Hardware availability — lets UI show "Not connected" badges
             "hw": {
                 "motors":     self.motors._initialized if self.motors else False,
                 "servos":     self.servos._pwm_initialized if self.servos else False,
@@ -261,7 +207,7 @@ class SharedState:
                 "mpu6050":    self.mpu6050.initialized if self.mpu6050 else False,
                 "oled":       self.oled._initialized if self.oled else False,
                 "camera":     self.camera is not None,
-                "autonomous":  (self.autonomous is not None
+                "autonomous": (self.autonomous is not None
                                 and self.motors._initialized
                                 and self.ultrasonic._initialized)
                                if self.autonomous else False,
@@ -269,10 +215,8 @@ class SharedState:
         }
 
     def shutdown_hardware(self):
-        """Clean up all hardware on exit."""
         self.running = False
-        print("[WebServer] Shutting down hardware...")
-
+        print("[WebServer] Shutting down...")
         self.module_runner.stop()
         if self.motors:
             self.motors.stop()
@@ -297,46 +241,27 @@ class SharedState:
         print("[WebServer] Shutdown complete")
 
 
-# Global shared state instance
 state = SharedState()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  OLED update thread
-# ═════════════════════════════════════════════════════════════════════════════
-
 def oled_update_loop():
-    """Update OLED every 1.5 seconds with IP, port, CPU, RAM (line 4 is scrolling text)."""
     ip = get_ip_address()
     port = FLASK_PORT
-
     while state.running:
         try:
             info = SystemInfo.get_all()
             ram = info['ram']
-
             line1 = f"{ip}:{port}"
             line2 = f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%"
             line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"
-
             if state.oled:
                 state.oled.set_lines([line1, line2, line3])
         except Exception as e:
             print(f"[OLED] Update error: {e}")
-
         time.sleep(1.5)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  WebSocket command handler (asyncio)
-# ═════════════════════════════════════════════════════════════════════════════
-
 def process_command(data):
-    """Process a command dict and return a response dict.
-
-    This is synchronous — called from the async WebSocket handler.
-    All hardware operations are thread-safe.
-    """
     cmd = data.get('cmd', '')
     params = data.get('params', {})
     result = {'ok': False, 'cmd': cmd}
@@ -344,9 +269,6 @@ def process_command(data):
     if cmd == 'move':
         direction = params.get('dir', 'stop')
         state.module_runner.set_command(f"Move: {direction}")
-
-        # Steering servo angles: 30=right, 90=center, 150=left
-        # (matches servo-control slider range)
         steer_angles = {
             'forward': 90, 'backward': 90,
             'left': 150, 'right': 30,
@@ -378,10 +300,8 @@ def process_command(data):
             result['error'] = f'Unknown direction: {direction}'
             return result
 
-        # Move steering servo to match direction
         steer_angle = steer_angles.get(direction, 90)
         state.servos.set_angle(SERVO_STEERING, steer_angle)
-
         result = {'ok': True, 'cmd': cmd, 'dir': direction, 'steer': steer_angle}
 
     elif cmd == 'speed':
@@ -411,7 +331,6 @@ def process_command(data):
             cal = load_servo_cal()
             cal[servo_id] = angle
             save_servo_cal(cal)
-            state.module_runner.set_command(f"Cal S{servo_id}:{angle}")
             result = {'ok': True, 'cmd': cmd, 'id': servo_id, 'init_angle': angle}
         else:
             result['error'] = f'Servo id must be 0-{SERVO_COUNT-1}'
@@ -431,7 +350,6 @@ def process_command(data):
             except (ValueError, TypeError):
                 color = (255, 0, 0)
             state.leds.set_mode(mode, color)
-            state.module_runner.set_command(f"LED: {mode}")
             result = {'ok': True, 'cmd': cmd, 'mode': mode}
         else:
             result['error'] = f'Invalid mode. Use: {", ".join(valid_modes)}'
@@ -442,14 +360,12 @@ def process_command(data):
         melody_key = melody_map.get(melody)
         if melody_key:
             state.buzzer.play_melody(melody_key)
-            state.module_runner.set_command(f"Buzzer: {melody}")
             result = {'ok': True, 'cmd': cmd, 'melody': melody}
         else:
             result['error'] = f'Unknown melody. Use: {", ".join(melody_map.keys())}'
 
     elif cmd == 'buzzer_stop':
         state.buzzer.stop()
-        state.module_runner.set_command("Buzzer Stop")
         result = {'ok': True, 'cmd': cmd}
 
     elif cmd == 'switch':
@@ -461,7 +377,6 @@ def process_command(data):
                 state.switches.on(switch_id)
             else:
                 state.switches.off(switch_id)
-            state.module_runner.set_command(f"Switch {switch_id}: {'ON' if switch_state else 'OFF'}")
             result = {'ok': True, 'cmd': cmd, 'id': switch_id, 'state': switch_state}
         else:
             result['error'] = f'Switch id must be 0-{max_switches - 1}'
@@ -476,10 +391,9 @@ def process_command(data):
         if cv_mode is not None:
             state.init_camera()
             state.camera.set_cv_mode(cv_mode)
-            state.module_runner.set_command(f"CV: {mode}")
             result = {'ok': True, 'cmd': cmd, 'mode': mode}
         else:
-            result['error'] = f'Unknown mode. Use: {", ".join(mode_map.keys())}'
+            result['error'] = f'Unknown mode'
 
     elif cmd == 'auto':
         func = params.get('func', 'stop')
@@ -487,20 +401,17 @@ def process_command(data):
         if func in valid_funcs:
             if func == 'stop':
                 state.autonomous.stop()
-                state.module_runner.set_command("Auto Stop")
             else:
                 state.autonomous.start(func)
-                state.module_runner.set_command(f"Auto: {func}")
             result = {'ok': True, 'cmd': cmd, 'func': func}
         else:
-            result['error'] = f'Unknown function. Use: {", ".join(valid_funcs)}'
+            result['error'] = f'Unknown function'
 
     elif cmd == 'module_start':
         module_id = params.get('id', '')
         upload_dir = os.path.join(os.path.dirname(__file__), "modules", "uploads")
         if module_id.startswith('upload_'):
-            fname = module_id[len('upload_'):]
-            fpath = os.path.join(upload_dir, fname)
+            fpath = os.path.join(upload_dir, module_id[len('upload_'):])
             ok, msg = state.module_runner.start_upload(fpath)
         else:
             ok, msg = state.module_runner.start(module_id)
@@ -519,23 +430,17 @@ def process_command(data):
             for fname in sorted(os.listdir(upload_dir)):
                 if fname.endswith('.py'):
                     uploaded.append({
-                        'id': f'upload_{fname}',
-                        'name': fname,
-                        'desc': f'Uploaded: {fname}',
-                        'icon': 'page',
-                        'hardware': [],
-                        'file': fname,
-                        'is_upload': True,
+                        'id': f'upload_{fname}', 'name': fname,
+                        'desc': f'Uploaded: {fname}', 'icon': 'page',
+                        'hardware': [], 'file': fname, 'is_upload': True,
                     })
         result = {
             'ok': True, 'cmd': cmd,
-            'modules': modules,
-            'uploads': uploaded,
+            'modules': modules, 'uploads': uploaded,
             'running': state.module_runner.running_module,
         }
 
     elif cmd == 'get_info':
-        # Original v1 command: return system info
         result = {'ok': True, 'cmd': cmd}
         result.update(state.get_status())
 
@@ -545,18 +450,11 @@ def process_command(data):
     return result
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  WebSocket server handler
-# ═════════════════════════════════════════════════════════════════════════════
-
 async def ws_handler(websocket, path=None):
-    """Handle a WebSocket connection (asyncio websockets library)."""
-    # Register client
     state.ws_clients.add(websocket)
     client_id = id(websocket)
     print(f"[WS] Client connected: {client_id} (total: {len(state.ws_clients)})")
 
-    # Send initial status
     try:
         status = state.get_status()
         await websocket.send(json.dumps({'type': 'status', 'data': status}))
@@ -570,13 +468,9 @@ async def ws_handler(websocket, path=None):
                 result = process_command(data)
                 await websocket.send(json.dumps({'type': 'response', 'data': result}))
             except json.JSONDecodeError:
-                await websocket.send(json.dumps({
-                    'type': 'response', 'data': {'ok': False, 'error': 'Invalid JSON'}
-                }))
+                await websocket.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': 'Invalid JSON'}}))
             except Exception as e:
-                await websocket.send(json.dumps({
-                    'type': 'response', 'data': {'ok': False, 'error': str(e)}
-                }))
+                await websocket.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': str(e)}}))
     except websockets.exceptions.ConnectionClosed:
         pass
     except Exception as e:
@@ -587,13 +481,11 @@ async def ws_handler(websocket, path=None):
 
 
 async def status_broadcast():
-    """Periodically broadcast status to all connected WebSocket clients."""
     while state.running:
         if state.ws_clients:
             try:
                 status = state.get_status()
                 msg = json.dumps({'type': 'status', 'data': status})
-                # Send to all connected clients
                 disconnected = set()
                 for ws in state.ws_clients:
                     try:
@@ -602,57 +494,36 @@ async def status_broadcast():
                         disconnected.add(ws)
                     except Exception:
                         disconnected.add(ws)
-                # Remove disconnected clients
                 state.ws_clients -= disconnected
             except Exception as e:
                 print(f"[WS] Broadcast error: {e}")
         await asyncio.sleep(1.5)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Flask thread — starts app.py in a separate thread
-# ═════════════════════════════════════════════════════════════════════════════
-
 def start_flask_thread():
-    """Start the Flask app (app.py) in a background thread."""
     from Server.app import create_app
-
     app = create_app(state)
 
     def run_flask():
-        app.run(
-            host="0.0.0.0",
-            port=FLASK_PORT,
-            threaded=True,
-            debug=False,
-            use_reloader=False,
-        )
+        app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True, debug=False, use_reloader=False)
 
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    print(f"[WebServer] Flask server started on port {FLASK_PORT}")
+    print(f"[WebServer] Flask on port {FLASK_PORT}")
     return flask_thread
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Main entry point
-# ═════════════════════════════════════════════════════════════════════════════
-
 def main():
-    """Main entry point — initialize hardware, start Flask, run WebSocket server."""
     global state
 
     print("=" * 55)
     print("  PiCar Pro Server (Flask + WebSocket)")
-    print("  Matching original architecture: Client/Server separation")
     print("=" * 55)
 
     if not HAS_WEBSOCKETS:
-        print("[WebServer] ERROR: websockets library not installed!")
-        print("[WebServer] Install with: pip3 install websockets")
+        print("[WebServer] ERROR: websockets not installed!")
         sys.exit(1)
 
-    # ── Initialize hardware ───────────────────────────────────────────────
     print("[WebServer] Initializing hardware...")
     state.motors = MotorController()
     state.servos = ServoController()
@@ -662,7 +533,6 @@ def main():
     state.oled = OLEDDisplay()
     state.buzzer = BuzzerController()
 
-    # MPU6050 IMU (optional — non-critical if not connected)
     try:
         state.mpu6050 = MPU6050Controller()
     except Exception as e:
@@ -670,61 +540,44 @@ def main():
 
     state.autonomous = AutonomousController(state.motors, state.servos, state.ultrasonic)
 
-    # ── Voice command (optional) ──────────────────────────────────────────
     try:
         from Server.functions.voice_command import VoiceCommandController
         state.voice = VoiceCommandController(state.servos, state.motors)
     except Exception:
         pass
 
-    # ── Apply saved servo calibration ─────────────────────────────────────
     saved_cal = load_servo_cal()
     for i, angle in enumerate(saved_cal):
         if 0 <= i < SERVO_COUNT:
             state.servos.set_init_angle(i, angle)
 
-    # ── Move servos to home ───────────────────────────────────────────────
     try:
         state.servos.move_init()
     except Exception as e:
-        print(f"[WebServer] Warning: servo init failed: {e}")
+        print(f"[WebServer] Servo init warning: {e}")
 
-    # ── OLED startup message ──────────────────────────────────────────────
     if state.oled:
         ip = get_ip_address()
-        state.oled.set_lines([
-            f"{ip}:{FLASK_PORT}",
-            "Starting...",
-            "",
-            "",
-        ])
+        state.oled.set_lines([f"{ip}:{FLASK_PORT}", "Starting...", "", ""])
 
-    # ── Start OLED update thread ──────────────────────────────────────────
     oled_thread = threading.Thread(target=oled_update_loop, daemon=True)
     oled_thread.start()
 
-    # ── Start Flask in a thread ───────────────────────────────────────────
     flask_thread = start_flask_thread()
 
-    # ── Signal handling ───────────────────────────────────────────────────
     def signal_handler(sig, frame):
-        print(f"\n[WebServer] Signal {sig} received, shutting down...")
+        print(f"\n[WebServer] Signal {sig}, shutting down...")
         state.shutdown_hardware()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # ── Run asyncio WebSocket server ──────────────────────────────────────
-    print(f"[WebServer] Starting WebSocket server on port {WEBSOCKET_PORT}...")
+    print(f"[WebServer] WebSocket on port {WEBSOCKET_PORT}...")
 
     async def run_server():
-        # Create WebSocket server
         async with websockets.serve(ws_handler, "0.0.0.0", WEBSOCKET_PORT):
-            print(f"[WebServer] WebSocket server listening on ws://0.0.0.0:{WEBSOCKET_PORT}")
-            print(f"[WebServer] Web interface: http://{get_ip_address()}:{FLASK_PORT}")
-            print(f"[WebServer] Ready for connections!")
-            # Run the status broadcast loop alongside
+            print(f"[WebServer] Ready! http://{get_ip_address()}:{FLASK_PORT}")
             await status_broadcast()
 
     try:
