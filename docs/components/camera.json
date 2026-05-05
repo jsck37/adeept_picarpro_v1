@@ -33,37 +33,45 @@
     {
       "pin_name": "CSI Connector Pin 1",
       "connected_to": "3.3V power (via Raspberry Pi CSI port)",
-      "function": "Camera module power supply"
+      "function": "Camera module power supply",
+      "function_ru": "Питание модуля камеры"
     },
     {
       "pin_name": "CSI Connector Pin 2-3",
       "connected_to": "RPi MIPI CSI-2 Data Lane 0 (SIOC/SIOD I2C for camera control)",
-      "function": "I2C control bus (SCL/SDA) for sensor configuration"
+      "function": "I2C control bus (SCL/SDA) for sensor configuration",
+      "function_ru": "Шина управления I2C (SCL/SDA) для настройки сенсора"
     },
     {
       "pin_name": "CSI Connector Pin 4-5",
       "connected_to": "RPi MIPI CSI-2 Data Lane 1 (clock/data)",
-      "function": "MIPI CSI-2 high-speed differential data lanes"
+      "function": "MIPI CSI-2 high-speed differential data lanes",
+      "function_ru": "Высокоскоростные дифференциальные линии MIPI CSI-2"
     },
     {
       "pin_name": "CSI Connector Pin 6-7",
       "connected_to": "RPi MIPI CSI-2 Clock Lane",
-      "function": "MIPI CSI-2 differential clock pair"
+      "function": "MIPI CSI-2 differential clock pair",
+      "function_ru": "Дифференциальная пара тактового сигнала MIPI CSI-2"
     },
     {
       "pin_name": "CSI Connector GND",
       "connected_to": "Raspberry Pi GND (via CSI connector)",
-      "function": "Common ground"
+      "function": "Common ground",
+      "function_ru": "Общая земля"
     },
     {
       "pin_name": "CAM_GPIO",
       "connected_to": "Not directly used by PiCar Pro (camera enable pin on some models)",
-      "function": "Camera shutdown/standby control (optional)"
+      "function": "Camera shutdown/standby control (optional)",
+      "function_ru": "Управление выключением/ожиданием камеры (опционально)"
     }
   ],
   "i2c_address": null,
   "i2c_address_alternates": [],
-  "related_modules": ["camera"],
+  "related_modules": [
+    "camera"
+  ],
   "tips": [
     "Enable the camera interface with: sudo raspi-config → Interface Options → Camera → Enable, or add 'camera_auto_detect=1' to /boot/config.txt.",
     "For PiCar Pro, use the picamera2 library (libcamera-based) on Raspberry Pi OS Bullseye and later. The legacy picamera library is deprecated.",
@@ -83,5 +91,22 @@
     "Ночное видение требует удаления ИК-фильтра и ИК-подсветки — стандартный модуль v2 имеет встроенный ИК-фильтр.",
     "Разъём MIPI CSI на Raspberry Pi 3B+ расположен между портами HDMI и аудио.",
     "Для потоковой передачи используйте MJPEG 640×480@30fps для баланса качества и пропускной способности, или H.264 1080p для качественной записи."
-  ]
+  ],
+  "specs_ru": {
+    "sensor": "Сенсор",
+    "resolution": "Разрешение",
+    "interface": "Интерфейс",
+    "connector": "Разъём",
+    "pixel_size": "Размер пикселя",
+    "color_filter": "Цветовой фильтр",
+    "lens_fov": "Угол обзора объектива",
+    "video_modes": "Видеорежимы",
+    "still_capture": "Фотосъёмка",
+    "dynamic_range": "Динамический диапазон",
+    "sensitivity": "Чувствительность",
+    "operating_temp": "Рабочая температура",
+    "dimensions": "Размеры",
+    "weight": "Вес",
+    "power_consumption": "Потребляемая мощность"
+  }
 }

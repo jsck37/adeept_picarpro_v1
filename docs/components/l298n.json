@@ -24,87 +24,152 @@
     {
       "pin_name": "12V / VS",
       "connected_to": "Battery positive terminal (7.4V 2S LiPo or 6× AA battery pack)",
-      "function": "Motor power supply input (5V–35V)"
+      "function": "Motor power supply input (5V–35V)",
+      "function_ru": "Вход питания моторов (5В–35В)"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39) AND Battery negative",
-      "function": "Common ground (must connect both Pi GND and battery GND)"
+      "function": "Common ground (must connect both Pi GND and battery GND)",
+      "function_ru": "Common ground (must connect both Pi GND and battery GND)"
     },
     {
       "pin_name": "5V",
       "connected_to": "Not used as output when jumper is on (provides regulated 5V). Remove jumper and supply 5V if using EN pins.",
-      "function": "5V regulated output (when 12V jumper installed) or 5V logic input"
+      "function": "5V regulated output (when 12V jumper installed) or 5V logic input",
+      "function_ru": "Стабилизированный выход 5В (при джампере 12В) или вход логики 5В"
     },
     {
       "pin_name": "EN_A",
       "connected_to": "Raspberry Pi GPIO 4 (Pin 7)",
-      "function": "Enable Motor A — PWM signal for speed control of left motor"
+      "function": "Enable Motor A — PWM signal for speed control of left motor",
+      "function_ru": "Разрешение мотора A — ШИМ контроля скорости левого мотора"
     },
     {
       "pin_name": "IN1_A",
       "connected_to": "Raspberry Pi GPIO 26 (Pin 37)",
-      "function": "Motor A direction control input 1"
+      "function": "Motor A direction control input 1",
+      "function_ru": "Вход управления направлением мотора A (1)"
     },
     {
       "pin_name": "IN2_A",
       "connected_to": "Raspberry Pi GPIO 21 (Pin 40)",
-      "function": "Motor A direction control input 2"
+      "function": "Motor A direction control input 2",
+      "function_ru": "Вход управления направлением мотора A (2)"
     },
     {
       "pin_name": "IN1_B",
       "connected_to": "Raspberry Pi GPIO 27 (Pin 13)",
-      "function": "Motor B direction control input 1"
+      "function": "Motor B direction control input 1",
+      "function_ru": "Вход управления направлением мотора B (1)"
     },
     {
       "pin_name": "IN2_B",
       "connected_to": "Raspberry Pi GPIO 18 (Pin 12)",
-      "function": "Motor B direction control input 2"
+      "function": "Motor B direction control input 2",
+      "function_ru": "Вход управления направлением мотора B (2)"
     },
     {
       "pin_name": "EN_B",
       "connected_to": "Raspberry Pi GPIO 17 (Pin 11)",
-      "function": "Enable Motor B — PWM signal for speed control of right motor"
+      "function": "Enable Motor B — PWM signal for speed control of right motor",
+      "function_ru": "Разрешение мотора B — ШИМ контроля скорости правого мотора"
     },
     {
       "pin_name": "OUT1",
       "connected_to": "Left Motor terminal A",
-      "function": "Motor A output 1"
+      "function": "Motor A output 1",
+      "function_ru": "Выход мотора A (1)"
     },
     {
       "pin_name": "OUT2",
       "connected_to": "Left Motor terminal B",
-      "function": "Motor A output 2"
+      "function": "Motor A output 2",
+      "function_ru": "Выход мотора A (2)"
     },
     {
       "pin_name": "OUT3",
       "connected_to": "Right Motor terminal A",
-      "function": "Motor B output 1"
+      "function": "Motor B output 1",
+      "function_ru": "Выход мотора B (1)"
     },
     {
       "pin_name": "OUT4",
       "connected_to": "Right Motor terminal B",
-      "function": "Motor B output 2"
+      "function": "Motor B output 2",
+      "function_ru": "Выход мотора B (2)"
     }
   ],
   "i2c_address": null,
   "i2c_address_alternates": [],
-  "related_modules": ["motor"],
+  "related_modules": [
+    "motor"
+  ],
   "truth_table": {
     "description": "Motor direction control truth table",
     "motor_a": [
-      {"EN_A": "HIGH/PWM", "IN1_A": "HIGH", "IN2_A": "LOW", "direction": "Forward"},
-      {"EN_A": "HIGH/PWM", "IN1_A": "LOW", "IN2_A": "HIGH", "direction": "Backward"},
-      {"EN_A": "HIGH/PWM", "IN1_A": "LOW", "IN2_A": "LOW", "direction": "Free run stop"},
-      {"EN_A": "HIGH/PWM", "IN1_A": "HIGH", "IN2_A": "HIGH", "direction": "Fast stop (brake)"},
-      {"EN_A": "LOW", "IN1_A": "X", "IN2_A": "X", "direction": "Disabled (coast)"}
+      {
+        "EN_A": "HIGH/PWM",
+        "IN1_A": "HIGH",
+        "IN2_A": "LOW",
+        "direction": "Forward"
+      },
+      {
+        "EN_A": "HIGH/PWM",
+        "IN1_A": "LOW",
+        "IN2_A": "HIGH",
+        "direction": "Backward"
+      },
+      {
+        "EN_A": "HIGH/PWM",
+        "IN1_A": "LOW",
+        "IN2_A": "LOW",
+        "direction": "Free run stop"
+      },
+      {
+        "EN_A": "HIGH/PWM",
+        "IN1_A": "HIGH",
+        "IN2_A": "HIGH",
+        "direction": "Fast stop (brake)"
+      },
+      {
+        "EN_A": "LOW",
+        "IN1_A": "X",
+        "IN2_A": "X",
+        "direction": "Disabled (coast)"
+      }
     ],
     "motor_b": [
-      {"EN_B": "HIGH/PWM", "IN1_B": "HIGH", "IN2_B": "LOW", "direction": "Forward"},
-      {"EN_B": "HIGH/PWM", "IN1_B": "LOW", "IN2_B": "HIGH", "direction": "Backward"},
-      {"EN_B": "HIGH/PWM", "IN1_B": "LOW", "IN2_B": "LOW", "direction": "Free run stop"},
-      {"EN_B": "HIGH/PWM", "IN1_B": "HIGH", "IN2_B": "HIGH", "direction": "Fast stop (brake)"},
-      {"EN_B": "LOW", "IN1_B": "X", "IN2_B": "X", "direction": "Disabled (coast)"}
+      {
+        "EN_B": "HIGH/PWM",
+        "IN1_B": "HIGH",
+        "IN2_B": "LOW",
+        "direction": "Forward"
+      },
+      {
+        "EN_B": "HIGH/PWM",
+        "IN1_B": "LOW",
+        "IN2_B": "HIGH",
+        "direction": "Backward"
+      },
+      {
+        "EN_B": "HIGH/PWM",
+        "IN1_B": "LOW",
+        "IN2_B": "LOW",
+        "direction": "Free run stop"
+      },
+      {
+        "EN_B": "HIGH/PWM",
+        "IN1_B": "HIGH",
+        "IN2_B": "HIGH",
+        "direction": "Fast stop (brake)"
+      },
+      {
+        "EN_B": "LOW",
+        "IN1_B": "X",
+        "IN2_B": "X",
+        "direction": "Disabled (coast)"
+      }
     ]
   },
   "tips": [
@@ -126,5 +191,18 @@
     "Для дифференциального привода: оба двигателя вперёд = прямо, один быстрее = поворот, один вперёд + один назад = разворот на месте.",
     "L298N может нагреваться при больших токах. Установите радиатор, если двигатели работают вблизи пикового тока 2А.",
     "Выводы измерения тока (CSA, CSB) можно использовать с резисторами для мониторинга тока, но обычно остаются неподключёнными."
-  ]
+  ],
+  "specs_ru": {
+    "voltage_logic": "Напряжение логики",
+    "voltage_motor": "Напряжение моторов",
+    "voltage_drop": "Падение напряжения",
+    "current_per_channel": "Ток на канал",
+    "channels": "Каналы",
+    "interface": "Интерфейс",
+    "pwm_frequency": "Частота ШИМ",
+    "enable_pins": "Выводы разрешения",
+    "protection": "Защита",
+    "operating_temp": "Рабочая температура",
+    "package": "Корпус"
+  }
 }
