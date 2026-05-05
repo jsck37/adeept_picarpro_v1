@@ -88,7 +88,7 @@
         <div class="card-title collapsible-header open" data-target="auto-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="2"/></svg>
-            Autonomous<span class="hw-missing-tag" id="auto-missing-tag" style="display:none">Module not found</span>
+            Autonomous<span class="hw-missing-tag" id="auto-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -110,34 +110,23 @@
     <!-- ========== RIGHT COLUMN ========== -->
     <div class="col-right">
 
-      <!-- Drive & Control (Movement + Speed + Servo — merged) -->
-      <div class="card" id="card-drive">
-        <div class="card-title collapsible-header open" data-target="drive-body">
+      <!-- Movement (Wheel Joystick + Camera Joystick side by side) -->
+      <div class="card">
+        <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            Drive & Control<span class="hw-missing-tag" id="servo-missing-tag" style="display:none">Module not found</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+            Movement
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
-        <div class="collapsible-body open" id="drive-body">
-          <!-- Dual Joysticks -->
+        <div class="collapsible-body open" id="move-body">
           <div class="dual-joystick-row">
-            <!-- Wheel Joystick with direction labels -->
+            <!-- Wheel Joystick -->
             <div class="joystick-area">
               <div class="joystick-container" id="joystick-container">
                 <div class="joystick-base"></div>
                 <div class="joystick-crosshair"></div>
                 <div class="joystick-knob" id="joystick-knob"></div>
-                <div class="joystick-labels">
-                  <span class="jlbl jlbl-fwd">Fwd</span>
-                  <span class="jlbl jlbl-back">Back</span>
-                  <span class="jlbl jlbl-left">Left</span>
-                  <span class="jlbl jlbl-right">Right</span>
-                  <span class="jlbl jlbl-fwd-right">Fwd-R</span>
-                  <span class="jlbl jlbl-fwd-left">Fwd-L</span>
-                  <span class="jlbl jlbl-back-right">Back-R</span>
-                  <span class="jlbl jlbl-back-left">Back-L</span>
-                </div>
               </div>
               <div class="joystick-label" id="joystick-label">Wheels — WASD</div>
             </div>
@@ -157,15 +146,37 @@
               <div class="cam-joystick-label" id="cam-joystick-label">Camera — Arrows</div>
             </div>
           </div>
-          <!-- Speed Slider -->
-          <div class="drive-separator"></div>
+        </div>
+      </div>
+
+      <!-- Speed (motor only) -->
+      <div class="card">
+        <div class="card-title collapsible-header open" data-target="speed-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            Speed
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="speed-body">
           <div class="slider-row">
-            <label>Motor Speed</label>
+            <label>Motor</label>
             <input type="range" id="speed-slider" min="0" max="100" value="50">
             <span class="val" id="speed-val">50%</span>
           </div>
-          <!-- Servo Controls -->
-          <div class="drive-separator"></div>
+        </div>
+      </div>
+
+      <!-- Servo Control -->
+      <div class="card">
+        <div class="card-title collapsible-header open" data-target="servo-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><line x1="14" y1="9" x2="20" y2="9"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="15" x2="20" y2="15"/></svg>
+            Servo Control<span class="hw-missing-tag" id="servo-missing-tag" style="display:none">Модуль не найден</span>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="servo-body">
           <div id="servo-controls">
             <div class="servo-grid" id="servo-grid"></div>
             <div class="servo-home-row">
@@ -180,7 +191,7 @@
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            IMU Sensor (MPU6050)<span class="hw-missing-tag" id="mpu-missing-tag" style="display:none">Module not found</span>
+            IMU Sensor (MPU6050)<span class="hw-missing-tag" id="mpu-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -214,7 +225,7 @@
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Headlights<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Module not found</span>
+            Headlights<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -234,7 +245,7 @@
         <div class="card-title collapsible-header open" data-target="led-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="20" height="4" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
-            LED Strip<span class="hw-missing-tag" id="led-missing-tag" style="display:none">Module not found</span>
+            LED Strip<span class="hw-missing-tag" id="led-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -272,7 +283,7 @@
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
-            Buzzer<span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none">Module not found</span>
+            Buzzer<span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -282,6 +293,7 @@
               <button class="gbtn" data-buzzer="beep">Beep</button>
               <button class="gbtn" data-buzzer="alarm">Alarm</button>
               <button class="gbtn" data-buzzer="birthday">Birthday</button>
+              <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
           </div>
         </div>
@@ -296,14 +308,14 @@
   <div class="info-layout">
     <div class="info-sidebar" id="info-sidebar">
       <div class="info-nav">
-        <button class="info-nav-btn active" data-doc="overview">Обзор</button>
-        <button class="info-nav-btn" data-doc="pinout">Распиновка</button>
+        <button class="info-nav-btn active" data-doc="overview">Overview</button>
+        <button class="info-nav-btn" data-doc="pinout">Pinout</button>
       </div>
-      <div class="info-nav-sep">Компоненты</div>
+      <div class="info-nav-sep">Components</div>
       <div id="info-component-nav"></div>
     </div>
     <div class="info-main" id="info-main">
-      <div class="info-loading">Загрузка документации...</div>
+      <div class="info-loading">Loading documentation...</div>
     </div>
   </div>
 </div>

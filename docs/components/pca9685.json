@@ -24,135 +24,57 @@
     {
       "pin_name": "VCC",
       "connected_to": "Raspberry Pi 3.3V (Pin 1) or 5V (Pin 2/4)",
-      "function": "Logic power supply",
-      "function_ru": "Питание логики"
+      "function": "Logic power supply"
     },
     {
       "pin_name": "V+",
       "connected_to": "5V Servo Power Rail (external supply recommended)",
-      "function": "Servo motor power supply (separate from logic)",
-      "function_ru": "Питание сервоприводов (отдельно от логики)"
+      "function": "Servo motor power supply (separate from logic)"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "function": "Common ground"
     },
     {
       "pin_name": "SDA",
       "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
-      "function": "I2C data line",
-      "function_ru": "Линия данных I2C"
+      "function": "I2C data line"
     },
     {
       "pin_name": "SCL",
       "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
-      "function": "I2C clock line",
-      "function_ru": "Линия тактирования I2C"
+      "function": "I2C clock line"
     },
     {
       "pin_name": "OE",
       "connected_to": "Active LOW — tied to GND (always enabled) or GPIO for enable/disable",
-      "function": "Output enable (active low)",
-      "function_ru": "Разрешение выхода (активный низкий)"
+      "function": "Output enable (active low)"
     },
     {
       "pin_name": "A0-A5",
       "connected_to": "Address select jumpers — all LOW for 0x40",
-      "function": "I2C address configuration (6-bit programmable)",
-      "function_ru": "Конфигурация адреса I2C (6 бит)"
+      "function": "I2C address configuration (6-bit programmable)"
     },
     {
       "pin_name": "PWM0",
       "connected_to": "Steering servo",
-      "function": "Front wheel steering (30=right, 90=center, 150=left)",
-      "function_ru": "Рулевое управление (30=право, 90=центр, 150=лево)"
+      "function": "Front wheel steering (30=right, 90=center, 150=left)"
     },
     {
       "pin_name": "PWM1",
       "connected_to": "Camera pan servo",
-      "function": "Camera horizontal pan",
-      "function_ru": "Горизонтальное панорамирование камеры"
+      "function": "Camera horizontal pan"
     },
     {
       "pin_name": "PWM2",
       "connected_to": "Camera tilt servo",
-      "function": "Camera vertical tilt",
-      "function_ru": "Вертикальный наклон камеры"
+      "function": "Camera vertical tilt"
     }
   ],
   "i2c_address": "0x40",
-  "i2c_address_alternates": [
-    "0x41",
-    "0x42",
-    "0x43",
-    "0x44",
-    "0x45",
-    "0x46",
-    "0x47",
-    "0x48",
-    "0x49",
-    "0x4A",
-    "0x4B",
-    "0x4C",
-    "0x4D",
-    "0x4E",
-    "0x4F",
-    "0x50",
-    "0x51",
-    "0x52",
-    "0x53",
-    "0x54",
-    "0x55",
-    "0x56",
-    "0x57",
-    "0x58",
-    "0x59",
-    "0x5A",
-    "0x5B",
-    "0x5C",
-    "0x5D",
-    "0x5E",
-    "0x5F",
-    "0x60",
-    "0x61",
-    "0x62",
-    "0x63",
-    "0x64",
-    "0x65",
-    "0x66",
-    "0x67",
-    "0x68",
-    "0x69",
-    "0x6A",
-    "0x6B",
-    "0x6C",
-    "0x6D",
-    "0x6E",
-    "0x6F",
-    "0x70",
-    "0x71",
-    "0x72",
-    "0x73",
-    "0x74",
-    "0x75",
-    "0x76",
-    "0x77",
-    "0x78",
-    "0x79",
-    "0x7A",
-    "0x7B",
-    "0x7C",
-    "0x7D",
-    "0x7E",
-    "0x7F"
-  ],
-  "related_modules": [
-    "servo",
-    "camera",
-    "steering"
-  ],
+  "i2c_address_alternates": ["0x41", "0x42", "0x43", "0x44", "0x45", "0x46", "0x47", "0x48", "0x49", "0x4A", "0x4B", "0x4C", "0x4D", "0x4E", "0x4F", "0x50", "0x51", "0x52", "0x53", "0x54", "0x55", "0x56", "0x57", "0x58", "0x59", "0x5A", "0x5B", "0x5C", "0x5D", "0x5E", "0x5F", "0x60", "0x61", "0x62", "0x63", "0x64", "0x65", "0x66", "0x67", "0x68", "0x69", "0x6A", "0x6B", "0x6C", "0x6D", "0x6E", "0x6F", "0x70", "0x71", "0x72", "0x73", "0x74", "0x75", "0x76", "0x77", "0x78", "0x79", "0x7A", "0x7B", "0x7C", "0x7D", "0x7E", "0x7F"],
+  "related_modules": ["servo", "camera", "steering"],
   "tips": [
     "Always use an external 5V power supply for servos — do not power them from the Raspberry Pi's 5V pin to avoid brownouts.",
     "The default I2C address 0x40 is set with all address jumpers (A0-A5) open/LOW. Solder jumpers to change the address.",
@@ -168,18 +90,5 @@
     "Вывод OE (разрешение выхода) активен низким уровнем. Подключите к GND для включения всех выходов или к GPIO для программного управления.",
     "Каждый ШИМ-канал имеет независимые регистры ON и OFF, что позволяет сдвигать фазы для снижения пиковых токов.",
     "12-битное разрешение при 50 Гц даёт ~0.6 мкс на шаг — более чем достаточно для позиционирования сервоприводов."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic": "Напряжение логики",
-    "voltage_output": "Выходное напряжение",
-    "interface": "Интерфейс",
-    "i2c_speed": "Скорость I2C",
-    "resolution": "Разрешение",
-    "channels": "Каналы",
-    "pwm_frequency": "Частота ШИМ",
-    "current_per_output": "Ток на выход",
-    "operating_temp": "Рабочая температура",
-    "package": "Корпус"
-  }
+  ]
 }

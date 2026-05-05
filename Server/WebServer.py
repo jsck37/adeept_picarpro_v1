@@ -306,9 +306,7 @@ state = SharedState()
 # ═════════════════════════════════════════════════════════════════════════════
 
 def oled_update_loop():
-    """Update OLED every 1.5 seconds with IP, port, CPU, RAM.
-    Line 4 is always the scrolling marquee (handled by OLEDDisplay internally).
-    """
+    """Update OLED every 1.5 seconds with IP, port, CPU, RAM (line 4 is scrolling text)."""
     ip = get_ip_address()
     port = FLASK_PORT
 
@@ -317,12 +315,12 @@ def oled_update_loop():
             info = SystemInfo.get_all()
             ram = info['ram']
 
+            line1 = f"{ip}:{port}"
+            line2 = f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%"
+            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"
+
             if state.oled:
-                state.oled.show_status(
-                    ip, port,
-                    info['cpu_temp'], info['cpu_usage'],
-                    ram['used_mb'], ram['total_mb'], ram['percent'],
-                )
+                state.oled.set_lines([line1, line2, line3])
         except Exception as e:
             print(f"[OLED] Update error: {e}")
 
@@ -448,6 +446,11 @@ def process_command(data):
             result = {'ok': True, 'cmd': cmd, 'melody': melody}
         else:
             result['error'] = f'Unknown melody. Use: {", ".join(melody_map.keys())}'
+
+    elif cmd == 'buzzer_stop':
+        state.buzzer.stop()
+        state.module_runner.set_command("Buzzer Stop")
+        result = {'ok': True, 'cmd': cmd}
 
     elif cmd == 'switch':
         switch_id = int(params.get('id', 0))

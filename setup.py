@@ -382,8 +382,10 @@ def stage_3_apt_packages(debian_ver, codename):
     # FIX: Removed python3-pyaudio (no audio input hardware, requires PortAudio)
     # FIX: Removed python3-pigpio (not used, gpiozero handles everything)
     # FIX: Packages adjusted for Trixie compatibility
+    # FIX: Added fonts-noto-color-emoji for module icon display in web UI
     all_packages = [
         "i2c-tools", "python3-smbus", "python3-gpiozero",
+        "fonts-noto-color-emoji",
     ]
 
     # Camera packages — different names on different Debian versions
@@ -464,6 +466,13 @@ def stage_5_hardware_config():
     run_cmd("raspi-config nonint do_spi 0", critical=False)
     run_cmd("raspi-config nonint do_camera 0", critical=False)
 
+    # FIX: Mask rpi-setup-resize service — it tries to resize root partition
+    # on every boot and fails if partition is already expanded, causing error on startup
+    # mask is stronger than disable — it symlinkes to /dev/null so the unit cannot
+    # be started even manually, preventing the "failed" status on boot
+    run_cmd("systemctl mask rpi-setup-resize.service 2>/dev/null || true", critical=False)
+    run_cmd("systemctl stop rpi-setup-resize.service 2>/dev/null || true", critical=False)
+
     config_path = get_boot_config_path()
     print(f"  {DIM}[*]{RST} Tuning {config_path}...")
 
@@ -471,7 +480,7 @@ def stage_5_hardware_config():
     append_to_config("i2c_arm_baudrate", "dtparam=i2c_arm_baudrate=400000", config_path)
     # NOTE: Do NOT add spi0-0cs overlay — it claims GPIO 8 and 11,
     # which conflict with the HC-SR04 ultrasonic sensor (Echo=GPIO8, Trig=GPIO11).
-    # WS2812 uses rpi_ws281x (PWM/DMA on GPIO 10) instead of SPI.
+    # WS2812 uses rpi_ws281x (PWM/DMA on GPIO 12) instead of SPI.
     append_to_config("gpu_mem=", "gpu_mem=128", config_path)
 
     debian_ver = get_debian_version()

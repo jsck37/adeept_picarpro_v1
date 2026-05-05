@@ -8,21 +8,21 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from Server.hardware.servos import ServoController
-from Server.config import SERVO_PAN
+from Server.config import SERVO_CAM_PAN
 
 
 def main():
-    print("[Servo Sweep] Sweeping servo channel 0 (Pan)...")
+    print("[Servo Sweep] Sweeping camera pan servo...")
     print("  Press Ctrl+C to stop.")
     servos = ServoController()
 
     try:
         while True:
             for angle in range(0, 181, 5):
-                servos.set_angle(SERVO_PAN, angle)
+                servos.set_angle(SERVO_CAM_PAN, angle)
                 time.sleep(0.03)
             for angle in range(180, -1, -5):
-                servos.set_angle(SERVO_PAN, angle)
+                servos.set_angle(SERVO_CAM_PAN, angle)
                 time.sleep(0.03)
     except KeyboardInterrupt:
         pass

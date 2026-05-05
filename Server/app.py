@@ -222,6 +222,11 @@ def create_app(state):
             return jsonify({"ok": True, "melody": melody})
         return jsonify({"ok": False, "error": "Unknown melody"}), 400
 
+    @app.route("/cmd/buzzer_stop", methods=["POST"])
+    def cmd_buzzer_stop():
+        state.buzzer.stop()
+        return jsonify({"ok": True})
+
     @app.route("/cmd/switch", methods=["POST"])
     def cmd_switch():
         data = request.get_json(silent=True) or {}

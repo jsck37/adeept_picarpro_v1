@@ -1,12 +1,13 @@
 """
 WS2812 RGB LED strip control via rpi_ws281x (PWM/DMA).
-Uses GPIO 10 for data — standard RobotHat configuration.
+Uses GPIO 12 for data — matches original Adeept PiCar Pro RobotHat configuration.
 
-Why rpi_ws281x instead of SPI (spidev):
-- SPI claims GPIO 8 (CS0) and GPIO 11 (SCLK), which conflict with
-  the HC-SR04 ultrasonic sensor (Echo=GPIO8, Trig=GPIO11)
-- rpi_ws281x uses DMA/PWM on GPIO 10 only — no SPI conflict
-- This is the same approach used by the original Adeept software
+GPIO 12 = PWM0 (BCM 12, pin 32 on 40-pin header)
+This is the same pin used by the original Adeept software.
+
+Note: We do NOT use SPI mode — SPI claims GPIO 8/11 which conflict with
+the HC-SR04 ultrasonic sensor (Echo=GPIO8, Trig=GPIO11).
+rpi_ws281x uses DMA/PWM and only needs GPIO 12.
 
 Requires: rpi_ws281x (pip install rpi_ws281x), root access for DMA
 """
@@ -17,7 +18,8 @@ from Server.config import LED_COUNT, LED_BRIGHTNESS
 
 
 # WS2812 configuration for rpi_ws281x
-LED_PIN = 10        # GPIO 10 (SPI0_MOSI on RobotHat)
+# GPIO 12 = PWM0 — matches original Adeept PiCar Pro RobotHat
+LED_PIN = 12
 LED_FREQ_HZ = 800000
 LED_DMA = 10
 LED_INVERT = False

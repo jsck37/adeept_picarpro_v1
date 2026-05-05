@@ -27,65 +27,52 @@
     {
       "pin_name": "VDD",
       "connected_to": "Raspberry Pi 3.3V (Pin 1)",
-      "function": "Power supply (3.3V)",
-      "function_ru": "Питание (3.3В)"
+      "function": "Power supply (3.3V)"
     },
     {
       "pin_name": "VLOGIC",
       "connected_to": "Raspberry Pi 3.3V (Pin 1)",
-      "function": "Logic level voltage (3.3V for I2C compatibility)",
-      "function_ru": "Напряжение логики (3.3В для совместимости I2C)"
+      "function": "Logic level voltage (3.3V for I2C compatibility)"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "function": "Common ground"
     },
     {
       "pin_name": "SCL",
       "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
-      "function": "I2C clock line",
-      "function_ru": "Линия тактирования I2C"
+      "function": "I2C clock line"
     },
     {
       "pin_name": "SDA",
       "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
-      "function": "I2C data line",
-      "function_ru": "Линия данных I2C"
+      "function": "I2C data line"
     },
     {
       "pin_name": "INT",
       "connected_to": "Optional — can connect to any GPIO for data-ready interrupt",
-      "function": "Interrupt output (data ready, motion detect, FIFO overflow)",
-      "function_ru": "Выход прерывания (данные готовы, обнаружение движения, переполнение FIFO)"
+      "function": "Interrupt output (data ready, motion detect, FIFO overflow)"
     },
     {
       "pin_name": "AD0",
       "connected_to": "GND for address 0x68, VDD for address 0x69",
-      "function": "I2C address select (LSB)",
-      "function_ru": "Выбор адреса I2C (младший бит)"
+      "function": "I2C address select (LSB)"
     },
     {
       "pin_name": "XDA",
       "connected_to": "Not connected (secondary I2C bus for external magnetometer)",
-      "function": "Secondary I2C SDA (for MPU9150 compass bypass)",
-      "function_ru": "Вторичный I2C SDA (для обхода компаса MPU9150)"
+      "function": "Secondary I2C SDA (for MPU9150 compass bypass)"
     },
     {
       "pin_name": "XCL",
       "connected_to": "Not connected (secondary I2C bus for external magnetometer)",
-      "function": "Secondary I2C SCL (for MPU9150 compass bypass)",
-      "function_ru": "Вторичный I2C SCL (для обхода компаса MPU9150)"
+      "function": "Secondary I2C SCL (for MPU9150 compass bypass)"
     }
   ],
   "i2c_address": "0x68",
-  "i2c_address_alternates": [
-    "0x69"
-  ],
-  "related_modules": [
-    "imu"
-  ],
+  "i2c_address_alternates": ["0x69"],
+  "related_modules": ["imu"],
   "tips": [
     "The WHO_AM_I register (0x75) should return 0x68 — use this to verify I2C communication is working.",
     "Calibrate the sensor at power-on: take ~1000 readings with the device stationary, then store offsets for accelerometer and gyroscope.",
@@ -103,21 +90,5 @@
     "Установите делитель частоты дискретизации (регистр 0x19) и DLPF (регистр 0x1A) в зависимости от задачи. Для робототехники хорошая отправная точка — 100 Гц с DLPF=3 (полоса 44 Гц).",
     "Буфер FIFO (1024 байта) может накапливать данные датчиков и считываться пакетами, снижая нагрузку на шину I2C.",
     "Вывод AD0 задаёт адрес I2C: LOW = 0x68, HIGH = 0x69. Большинство модулей имеют джампер для этого."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic": "Напряжение логики",
-    "interface": "Интерфейс",
-    "i2c_speed": "Скорость I2C",
-    "accelerometer_range": "Диапазон акселерометра",
-    "gyroscope_range": "Диапазон гироскопа",
-    "accelerometer_resolution": "Разрешение акселерометра",
-    "gyroscope_resolution": "Разрешение гироскопа",
-    "adc_resolution": "Разрешение АЦП",
-    "sample_rate": "Частота выборки",
-    "fifo_size": "Размер FIFO",
-    "dmp": "DMP (процессор движения)",
-    "operating_temp": "Рабочая температура",
-    "package": "Корпус"
-  }
+  ]
 }

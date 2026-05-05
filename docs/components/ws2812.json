@@ -24,33 +24,27 @@
     {
       "pin_name": "VDD",
       "connected_to": "5V Power Rail (external supply recommended for >10 LEDs)",
-      "function": "LED power supply (5V)",
-      "function_ru": "Питание светодиодов (5В)"
+      "function": "LED power supply (5V)"
     },
     {
       "pin_name": "DIN",
       "connected_to": "Raspberry Pi GPIO 10 / SPI0 MOSI (Pin 19)",
-      "function": "Serial data input — receives color data from SPI MOSI",
-      "function_ru": "Вход последовательных данных от SPI MOSI"
+      "function": "Serial data input — receives color data from SPI MOSI"
     },
     {
       "pin_name": "DOUT",
       "connected_to": "DIN of next LED in chain",
-      "function": "Serial data output — forwards data to next LED",
-      "function_ru": "Выход данных — передача следующему светодиоду"
+      "function": "Serial data output — forwards data to next LED"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground (must be shared with Raspberry Pi)",
-      "function_ru": "Common ground (must be shared with Raspberry Pi)"
+      "function": "Common ground (must be shared with Raspberry Pi)"
     }
   ],
   "i2c_address": null,
   "i2c_address_alternates": [],
-  "related_modules": [
-    "led"
-  ],
+  "related_modules": ["led"],
   "tips": [
     "The SPI0 MOSI output is 3.3V, but WS2812B data input expects ~0.7 × VDD = 3.5V at 5V supply. A logic level shifter (3.3V → 5V) is recommended for reliable operation, though many setups work without one at shorter wire lengths.",
     "To drive WS2812B via SPI, set SPI clock to approximately 3.2 MHz (800 kHz × 4 bits per data bit). Each LED byte is encoded as 4 SPI bytes (3 = high bit, 2 = low bit for typical encoding).",
@@ -72,18 +66,5 @@
     "Добавьте резистор 300–500 Ом на линию DIN между Raspberry Pi и первым светодиодом для предотвращения звона сигнала.",
     "Добавьте конденсатор 100–1000 мкФ параллельно источнику питания рядом со светодиодами для компенсации скачков тока при смене цветов.",
     "Популярные библиотеки Python: rpi_ws281x (нативная), neopixel (Adafruit) или пользовательские драйверы на основе spidev для режима SPI."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic_data": "Напряжение логики (данные)",
-    "interface": "Интерфейс",
-    "data_rate": "Скорость данных",
-    "color_depth": "Глубина цвета",
-    "led_count": "Количество светодиодов",
-    "current_per_led": "Current Per Led",
-    "data_protocol": "Протокол данных",
-    "color_order": "Порядок цветов",
-    "operating_temp": "Рабочая температура",
-    "viewing_angle": "Угол обзора"
-  }
+  ]
 }

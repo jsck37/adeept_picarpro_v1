@@ -1,7 +1,8 @@
 /* ========== RESET & BASE ========== */
+@font-face{font-family:'Noto Color Emoji';src:url('/fonts/NotoColorEmoji.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:16px;-webkit-text-size-adjust:100%}
-body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f0f2f5;color:#202124;line-height:1.5;min-height:100vh;overflow-x:hidden}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji';background:#f0f2f5;color:#202124;line-height:1.5;min-height:100vh;overflow-x:hidden}
 button{font-family:inherit;cursor:pointer;border:none;outline:none}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;height:18px;width:18px;border-radius:50%;background:#1a73e8;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2);margin-top:-7px}
@@ -66,9 +67,6 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 /* ========== DUAL JOYSTICK ROW ========== */
 .dual-joystick-row{display:flex;justify-content:center;align-items:flex-start;gap:24px;flex-wrap:wrap}
 
-/* ========== DRIVE CARD SEPARATOR ========== */
-.drive-separator{height:1px;background:#e0e0e0;margin:10px 0}
-
 /* ========== WHEEL JOYSTICK ========== */
 .joystick-area{display:flex;flex-direction:column;align-items:center;gap:6px}
 .joystick-container{width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,#2d2d2d 0%,#1a1a1a 100%);box-shadow:inset 0 2px 8px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.2);position:relative;touch-action:none;user-select:none}
@@ -81,18 +79,6 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .joystick-knob:active,.joystick-knob.dragging{cursor:grabbing;box-shadow:0 2px 16px rgba(26,115,232,.7),inset 0 1px 2px rgba(255,255,255,.3)}
 .joystick-knob.spring-back{transition:transform .3s cubic-bezier(.25,.46,.45,.94)}
 .joystick-label{font-size:.72rem;color:#5f6368;text-align:center;font-weight:500}
-
-/* ========== WHEEL JOYSTICK DIRECTION LABELS ========== */
-.joystick-labels{position:absolute;inset:0;pointer-events:none;font-size:.5rem;color:rgba(255,255,255,.22);font-weight:600}
-.jlbl{position:absolute}
-.jlbl-fwd{top:4px;left:50%;transform:translateX(-50%)}
-.jlbl-back{bottom:4px;left:50%;transform:translateX(-50%)}
-.jlbl-left{left:3px;top:50%;transform:translateY(-50%)}
-.jlbl-right{right:3px;top:50%;transform:translateY(-50%)}
-.jlbl-fwd-right{top:12px;right:5px}
-.jlbl-fwd-left{top:12px;left:5px}
-.jlbl-back-right{bottom:12px;right:5px}
-.jlbl-back-left{bottom:12px;left:5px}
 
 /* ========== CAMERA JOYSTICK ========== */
 .cam-joystick-container{width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,#2d2d2d 0%,#1a1a1a 100%);box-shadow:inset 0 2px 8px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.2);position:relative;touch-action:none;user-select:none}
@@ -169,7 +155,7 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .module-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .module-card.running{border-color:#34a853;background:#f0faf3}
 .module-header{display:flex;align-items:center;gap:10px}
-.module-icon{width:38px;height:38px;border-radius:8px;background:#e8f0fe;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.module-icon{width:38px;height:38px;border-radius:8px;background:#e8f0fe;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;font-family:'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif}
 .module-info h3{font-size:.88rem;font-weight:600;color:#202124}
 .module-info p{font-size:.75rem;color:#5f6368;margin-top:1px}
 .module-tags{display:flex;flex-wrap:wrap;gap:3px}

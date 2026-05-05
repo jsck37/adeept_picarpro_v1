@@ -25,35 +25,27 @@
     {
       "pin_name": "VCC",
       "connected_to": "Raspberry Pi 3.3V (Pin 1)",
-      "function": "Logic power supply (3.3V)",
-      "function_ru": "Logic power supply (3.3V)"
+      "function": "Logic power supply (3.3V)"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "function": "Common ground"
     },
     {
       "pin_name": "SCL",
       "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
-      "function": "I2C clock line",
-      "function_ru": "Линия тактирования I2C"
+      "function": "I2C clock line"
     },
     {
       "pin_name": "SDA",
       "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
-      "function": "I2C data line",
-      "function_ru": "Линия данных I2C"
+      "function": "I2C data line"
     }
   ],
   "i2c_address": "0x3C",
-  "i2c_address_alternates": [
-    "0x3D"
-  ],
-  "related_modules": [
-    "oled"
-  ],
+  "i2c_address_alternates": ["0x3D"],
+  "related_modules": ["oled"],
   "tips": [
     "Common I2C addresses are 0x3C (SA0=0) or 0x3D (SA0=1). Check your module's solder jumper to confirm.",
     "The display uses page-based addressing: 8 pages of 128 bytes each. Each byte controls 8 vertical pixels.",
@@ -71,19 +63,5 @@
     "Для плавной анимации используйте двойную буферизацию: рендерите в буфер в ОЗУ, затем записывайте весь буфер на дисплей.",
     "При 400 кГц I2C полное обновление экрана занимает примерно 2 мс — достаточно быстро для обновления статуса в реальном времени.",
     "Используйте библиотеки Python luma.oled или Adafruit_SSD1306 для простой интеграции."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic": "Напряжение логики",
-    "interface": "Интерфейс",
-    "i2c_speed": "Скорость I2C",
-    "resolution": "Разрешение",
-    "color_depth": "Глубина цвета",
-    "display_size": "Размер дисплея",
-    "pixel_format": "Формат пикселей",
-    "ram_size": "Размер ОЗУ",
-    "i2c_mode": "Режим I2C",
-    "operating_temp": "Рабочая температура",
-    "package": "Корпус"
-  }
+  ]
 }

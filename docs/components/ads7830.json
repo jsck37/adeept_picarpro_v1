@@ -26,109 +26,87 @@
     {
       "pin_name": "VDD",
       "connected_to": "Raspberry Pi 3.3V (Pin 1) or 5V (Pin 2/4)",
-      "function": "Power supply",
-      "function_ru": "Питание"
+      "function": "Power supply"
     },
     {
       "pin_name": "GND",
       "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "function": "Common ground"
     },
     {
       "pin_name": "SDA",
       "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
-      "function": "I2C data line",
-      "function_ru": "Линия данных I2C"
+      "function": "I2C data line"
     },
     {
       "pin_name": "SCL",
       "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
-      "function": "I2C clock line",
-      "function_ru": "Линия тактирования I2C"
+      "function": "I2C clock line"
     },
     {
       "pin_name": "CH0",
       "connected_to": "Battery voltage divider output",
-      "function": "Analog input — battery voltage monitoring",
-      "function_ru": "Аналоговый вход — мониторинг батареи"
+      "function": "Analog input — battery voltage monitoring"
     },
     {
       "pin_name": "CH1",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH2",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH3",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH4",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH5",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH6",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "CH7",
       "connected_to": "Not connected / spare",
-      "function": "Analog input — available for expansion",
-      "function_ru": "Аналоговый вход — доступно для расширения"
+      "function": "Analog input — available for expansion"
     },
     {
       "pin_name": "VREF",
       "connected_to": "VDD (using internal reference) or external reference",
-      "function": "Reference voltage for ADC conversion",
-      "function_ru": "Опорное напряжение для АЦП"
+      "function": "Reference voltage for ADC conversion"
     },
     {
       "pin_name": "COM",
       "connected_to": "GND",
-      "function": "Common analog input (single-ended mode reference)",
-      "function_ru": "Общий аналоговый вход (опорный для одиночного режима)"
+      "function": "Common analog input (single-ended mode reference)"
     },
     {
       "pin_name": "A0",
       "connected_to": "Address jumper — LOW for 0x48",
-      "function": "I2C address bit 0",
-      "function_ru": "Бит 0 адреса I2C"
+      "function": "I2C address bit 0"
     },
     {
       "pin_name": "A1",
       "connected_to": "Address jumper — LOW for 0x48",
-      "function": "I2C address bit 1",
-      "function_ru": "Бит 1 адреса I2C"
+      "function": "I2C address bit 1"
     }
   ],
   "i2c_address": "0x48",
-  "i2c_address_alternates": [
-    "0x49",
-    "0x4A",
-    "0x4B"
-  ],
-  "related_modules": [
-    "battery"
-  ],
+  "i2c_address_alternates": ["0x49", "0x4A", "0x4B"],
+  "related_modules": ["battery"],
   "tips": [
     "Use a voltage divider to measure battery voltages above VDD. For a 2S LiPo (7.4V–8.4V), use a 1:2 divider with 10kΩ + 10kΩ resistors.",
     "At 8-bit resolution with VREF=3.3V, each LSB equals ~12.9 mV. With a 1:2 divider, battery resolution is ~25.8 mV per step.",
@@ -144,20 +122,5 @@
     "Для мониторинга батареи обычно используется одиночный режим на CH0: командный байт = 0x8C (CH0, одиночный, внутренний ИОН).",
     "ADS7830 можно настроить для одиночных или дифференциальных входов — одиночный режим проще для измерения напряжения.",
     "Подтягивающие резисторы (4.7кОм) необходимы на линиях SDA и SCL, если они ещё не установлены на шине I2C."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic": "Напряжение логики",
-    "voltage_analog_input": "Напряжение аналогового входа",
-    "interface": "Интерфейс",
-    "i2c_speed": "Скорость I2C",
-    "resolution": "Разрешение",
-    "channels": "Каналы",
-    "sampling_rate": "Частота дискретизации",
-    "input_impedance": "Входное сопротивление",
-    "reference_voltage": "Опорное напряжение",
-    "power_consumption": "Потребляемая мощность",
-    "operating_temp": "Рабочая температура",
-    "package": "Корпус"
-  }
+  ]
 }

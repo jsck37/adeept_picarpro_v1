@@ -87,12 +87,13 @@ ULTRASONIC_ECHO = 8
 ULTRASONIC_MAX_DISTANCE = 2.0  # meters
 
 # =============================================================================
-# WS2812 LED Strip — uses rpi_ws281x (DMA/PWM on GPIO 10)
+# WS2812 LED Strip — uses rpi_ws281x (DMA/PWM on GPIO 12)
+# GPIO 12 = PWM0 — matches original Adeept PiCar Pro RobotHat
 # NOT using SPI — SPI claims GPIO 8/11, conflicting with ultrasonic sensor
 # =============================================================================
 LED_COUNT = 16
 LED_BRIGHTNESS = 255
-# LED_PIN = 10 is defined in hardware/leds_ws2812.py (rpi_ws281x config)
+# LED_PIN = 12 is defined in hardware/leds_ws2812.py (rpi_ws281x config)
 
 # =============================================================================
 # GPIO Switches (2-port LED/headlight)
@@ -116,8 +117,14 @@ LINE_RIGHT_PIN = 19
 # Buzzer — connects to RobotHat 3-pin port (GPIO 5)
 # In Adeept PiCar Pro: buzzer plugs into the 3-pin connector
 # where wire colors match (port 0/3 on RobotHat = GPIO 5)
+#
+# BUZZER_GPIO_DIRECT: Set to a GPIO pin number to use a passive buzzer
+# connected directly to that GPIO (e.g., GPIO 24). Set to None or 0 to
+# use the RobotHat TonalBuzzer on BUZZER_PIN instead.
+# Free GPIO pins on Pi 3B+: 24, 25, 7, 12 (if LED not using), 23, 22, 9, 10
 # =============================================================================
 BUZZER_PIN = 5
+BUZZER_GPIO_DIRECT = 24  # Set to e.g. 24 for direct GPIO passive buzzer
 
 # =============================================================================
 # Camera Configuration
@@ -153,9 +160,8 @@ CV_WATCHDOG_BLUR_SIZE = (7, 7)  # GaussianBlur kernel (7x7 vs 21x21 — faster o
 # =============================================================================
 WEBSOCKET_PORT = 8888
 FLASK_PORT = 5000
-# ZMQ and GUI ports kept for reference (not used by current Flask+WS server)
-# ZMQ_PORT = 5555
-# GUI_SERVER_PORT = 10223
+ZMQ_PORT = 5555
+GUI_SERVER_PORT = 10223
 
 # WiFi Hotspot
 HOTSPOT_SSID = "Adeept_Robot"

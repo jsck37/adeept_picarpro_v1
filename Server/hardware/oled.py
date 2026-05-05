@@ -1,18 +1,14 @@
 """
 OLED SSD1306 display module.
-Shows 4 lines: IP:PORT, CPU info, RAM info, command status.
+Shows 4 lines: IP:PORT, CPU info, RAM info, scrolling text.
 
 Display layout (SSD1306 128x64, 4 lines @ 16px each):
 - Line 1: IP:PORT (e.g., "192.168.1.100:5000")
 - Line 2: CPU: temp°C usage%
-- Line 3: RAM: used/total GB percent%
-- Line 4: Command status (running module or last command)
+- Line 3: RAM: used/total MB percent%
+- Line 4: Scrolling marquee text ("modded by turik from 8241117 <3")
 
-Improvements over v1:
-- Structured 4-line display matching original PiCar Pro pattern
-- Thread-safe updates
-- Proper shutdown
-- No battery display (not all hardware has ADS7830)
+The 4th line is always the scrolling marquee — no program status shown.
 """
 
 import threading
@@ -21,11 +17,10 @@ from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
 
 
 class OLEDDisplay:
-    """SSD1306 OLED display controller with auto-refresh and scrolling marquee."""
+    """SSD1306 OLED display controller with auto-refresh and scrolling text."""
 
-    # Marquee text for line 4
-    MARQUEE_TEXT = "modded by turik from 8241117 <3"
-    MARQUEE_WIDTH = 21  # Max visible chars per line at 12pt
+    SCROLL_TEXT = "modded by turik from 8241117 <3"
+    SCROLL_WIDTH = 21  # visible chars per line at 12pt
 
     def __init__(self):
         self._device = None
@@ -34,7 +29,9 @@ class OLEDDisplay:
         self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._refresh_loop, daemon=True)
         self._initialized = False
-        self._marquee_pos = 0
+        self._scroll_pos = 0
+        self._scroll_text = self.SCROLL_TEXT
+        self._scroll_pad = "   "  # spacing between repetitions
 
         try:
             from luma.core.interface.serial import i2c
@@ -44,7 +41,7 @@ class OLEDDisplay:
             self._device = ssd1306(serial, width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             self._thread.start()
-            print("[OLED] Display initialized (4-line mode)")
+            print("[OLED] Display initialized (scrolling text mode)")
         except Exception as e:
             print(f"[OLED] Failed to initialize: {e}")
 
@@ -60,23 +57,17 @@ class OLEDDisplay:
             for i, line in enumerate(lines[:4]):
                 self._lines[i] = str(line)[:21]
 
-    def _scroll_text(self, text, pos):
-        """Get visible window of scrolling text at given position.
-        Adds 3-space gap between repeats for readability.
-        """
-        if len(text) <= self.MARQUEE_WIDTH:
-            return text  # Short enough — no scrolling needed
-        padded = text + "   "  # 3-space gap between repeats
-        total = len(padded)
-        pos = pos % total
-        result = padded[pos:pos + self.MARQUEE_WIDTH]
-        # Wrap around if needed
-        if len(result) < self.MARQUEE_WIDTH:
-            result += padded[:self.MARQUEE_WIDTH - len(result)]
-        return result
+    def _get_scroll_window(self):
+        """Get current scrolling text window for line 4."""
+        # Create a long repeated string so scroll wraps seamlessly
+        full = self._scroll_text + self._scroll_pad
+        repeated = full * 3  # repeat 3x for seamless wrap
+        pos = self._scroll_pos % len(full)
+        window = repeated[pos:pos + self.SCROLL_WIDTH]
+        return window
 
     def _refresh_loop(self):
-        """Periodically refresh the OLED display."""
+        """Periodically refresh the OLED display with scrolling text on line 4."""
         from PIL import Image, ImageDraw, ImageFont
 
         while self._running:
@@ -94,24 +85,24 @@ class OLEDDisplay:
                     font = ImageFont.load_default()
 
                 with self._lock:
-                    lines = self._lines[:]
+                    lines = self._lines[:3]  # lines 0-2 (IP, CPU, RAM)
 
-                for i in range(3):
-                    draw.text((0, i * 16), lines[i], fill=255, font=font)
+                # Line 4: scrolling text
+                scroll_line = self._get_scroll_window()
 
-                # Line 4: scrolling marquee
-                marquee_visible = self._scroll_text(self.MARQUEE_TEXT, self._marquee_pos)
-                draw.text((0, 48), marquee_visible, fill=255, font=font)
+                for i, line in enumerate(lines):
+                    draw.text((0, i * 16), line, fill=255, font=font)
+                draw.text((0, 3 * 16), scroll_line, fill=255, font=font)
 
                 self._device.display(image)
 
-                # Advance marquee position
-                self._marquee_pos += 1
+                # Advance scroll position
+                self._scroll_pos += 1
 
             except Exception as e:
                 print(f"[OLED] Refresh error: {e}")
 
-            time.sleep(0.3)  # ~3Hz for smooth scrolling
+            time.sleep(0.3)  # ~3Hz refresh for smooth scrolling
 
     def show_startup(self):
         """Show startup message."""
@@ -122,8 +113,8 @@ class OLEDDisplay:
             "",
         ])
 
-    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent):
-        """Show status display (3 lines). Line 4 is always the scrolling marquee."""
+    def show_status(self, ip, port, cpu_temp, cpu_usage, ram_used_mb, ram_total_mb, ram_percent, command="Ready"):
+        """Show status display (lines 1-3 only; line 4 is always scrolling text)."""
         self.set_lines([
             f"{ip}:{port}",
             f"CPU:{cpu_temp}C {cpu_usage}%",
