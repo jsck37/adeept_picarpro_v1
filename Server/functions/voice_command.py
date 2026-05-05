@@ -1,4 +1,9 @@
-"""Voice command module — Sherpa-NCNN offline speech recognition."""
+"""Voice command module — Sherpa-NCNN offline speech recognition.
+
+Fixed: removed references to servo channels 3/4/6 which don't exist
+on PiCar Pro v1 (only has 3 servos: 0=steering, 1=cam_pan, 2=cam_tilt).
+Now uses only the available servos for voice commands.
+"""
 
 import threading
 import time
@@ -8,38 +13,27 @@ from Server.config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
 
 
 class VoiceCommandController:
-    """Offline voice command recognition via Sherpa-NCNN."""
 
-    # Supported voice commands mapping
+    # Map voice phrases to robot actions.
+    # v1 only has 3 servos: 0=steering, 1=cam_pan, 2=cam_tilt
     COMMAND_MAP = {
         'look left': 'lookLeft',
         'look right': 'lookRight',
         'look left.': 'lookLeft',
         'look right.': 'lookRight',
-        'arm up': 'armUp',
-        'arm down': 'armDown',
-        'arm up.': 'armUp',
-        'arm down.': 'armDown',
-        'hand up': 'handUp',
-        'hand down': 'handDown',
-        'hand up.': 'handUp',
-        'hand down.': 'handDown',
-        'grab': 'grab',
-        'grab.': 'grab',
-        'loose': 'loose',
-        'loose.': 'loose',
+        'camera up': 'camUp',
+        'camera down': 'camDown',
+        'camera up.': 'camUp',
+        'camera down.': 'camDown',
+        'forward': 'forward',
+        'forward.': 'forward',
+        'backward': 'backward',
+        'backward.': 'backward',
         'stop': 'stop',
         'stop.': 'stop',
     }
 
     def __init__(self, servos, motors):
-        """
-        Initialize voice command controller.
-        
-        Args:
-            servos: ServoController instance
-            motors: MotorController instance
-        """
         self.servos = servos
         self.motors = motors
 
@@ -52,7 +46,6 @@ class VoiceCommandController:
         self._initialized = False
         self._last_command = ""
 
-        # Check if sherpa-ncnn is available
         sherpa_binary = os.path.join(
             os.path.dirname(VOICE_MODEL_PATH), "..", "sherpa-ncnn-alsa"
         )
@@ -61,52 +54,35 @@ class VoiceCommandController:
             self._sherpa_binary = sherpa_binary
             self._initialized = True
             self._thread.start()
-            print("[Voice] Sherpa-NCNN voice control initialized")
+            print("[Voice] Sherpa-NCNN initialized")
         else:
             print("[Voice] Sherpa-NCNN not found - voice control disabled")
-            print(f"[Voice] Expected binary: {sherpa_binary}")
-            print(f"[Voice] Expected model: {VOICE_MODEL_PATH}")
 
     def start(self):
-        """Start voice recognition."""
         if not self._initialized:
             return
-
         self._active = True
         self._start_sherpa()
         self._flag.set()
-        print("[Voice] Recognition started")
 
     def stop(self):
-        """Stop voice recognition."""
         self._active = False
         self._flag.clear()
         self._stop_sherpa()
 
     def _start_sherpa(self):
-        """Start the Sherpa-NCNN recognition process."""
         if self._sherpa_process is not None:
             return
-
         try:
-            cmd = [
-                self._sherpa_binary,
-                VOICE_MODEL_PATH,
-                VOICE_ALSA_DEVICE,
-            ]
-
             with open(VOICE_OUTPUT_FILE, 'w') as f:
                 self._sherpa_process = subprocess.Popen(
-                    cmd,
-                    stdout=f,
-                    stderr=subprocess.DEVNULL,
+                    [self._sherpa_binary, VOICE_MODEL_PATH, VOICE_ALSA_DEVICE],
+                    stdout=f, stderr=subprocess.DEVNULL,
                 )
-            print("[Voice] Sherpa-NCNN process started")
         except Exception as e:
             print(f"[Voice] Failed to start Sherpa-NCNN: {e}")
 
     def _stop_sherpa(self):
-        """Stop the Sherpa-NCNN recognition process."""
         if self._sherpa_process is not None:
             try:
                 self._sherpa_process.terminate()
@@ -119,68 +95,52 @@ class VoiceCommandController:
             self._sherpa_process = None
 
     def _run(self):
-        """Main voice recognition loop."""
         while self._running:
             self._flag.wait()
             if not self._running:
                 break
-
             try:
                 self._read_and_execute()
-            except Exception as e:
-                print(f"[Voice] Error: {e}")
-
+            except Exception:
+                pass
             time.sleep(0.2)
 
     def _read_and_execute(self):
-        """Read the latest recognition result and execute command."""
         try:
             if not os.path.exists(VOICE_OUTPUT_FILE):
                 return
-
             with open(VOICE_OUTPUT_FILE, 'r') as f:
                 content = f.read().strip().lower()
-
             if not content or content == self._last_command:
                 return
-
             self._last_command = content
-
-            # Find matching command
             for key, command in self.COMMAND_MAP.items():
                 if key in content:
                     self._execute_command(command)
                     break
-
         except Exception:
             pass
 
     def _execute_command(self, command):
-        """Execute a recognized voice command."""
         print(f"[Voice] Command: {command}")
-
+        # Servo 0 = steering, 1 = cam_pan, 2 = cam_tilt
         if command == 'lookLeft':
             self.servos.move_angle(0, -30)
         elif command == 'lookRight':
             self.servos.move_angle(0, 30)
-        elif command == 'armUp':
-            self.servos.move_angle(3, 15)
-        elif command == 'armDown':
-            self.servos.move_angle(3, -15)
-        elif command == 'handUp':
-            self.servos.move_angle(4, 15)
-        elif command == 'handDown':
-            self.servos.move_angle(4, -15)
-        elif command == 'grab':
-            self.servos.move_angle(6, 30)
-        elif command == 'loose':
-            self.servos.move_angle(6, -30)
+        elif command == 'camUp':
+            self.servos.move_angle(2, 15)    # cam_tilt up
+        elif command == 'camDown':
+            self.servos.move_angle(2, -15)   # cam_tilt down
+        elif command == 'forward':
+            self.motors.move(40, 'forward', 'no', 0.5)
+        elif command == 'backward':
+            self.motors.move(40, 'backward', 'no', 0.5)
         elif command == 'stop':
             self.motors.stop()
 
     def shutdown(self):
-        """Clean shutdown."""
         self.stop()
         self._running = False
         self._flag.set()
-        print("[Voice] Shutdown complete")
+        print("[Voice] Shutdown")

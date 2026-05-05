@@ -1,8 +1,8 @@
-# PiCar Pro — Python Dependencies
+# PiCar Pro v1 — Python Dependencies
 # Install: pip3 install -r requirements.txt
 # On Debian 12+: pip3 install --break-system-packages -r requirements.txt
 
-# I2C / Motor / Servo
+# I2C / Servo
 adafruit-circuitpython-pca9685
 adafruit-circuitpython-motor
 adafruit-circuitpython-busdevice
@@ -10,7 +10,7 @@ adafruit-circuitpython-busdevice
 # OLED Display
 luma.oled
 
-# WS2812 LED Strip (primary: rpi_ws281x DMA/PWM; fallback: spidev)
+# WS2812 LED Strip
 rpi_ws281x
 spidev
 
@@ -21,8 +21,11 @@ websockets
 
 # Vision / Video
 numpy
-psutil
 pillow
 
-# IMU Sensor (optional — MPU6050 hardware driver uses smbus from apt)
+# IMU Sensor (optional — also uses smbus from apt package python3-smbus)
 mpu6050-raspberrypi
+
+# GPIO (usually pre-installed on Raspberry Pi OS)
+# RPi.GPIO
+# gpiozero

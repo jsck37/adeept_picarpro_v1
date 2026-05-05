@@ -1,4 +1,4 @@
-"""WS2812 RGB LED strip via rpi_ws281x (DMA/PWM on GPIO 12)."""
+"""WS2812 RGB LED strip via rpi_ws281x (DMA/PWM on GPIO 12) with SPI fallback."""
 
 import time
 import threading
@@ -24,6 +24,7 @@ class LEDController:
         self._flag = threading.Event()
         self._flag.set()
         self._initialized = False
+        self._pixels = [(0, 0, 0)] * LED_COUNT
         self._init_strip()
 
     def _init_strip(self):
@@ -34,7 +35,6 @@ class LEDController:
                 LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL
             )
             self._strip.begin()
-            self._pixels = [(0, 0, 0)] * LED_COUNT
             self._initialized = True
             print(f"[LEDs] WS2812: {LED_COUNT} LEDs on GPIO {LED_PIN}")
             self._thread.start()
@@ -52,7 +52,6 @@ class LEDController:
             self._spi.open(0, 0)
             self._spi.max_speed_hz = 4000000
             self._spi.mode = 0
-            self._pixels = [(0, 0, 0)] * LED_COUNT
             self._use_spi = True
             self._initialized = True
             print(f"[LEDs] SPI fallback: {LED_COUNT} LEDs")
@@ -76,12 +75,14 @@ class LEDController:
         if not self._initialized:
             return
         try:
+            brightness = LED_BRIGHTNESS / 255.0
             if self._use_spi:
-                brightness = LED_BRIGHTNESS / 255.0
-                scaled = [(int(r * brightness), int(g * brightness), int(b * brightness)) for r, g, b in self._pixels]
+                scaled = [
+                    (int(r * brightness), int(g * brightness), int(b * brightness))
+                    for r, g, b in self._pixels
+                ]
                 self._spi.writebytes(self._ws2812_spi_encode(scaled))
             else:
-                brightness = LED_BRIGHTNESS / 255.0
                 for i, (r, g, b) in enumerate(self._pixels):
                     self._strip.setPixelColor(
                         i,
@@ -99,7 +100,14 @@ class LEDController:
 
     def fill(self, r, g, b):
         self._pixels = [(r, g, b)] * LED_COUNT
-        self.show()
+        self._show_safe()
+
+    def _show_safe(self):
+        """Show with error handling — safe for animation loops."""
+        try:
+            self.show()
+        except Exception:
+            pass
 
     def clear(self):
         self.fill(0, 0, 0)
@@ -158,7 +166,7 @@ class LEDController:
             for i in range(LED_COUNT):
                 hue = (i * 256 // LED_COUNT + offset) % 256
                 self._pixels[i] = self._wheel(hue)
-            self.show()
+            self._show_safe()
             offset = (offset + 1) % 256
             time.sleep(0.02)
 
@@ -168,7 +176,7 @@ class LEDController:
             for i in range(LED_COUNT):
                 hue = (i * 256 // LED_COUNT + offset) & 255
                 self._pixels[i] = self._wheel(hue)
-            self.show()
+            self._show_safe()
             offset = (offset + 2) % 256
             time.sleep(0.02)
 
@@ -179,13 +187,13 @@ class LEDController:
                 self._pixels[i] = (255, 0, 0)
             for i in range(half, LED_COUNT):
                 self._pixels[i] = (0, 0, 255)
-            self.show()
+            self._show_safe()
             time.sleep(0.15)
             for i in range(half):
                 self._pixels[i] = (0, 0, 255)
             for i in range(half, LED_COUNT):
                 self._pixels[i] = (255, 0, 0)
-            self.show()
+            self._show_safe()
             time.sleep(0.15)
 
     def _animate_color_wipe(self):
@@ -195,7 +203,7 @@ class LEDController:
                 if not self._flag.is_set() or self._mode != "colorWipe":
                     return
                 self._pixels[i] = (r, g, b)
-                self.show()
+                self._show_safe()
                 time.sleep(0.03)
             time.sleep(0.5)
             self.clear()
@@ -217,7 +225,7 @@ class LEDController:
         self._flag.set()
         time.sleep(0.1)
         self.clear()
-        if hasattr(self, '_spi') and self._spi is not None:
+        if self._spi is not None:
             try:
                 self._spi.close()
             except Exception:

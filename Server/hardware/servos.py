@@ -26,7 +26,6 @@ class ServoController:
         self._lock = threading.Lock()
         self._pwm_initialized = False
 
-        # Servo movement threads
         self._servo_threads = [None] * SERVO_COUNT
         self._servo_flags = [threading.Event() for _ in range(SERVO_COUNT)]
         for flag in self._servo_flags:
@@ -35,19 +34,16 @@ class ServoController:
         self._init_pca9685()
 
     def _init_pca9685(self):
-        """Initialize PCA9685 once with safe servo init sequence."""
         try:
             import busio
             from adafruit_pca9685 import PCA9685
             from adafruit_motor import servo as adafruit_servo
 
-            # Create I2C bus and PCA9685 once
-            self._i2c = busio.I2C(3, 2)  # SCL=GPIO3, SDA=GPIO2
+            self._i2c = busio.I2C(3, 2)
             self._pca = PCA9685(self._i2c, address=PCA9685_SERVO_ADDR)
             self._pca.frequency = PCA9685_SERVO_FREQ
-            time.sleep(0.1)  # Settle after frequency change
+            time.sleep(0.1)
 
-            # Create only the servos we need (SERVO_COUNT from config)
             for i in range(SERVO_COUNT):
                 try:
                     self._servos[i] = adafruit_servo.Servo(
@@ -56,33 +52,22 @@ class ServoController:
                         max_pulse=SERVO_MAX_PULSE,
                         actuation_range=180,
                     )
-                    # Set initial position with safe ramp
                     self._servos[i].angle = SERVO_INIT_ANGLE
-                    time.sleep(0.05)  # 50ms between servo inits to prevent I2C overload
+                    time.sleep(0.05)
                 except Exception as e:
-                    print(f"[Servos] Warning: failed to init servo {i}: {e}")
+                    print(f"[Servos] Warning: servo {i} init failed: {e}")
 
             self._pwm_initialized = True
-            print(f"[Servos] PCA9685 initialized at 0x{PCA9685_SERVO_ADDR:02X}, "
-                  f"{SERVO_COUNT} servos at {PCA9685_SERVO_FREQ}Hz (crane disabled)")
+            print(f"[Servos] PCA9685 at 0x{PCA9685_SERVO_ADDR:02X}, "
+                  f"{SERVO_COUNT} servos @ {PCA9685_SERVO_FREQ}Hz")
 
         except Exception as e:
             print(f"[Servos] Failed to initialize PCA9685: {e}")
-            self._pwm_initialized = False
 
     def set_angle(self, servo_id, angle):
-        """
-        Set servo angle directly.
-        
-        Args:
-            servo_id: 0-7 servo channel
-            angle: 0-180 degrees
-        """
         if not self._pwm_initialized or servo_id >= SERVO_COUNT:
             return
-
         angle = max(0, min(180, angle))
-
         with self._lock:
             try:
                 self._servos[servo_id].angle = angle
@@ -91,31 +76,16 @@ class ServoController:
                 print(f"[Servos] Error setting servo {servo_id}: {e}")
 
     def move_angle(self, servo_id, offset):
-        """
-        Move servo by offset from its init position.
-        
-        Args:
-            servo_id: 0-7 servo channel
-            offset: degrees offset from init position (-90 to +90)
-        """
+        """Move servo by offset from its init position."""
+        if servo_id >= SERVO_COUNT:
+            return
         target = self._init_angles[servo_id] + offset
         self.set_angle(servo_id, target)
 
     def single_servo(self, servo_id, direction=1, speed=3):
-        """
-        Continuously move a servo in one direction (for scanning/wiggling).
-        
-        Args:
-            servo_id: 0-7 servo channel
-            direction: 1 for increase, -1 for decrease
-            speed: movement speed (1-10)
-        """
         if not self._pwm_initialized or servo_id >= SERVO_COUNT:
             return
-
-        # Stop existing thread for this servo
         self._stop_servo_thread(servo_id)
-
         flag = self._servo_flags[servo_id]
         flag.set()
 
@@ -123,12 +93,8 @@ class ServoController:
             current = self._angles[servo_id]
             while flag.is_set():
                 current += direction * speed
-                if current >= 180:
-                    current = 180
-                    flag.clear()
-                    break
-                elif current <= 0:
-                    current = 0
+                if current >= 180 or current <= 0:
+                    current = max(0, min(180, current))
                     flag.clear()
                     break
                 self.set_angle(servo_id, current)
@@ -139,24 +105,11 @@ class ServoController:
         t.start()
 
     def smooth_move(self, servo_id, target_angle, steps=10, step_delay=0.02):
-        """
-        Smoothly move a servo to a target angle.
-        
-        Args:
-            servo_id: 0-7 servo channel
-            target_angle: 0-180 target
-            steps: number of interpolation steps
-            step_delay: delay between steps in seconds
-        """
         if not self._pwm_initialized or servo_id >= SERVO_COUNT:
             return
-
         self._stop_servo_thread(servo_id)
-
-        current = self._angles[servo_id]
         target_angle = max(0, min(180, target_angle))
-
-        if abs(current - target_angle) < 1:
+        if abs(self._angles[servo_id] - target_angle) < 1:
             return
 
         def _smooth():
@@ -165,8 +118,7 @@ class ServoController:
             for i in range(1, steps + 1):
                 if not self._servo_flags[servo_id].is_set():
                     break
-                angle = start + delta * i
-                self.set_angle(servo_id, angle)
+                self.set_angle(servo_id, start + delta * i)
                 time.sleep(step_delay)
 
         self._servo_flags[servo_id].set()
@@ -175,38 +127,30 @@ class ServoController:
         t.start()
 
     def move_init(self):
-        """Move all servos to their init positions smoothly."""
         for i in range(SERVO_COUNT):
             self.smooth_move(i, self._init_angles[i], steps=15, step_delay=0.02)
-        print("[Servos] All servos moved to init positions")
+        print("[Servos] All servos at init positions")
 
     def set_init_angle(self, servo_id, angle):
-        """Set and save the init angle for a servo."""
         if 0 <= servo_id < SERVO_COUNT:
             self._init_angles[servo_id] = max(0, min(180, angle))
 
     def get_angle(self, servo_id):
-        """Get current angle of a servo."""
         if 0 <= servo_id < SERVO_COUNT:
             return self._angles[servo_id]
         return 0
 
     def _stop_servo_thread(self, servo_id):
-        """Stop the movement thread for a specific servo."""
         self._servo_flags[servo_id].clear()
         if self._servo_threads[servo_id] is not None:
-            # Give thread time to stop
             time.sleep(0.06)
 
     def stop_all(self):
-        """Stop all servo movement threads."""
         for i in range(SERVO_COUNT):
             self._servo_flags[i].clear()
 
     def shutdown(self):
-        """Clean shutdown - stop all threads, move to init, release PCA9685."""
         self.stop_all()
-        # Move servos to safe position
         if self._pwm_initialized:
             for i in range(SERVO_COUNT):
                 try:
@@ -217,4 +161,4 @@ class ServoController:
                 self._pca.deinit()
             except Exception:
                 pass
-        print("[Servos] Shutdown complete")
+        print("[Servos] Shutdown")

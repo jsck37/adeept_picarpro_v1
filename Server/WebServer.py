@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""PiCar Pro WebServer — Flask (5000) + WebSocket (8888)."""
+"""PiCar Pro WebServer — Flask (5000) + WebSocket (8888).
+
+Optimized version with:
+- Optional ultrasonic sensor (ULTRASONIC_ENABLED flag)
+- Optional line tracker (LINE_TRACKER_ENABLED flag)
+- Robust MPU6050 initialization
+- Fixed buzzer driver (RPi.GPIO + gpiozero fallback)
+- Clean voice commands (only existing servos)
+"""
 
 import asyncio
 import json
@@ -24,6 +32,7 @@ from Server.config import (
     FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
     SERVO_COUNT, SERVO_INIT_ANGLE, CRANE_ENABLED,
     SERVO_STEERING, SWITCH_PINS,
+    ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController
@@ -56,7 +65,7 @@ class ModuleRunner:
             if path is None:
                 return False, f"Module '{module_id}' not found"
             if not os.path.isfile(path):
-                return False, f"Module file not found: {path}"
+                return False, f"File not found: {path}"
             try:
                 self._process = subprocess.Popen(
                     [sys.executable, path],
@@ -182,35 +191,34 @@ class SharedState:
     def get_status(self):
         info = SystemInfo.get_all()
         ram = info['ram']
+        ultra_ok = self.ultrasonic and self.ultrasonic._initialized
+        mpu_ok = self.mpu6050 and self.mpu6050.initialized
+
         return {
             "cpu_temp": info["cpu_temp"],
             "cpu_usage": info["cpu_usage"],
             "ram_percent": ram["percent"],
             "ram_used_mb": ram["used_mb"],
             "ram_total_mb": ram["total_mb"],
-            "ram_used": ram["used"],
-            "ram_total": ram["total"],
-            "distance": self.ultrasonic.get_last_distance() if self.ultrasonic else 0,
-            "mpu6050": self.mpu6050.get_data() if self.mpu6050 and self.mpu6050.initialized else None,
+            "distance": self.ultrasonic.get_last_distance() if ultra_ok else 0,
+            "mpu6050": self.mpu6050.get_data() if mpu_ok else None,
             "cv_mode": self.camera.cv_thread.cv_mode if self.camera else "none",
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
             "running_module": self.module_runner.running_module,
             "speed": self.speed,
             "crane_enabled": CRANE_ENABLED,
+            "ultrasonic_enabled": ULTRASONIC_ENABLED,
+            "line_tracker_enabled": LINE_TRACKER_ENABLED,
             "hw": {
                 "motors":     self.motors._initialized if self.motors else False,
                 "servos":     self.servos._pwm_initialized if self.servos else False,
                 "leds":       self.leds._initialized if self.leds else False,
                 "buzzer":     self.buzzer._initialized if self.buzzer else False,
                 "switches":   self.switches._initialized if self.switches else False,
-                "ultrasonic": self.ultrasonic._initialized if self.ultrasonic else False,
-                "mpu6050":    self.mpu6050.initialized if self.mpu6050 else False,
+                "ultrasonic": ultra_ok,
+                "mpu6050":    mpu_ok,
                 "oled":       self.oled._initialized if self.oled else False,
                 "camera":     self.camera is not None,
-                "autonomous": (self.autonomous is not None
-                                and self.motors._initialized
-                                and self.ultrasonic._initialized)
-                               if self.autonomous else False,
             },
         }
 
@@ -232,7 +240,8 @@ class SharedState:
                 self.camera.shutdown()
             except Exception:
                 pass
-        for hw in (self.servos, self.leds, self.switches, self.ultrasonic, self.buzzer, self.oled, self.mpu6050):
+        for hw in (self.servos, self.leds, self.switches, self.ultrasonic,
+                   self.buzzer, self.oled, self.mpu6050):
             if hw:
                 try:
                     hw.shutdown()
@@ -253,11 +262,11 @@ def oled_update_loop():
             ram = info['ram']
             line1 = f"{ip}:{port}"
             line2 = f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%"
-            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"
+            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M"
             if state.oled:
                 state.oled.set_lines([line1, line2, line3])
-        except Exception as e:
-            print(f"[OLED] Update error: {e}")
+        except Exception:
+            pass
         time.sleep(1.5)
 
 
@@ -352,7 +361,7 @@ def process_command(data):
             state.leds.set_mode(mode, color)
             result = {'ok': True, 'cmd': cmd, 'mode': mode}
         else:
-            result['error'] = f'Invalid mode. Use: {", ".join(valid_modes)}'
+            result['error'] = f'Invalid mode'
 
     elif cmd == 'buzzer':
         melody = params.get('melody', 'beep')
@@ -362,7 +371,7 @@ def process_command(data):
             state.buzzer.play_melody(melody_key)
             result = {'ok': True, 'cmd': cmd, 'melody': melody}
         else:
-            result['error'] = f'Unknown melody. Use: {", ".join(melody_map.keys())}'
+            result['error'] = 'Unknown melody'
 
     elif cmd == 'buzzer_stop':
         state.buzzer.stop()
@@ -393,7 +402,7 @@ def process_command(data):
             state.camera.set_cv_mode(cv_mode)
             result = {'ok': True, 'cmd': cmd, 'mode': mode}
         else:
-            result['error'] = f'Unknown mode'
+            result['error'] = 'Unknown mode'
 
     elif cmd == 'auto':
         func = params.get('func', 'stop')
@@ -401,11 +410,12 @@ def process_command(data):
         if func in valid_funcs:
             if func == 'stop':
                 state.autonomous.stop()
+                result = {'ok': True, 'cmd': cmd, 'func': func}
             else:
-                state.autonomous.start(func)
-            result = {'ok': True, 'cmd': cmd, 'func': func}
+                ok, msg = state.autonomous.start(func)
+                result = {'ok': ok, 'cmd': cmd, 'func': func, 'message': msg}
         else:
-            result['error'] = f'Unknown function'
+            result['error'] = 'Unknown function'
 
     elif cmd == 'module_start':
         module_id = params.get('id', '')
@@ -453,7 +463,6 @@ def process_command(data):
 async def ws_handler(websocket, path=None):
     state.ws_clients.add(websocket)
     client_id = id(websocket)
-    print(f"[WS] Client connected: {client_id} (total: {len(state.ws_clients)})")
 
     try:
         status = state.get_status()
@@ -468,16 +477,19 @@ async def ws_handler(websocket, path=None):
                 result = process_command(data)
                 await websocket.send(json.dumps({'type': 'response', 'data': result}))
             except json.JSONDecodeError:
-                await websocket.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': 'Invalid JSON'}}))
+                await websocket.send(json.dumps(
+                    {'type': 'response', 'data': {'ok': False, 'error': 'Invalid JSON'}}
+                ))
             except Exception as e:
-                await websocket.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': str(e)}}))
+                await websocket.send(json.dumps(
+                    {'type': 'response', 'data': {'ok': False, 'error': str(e)}}
+                ))
     except websockets.exceptions.ConnectionClosed:
         pass
-    except Exception as e:
-        print(f"[WS] Handler error: {e}")
+    except Exception:
+        pass
     finally:
         state.ws_clients.discard(websocket)
-        print(f"[WS] Client disconnected: {client_id} (total: {len(state.ws_clients)})")
 
 
 async def status_broadcast():
@@ -490,13 +502,11 @@ async def status_broadcast():
                 for ws in state.ws_clients:
                     try:
                         await ws.send(msg)
-                    except websockets.exceptions.ConnectionClosed:
-                        disconnected.add(ws)
                     except Exception:
                         disconnected.add(ws)
                 state.ws_clients -= disconnected
-            except Exception as e:
-                print(f"[WS] Broadcast error: {e}")
+            except Exception:
+                pass
         await asyncio.sleep(1.5)
 
 
@@ -505,7 +515,8 @@ def start_flask_thread():
     app = create_app(state)
 
     def run_flask():
-        app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True, debug=False, use_reloader=False)
+        app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True,
+                debug=False, use_reloader=False)
 
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
@@ -517,7 +528,7 @@ def main():
     global state
 
     print("=" * 55)
-    print("  PiCar Pro Server (Flask + WebSocket)")
+    print("  PiCar Pro Server v1 (Flask + WebSocket)")
     print("=" * 55)
 
     if not HAS_WEBSOCKETS:
@@ -525,27 +536,37 @@ def main():
         sys.exit(1)
 
     print("[WebServer] Initializing hardware...")
+
+    # Always available
     state.motors = MotorController()
     state.servos = ServoController()
     state.leds = LEDController()
-    state.ultrasonic = UltrasonicSensor()
     state.switches = SwitchController()
     state.oled = OLEDDisplay()
     state.buzzer = BuzzerController()
 
+    # MPU6050 — may not be connected, handles gracefully
     try:
         state.mpu6050 = MPU6050Controller()
     except Exception as e:
-        print(f"[WebServer] MPU6050 not available: {e}")
+        print(f"[WebServer] MPU6050 error: {e}")
 
-    state.autonomous = AutonomousController(state.motors, state.servos, state.ultrasonic)
+    # Ultrasonic — optional, controlled by ULTRASONIC_ENABLED flag
+    state.ultrasonic = UltrasonicSensor()
 
+    # Autonomous controller — adapts to available hardware
+    state.autonomous = AutonomousController(
+        state.motors, state.servos, state.ultrasonic
+    )
+
+    # Voice — optional, disabled if Sherpa-NCNN not found
     try:
         from Server.functions.voice_command import VoiceCommandController
         state.voice = VoiceCommandController(state.servos, state.motors)
     except Exception:
         pass
 
+    # Servo calibration
     saved_cal = load_servo_cal()
     for i, angle in enumerate(saved_cal):
         if 0 <= i < SERVO_COUNT:
@@ -556,6 +577,7 @@ def main():
     except Exception as e:
         print(f"[WebServer] Servo init warning: {e}")
 
+    # OLED startup message
     if state.oled:
         ip = get_ip_address()
         state.oled.set_lines([f"{ip}:{FLASK_PORT}", "Starting...", "", ""])
@@ -572,6 +594,15 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Print hardware status summary
+    print("-" * 55)
+    print(f"  Ultrasonic: {'ON' if state.ultrasonic._initialized else 'OFF'}")
+    print(f"  MPU6050:    {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")
+    print(f"  Buzzer:     {'ON' if state.buzzer._initialized else 'OFF'}")
+    print(f"  LineTrack:  {'ON' if LINE_TRACKER_ENABLED else 'OFF'}")
+    print(f"  OLED:       {'ON' if state.oled._initialized else 'OFF'}")
+    print("-" * 55)
 
     print(f"[WebServer] WebSocket on port {WEBSOCKET_PORT}...")
 

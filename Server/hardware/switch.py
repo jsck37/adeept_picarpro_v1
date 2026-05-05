@@ -1,4 +1,4 @@
-"""Headlight switch control via gpiozero (GPIO 6, 13)."""
+"""Headlight switch control via gpiozero."""
 
 from Server.config import SWITCH_PINS
 

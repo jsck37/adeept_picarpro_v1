@@ -20,8 +20,14 @@ class MotorController:
     def _init_motors(self):
         try:
             from gpiozero import Motor
-            self._motor_a = Motor(forward=MOTOR_A_IN1, backward=MOTOR_A_IN2, enable=MOTOR_A_EN, pwm=True)
-            self._motor_b = Motor(forward=MOTOR_B_IN1, backward=MOTOR_B_IN2, enable=MOTOR_B_EN, pwm=True)
+            self._motor_a = Motor(
+                forward=MOTOR_A_IN1, backward=MOTOR_A_IN2,
+                enable=MOTOR_A_EN, pwm=True
+            )
+            self._motor_b = Motor(
+                forward=MOTOR_B_IN1, backward=MOTOR_B_IN2,
+                enable=MOTOR_B_EN, pwm=True
+            )
             self._initialized = True
             print("[Motors] GPIO motors initialized")
         except Exception as e:

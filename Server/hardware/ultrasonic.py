@@ -1,8 +1,15 @@
-"""HC-SR04 ultrasonic distance sensor with median filtering."""
+"""HC-SR04 ultrasonic distance sensor with median filtering.
+
+When ULTRASONIC_ENABLED=False in config, this becomes a no-op stub
+that always returns 0 and never touches GPIO pins.
+"""
 
 import time
 import threading
-from Server.config import ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
+from Server.config import (
+    ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
+    ULTRASONIC_MAX_DISTANCE,
+)
 
 
 class UltrasonicSensor:
@@ -12,6 +19,10 @@ class UltrasonicSensor:
         self._last_distance = 0.0
         self._lock = threading.Lock()
         self._initialized = False
+
+        if not ULTRASONIC_ENABLED:
+            print("[Ultra] DISABLED in config (no sensor present)")
+            return
 
         try:
             from gpiozero import DistanceSensor
@@ -41,8 +52,7 @@ class UltrasonicSensor:
                     self._last_distance = round(median, 1)
                 return self._last_distance
             return self._last_distance
-        except Exception as e:
-            print(f"[Ultra] Read error: {e}")
+        except Exception:
             return self._last_distance
 
     def get_last_distance(self):

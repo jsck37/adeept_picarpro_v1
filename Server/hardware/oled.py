@@ -7,7 +7,7 @@ from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
 
 class OLEDDisplay:
 
-    SCROLL_TEXT = "modded by turik from 8241117 <3"
+    SCROLL_TEXT = "modded by turik <3 from 8241117 "
     SCROLL_WIDTH = 21
 
     def __init__(self):
@@ -18,8 +18,6 @@ class OLEDDisplay:
         self._thread = threading.Thread(target=self._refresh_loop, daemon=True)
         self._initialized = False
         self._scroll_pos = 0
-        self._scroll_text = self.SCROLL_TEXT
-        self._scroll_pad = "   "
 
         try:
             from luma.core.interface.serial import i2c
@@ -28,7 +26,7 @@ class OLEDDisplay:
             self._device = ssd1306(serial, width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             self._thread.start()
-            print("[OLED] Initialized (scrolling text)")
+            print("[OLED] Initialized")
         except Exception as e:
             print(f"[OLED] Init failed: {e}")
 
@@ -43,7 +41,7 @@ class OLEDDisplay:
                 self._lines[i] = str(line)[:21]
 
     def _get_scroll_window(self):
-        full = self._scroll_text + self._scroll_pad
+        full = self.SCROLL_TEXT
         repeated = full * 3
         pos = self._scroll_pos % len(full)
         return repeated[pos:pos + self.SCROLL_WIDTH]
@@ -60,7 +58,9 @@ class OLEDDisplay:
                 image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
                 draw = ImageDraw.Draw(image)
                 try:
-                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+                    font = ImageFont.truetype(
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12
+                    )
                 except Exception:
                     font = ImageFont.load_default()
 
