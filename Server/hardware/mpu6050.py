@@ -6,6 +6,8 @@ Key fixes vs original:
 - Re-initialization on persistent I2C errors
 - Background retry when sensor is not connected at startup
 - Configurable sample rate divider and DLPF
+- Tries both addresses 0x68 and 0x69 (AD0 LOW / HIGH)
+- Fixed: _read_signed_word() was missing addr parameter in test read
 """
 
 import math
@@ -27,6 +29,9 @@ GYRO_SCALE  = 131.0     # +/- 250 deg/s
 RETRY_INTERVAL = 5.0     # seconds between re-init attempts
 READ_INTERVAL  = 0.1     # 10 Hz read rate
 MAX_ERRORS     = 20      # re-init after this many consecutive errors
+
+# Possible I2C addresses
+POSSIBLE_ADDRS = [0x68, 0x69]
 
 
 class MPU6050Controller:
@@ -52,22 +57,27 @@ class MPU6050Controller:
     # ── Initialization ──────────────────────────────────────────────────
 
     def _init_sensor(self):
-        if self._init_package():
-            return
-        if self._init_smbus():
-            return
+        # Try the configured address first, then alternatives
+        for addr in [self._addr] + [a for a in POSSIBLE_ADDRS if a != self._addr]:
+            if self._init_package(addr):
+                return
+            if self._init_smbus(addr):
+                return
         print("[MPU6050] Not found on I2C. Will retry in background.")
         self._running = True
         self._thread = threading.Thread(target=self._retry_loop, daemon=True)
         self._thread.start()
 
-    def _init_package(self):
+    def _init_package(self, addr=None):
         """Initialize using mpu6050-raspberrypi package."""
+        if addr is None:
+            addr = self._addr
         try:
             from mpu6050 import mpu6050 as MPU6050Driver
-            sensor = MPU6050Driver(self._addr, bus=I2C_BUS)
+            sensor = MPU6050Driver(addr, bus=I2C_BUS)
             accel = sensor.get_accel_data()
             if accel:
+                self._addr = addr
                 self._sensor = sensor
                 self._initialized = True
                 self._use_package = True
@@ -76,49 +86,64 @@ class MPU6050Controller:
                     target=self._read_loop_package, daemon=True
                 )
                 self._thread.start()
-                print(f"[MPU6050] Package driver OK at 0x{self._addr:02X}")
+                print(f"[MPU6050] Package driver OK at 0x{addr:02X}")
                 return True
         except ImportError:
-            print("[MPU6050] mpu6050-raspberrypi not installed, trying smbus")
+            if addr == self._addr:
+                print("[MPU6050] mpu6050-raspberrypi not installed, trying smbus")
         except Exception as e:
-            print(f"[MPU6050] Package init failed: {e}")
+            print(f"[MPU6050] Package init failed at 0x{addr:02X}: {e}")
         return False
 
-    def _init_smbus(self):
+    def _init_smbus(self, addr=None):
         """Raw smbus I2C with proper wake-up.
 
         The #1 reason MPU6050 "doesn't work" is that the chip ships in
         SLEEP mode. Writing 0x00 to PWR_MGMT_1 (0x6B) wakes it up and
         selects PLL with X-gyro reference as the clock source.
         """
+        if addr is None:
+            addr = self._addr
         try:
             import smbus
             bus = smbus.SMBus(I2C_BUS)
 
-            # 1. Wake up — clear SLEEP bit
-            bus.write_byte_data(self._addr, REG_PWR_MGMT_1, 0x00)
+            # 1. Try to detect chip at this address
+            try:
+                who_am_i = bus.read_byte_data(addr, REG_WHO_AM_I)
+            except Exception as e:
+                print(f"[MPU6050] No response at 0x{addr:02X}: {e}")
+                return False
+
+            if who_am_i not in (0x68, 0x72, 0x71):
+                print(f"[MPU6050] WHO_AM_I=0x{who_am_i:02X} at 0x{addr:02X} — unexpected")
+                return False
+
+            # 2. Wake up — clear SLEEP bit
+            bus.write_byte_data(addr, REG_PWR_MGMT_1, 0x00)
             time.sleep(0.1)  # 100ms for oscillator to stabilize
 
-            # 2. Verify chip identity
-            who_am_i = bus.read_byte_data(self._addr, REG_WHO_AM_I)
-            if who_am_i not in (0x68, 0x72, 0x71):
-                print(f"[MPU6050] WHO_AM_I=0x{who_am_i:02X} — unexpected")
+            # 3. Verify chip is awake by re-reading WHO_AM_I
+            who_am_i2 = bus.read_byte_data(addr, REG_WHO_AM_I)
+            if who_am_i2 != who_am_i:
+                print(f"[MPU6050] WHO_AM_I changed after wake-up, unstable")
 
-            # 3. Sample rate: 1kHz / (1+7) = 125 Hz
-            bus.write_byte_data(self._addr, REG_SMPLRT_DIV, 0x07)
+            # 4. Sample rate: 1kHz / (1+7) = 125 Hz
+            bus.write_byte_data(addr, REG_SMPLRT_DIV, 0x07)
 
-            # 4. DLPF: ~44 Hz bandwidth
-            bus.write_byte_data(self._addr, REG_CONFIG, 0x03)
+            # 5. DLPF: ~44 Hz bandwidth
+            bus.write_byte_data(addr, REG_CONFIG, 0x03)
 
-            # 5. Gyro: +/- 250 deg/s
-            bus.write_byte_data(self._addr, REG_GYRO_CONFIG, 0x00)
+            # 6. Gyro: +/- 250 deg/s
+            bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)
 
-            # 6. Accel: +/- 2g
-            bus.write_byte_data(self._addr, REG_ACCEL_CONFIG, 0x00)
+            # 7. Accel: +/- 2g
+            bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00)
 
-            # 7. Test read
-            _ = self._read_signed_word(bus, 0x3B)
+            # 8. Test read — FIXED: was missing addr parameter
+            _ = self._read_signed_word(bus, addr, 0x3B)
 
+            self._addr = addr
             self._bus = bus
             self._initialized = True
             self._running = True
@@ -126,12 +151,12 @@ class MPU6050Controller:
                 target=self._read_loop_smbus, daemon=True
             )
             self._thread.start()
-            print(f"[MPU6050] smbus driver OK at 0x{self._addr:02X} "
+            print(f"[MPU6050] smbus driver OK at 0x{addr:02X} "
                   f"(WHO_AM_I=0x{who_am_i:02X})")
             return True
 
         except Exception as e:
-            print(f"[MPU6050] smbus init failed: {e}")
+            print(f"[MPU6050] smbus init failed at 0x{addr:02X}: {e}")
         return False
 
     # ── I2C helper ──────────────────────────────────────────────────────
@@ -209,9 +234,10 @@ class MPU6050Controller:
     def _retry_loop(self):
         while self._running and not self._initialized:
             time.sleep(RETRY_INTERVAL)
-            if self._init_package() or self._init_smbus():
-                print("[MPU6050] Re-initialized successfully!")
-                return
+            for addr in POSSIBLE_ADDRS:
+                if self._init_package(addr) or self._init_smbus(addr):
+                    print("[MPU6050] Re-initialized successfully!")
+                    return
 
     def _reinit_smbus(self):
         self._initialized = False

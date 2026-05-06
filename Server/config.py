@@ -28,14 +28,26 @@ MOTOR_B_IN1 = 27
 MOTOR_B_IN2 = 18
 
 # ── Servos ──────────────────────────────────────────────────────────────
-SERVO_COUNT = 3
+SERVO_COUNT = 6                # 0=steering, 1=cam pan, 2=cam tilt, 3=unused, 4=claw arm, 5=claw grip
 SERVO_MIN_PULSE = 500
 SERVO_MAX_PULSE = 2400
 SERVO_INIT_ANGLE = 90
 SERVO_STEERING = 0
 SERVO_CAM_PAN = 1
 SERVO_CAM_TILT = 2
-CRANE_ENABLED = False
+SERVO_CLAW_ARM = 4             # Crane arm up/down (RobotHat ch4)
+SERVO_CLAW_GRIP = 5            # Claw open/close (RobotHat ch5)
+CRANE_ENABLED = True           # Claw crane is now connected
+
+# ── Crane/Claw angle limits ─────────────────────────────────────────────
+CLAW_ARM_UP = 30               # Arm raised position
+CLAW_ARM_DOWN = 120             # Arm lowered position
+CLAW_GRIP_OPEN = 60            # Claw open (released)
+CLAW_GRIP_CLOSED = 130         # Claw closed (grabbed)
+
+# ── Buzzer ──────────────────────────────────────────────────────────────
+BUZZER_PIN = 24
+BUZZER_PASSIVE = False         # Active buzzer on RobotHat v1
 
 # ── Ultrasonic HC-SR04 (only used when ULTRASONIC_ENABLED=True) ────────
 ULTRASONIC_TRIGGER = 11
@@ -53,9 +65,6 @@ SWITCH_PINS = [6, 13]
 LINE_LEFT_PIN = 20
 LINE_MIDDLE_PIN = 16
 LINE_RIGHT_PIN = 19
-
-# ── Buzzer ──────────────────────────────────────────────────────────────
-BUZZER_PIN = 24
 
 # ── Camera ──────────────────────────────────────────────────────────────
 CAMERA_RESOLUTION = (640, 480)

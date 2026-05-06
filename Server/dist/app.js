@@ -7,6 +7,8 @@ var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
+  { id: 4, name: 'Claw Arm', min: 0,  max: 180, init: 90 },
+  { id: 5, name: 'Claw Grip', min: 0, max: 180, init: 90 },
 ];
 
 // ── State ──
@@ -20,7 +22,7 @@ var moveThrottle = 0;
 var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
   switches: false, ultrasonic: false, mpu6050: false,
-  oled: false, camera: false, autonomous: false,
+  oled: false, camera: false, autonomous: false, crane: false,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -65,6 +67,7 @@ function updateHardwareUI(hardwareStatus) {
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
   toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
+  toggleHwSection('card-claw', 'claw-missing-tag', hw.crane);
 }
 
 function toggleHwSection(cardId, tagId, available) {
@@ -138,7 +141,7 @@ function sendCommand(cmd, params) {
       'move': '/cmd/move', 'speed': '/cmd/speed', 'servo': '/cmd/servo',
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
-      'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto',
+      'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'claw': '/cmd/claw',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -408,22 +411,22 @@ function arrowCamUpdate() {
   var newTilt = camTiltAngle;
   if (left)  newPan  = Math.max(0,  camPanAngle  - CAM_ARROW_STEP);
   if (right) newPan  = Math.min(180, camPanAngle  + CAM_ARROW_STEP);
-  if (up)    newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
-  if (down)  newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
+  if (up)    newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
+  if (down)  newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
 
   if (newPan !== camPanAngle || newTilt !== camTiltAngle) {
     camPanAngle = newPan;
     camTiltAngle = newTilt;
     var now = Date.now();
     if (now - camThrottle > 60) {
-      sendCommand('servo', { id: 2, angle: camPanAngle });
-      sendCommand('servo', { id: 1, angle: camTiltAngle });
+      sendCommand('servo', { id: 1, angle: camPanAngle });
+      sendCommand('servo', { id: 2, angle: camTiltAngle });
       camThrottle = now;
-      // sync servo sliders (swapped: pan=2, tilt=1)
-      var panSlider = servoGrid.querySelector('[data-servo="2"]');
-      var tiltSlider = servoGrid.querySelector('[data-servo="1"]');
-      if (panSlider) { panSlider.value = camPanAngle; document.getElementById('sv-2').textContent = camPanAngle + '\u00B0'; }
-      if (tiltSlider) { tiltSlider.value = camTiltAngle; document.getElementById('sv-1').textContent = camTiltAngle + '\u00B0'; }
+      // sync servo sliders (pan=servo1, tilt=servo2)
+      var panSlider = servoGrid.querySelector('[data-servo="1"]');
+      var tiltSlider = servoGrid.querySelector('[data-servo="2"]');
+      if (panSlider) { panSlider.value = camPanAngle; document.getElementById('sv-1').textContent = camPanAngle + '\u00B0'; }
+      if (tiltSlider) { tiltSlider.value = camTiltAngle; document.getElementById('sv-2').textContent = camTiltAngle + '\u00B0'; }
     }
     // move camera joystick knob visually
     moveCamKnobToAngles(camPanAngle, camTiltAngle);
@@ -574,21 +577,21 @@ function updateCamJoystick(clientX, clientY) {
   var panRange = 90;
   var tiltRange = 90;
   var newPan = Math.round(90 + (dx / maxR) * panRange);
-  var newTilt = Math.round(90 - (dy / maxR) * tiltRange);
+  var newTilt = Math.round(90 + (dy / maxR) * tiltRange);
   newPan = Math.max(0, Math.min(180, newPan));
   newTilt = Math.max(0, Math.min(180, newTilt));
   camJoystickLabel.textContent = 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
   var now = Date.now();
   if ((newPan !== camPanAngle || newTilt !== camTiltAngle) && now - camThrottle > 100) {
-    sendCommand('servo', { id: 2, angle: newPan });
-    sendCommand('servo', { id: 1, angle: newTilt });
+    sendCommand('servo', { id: 1, angle: newPan });
+    sendCommand('servo', { id: 2, angle: newTilt });
     camPanAngle = newPan;
     camTiltAngle = newTilt;
     camThrottle = now;
     var panSlider = servoGrid.querySelector('[data-servo="1"]');
     var tiltSlider = servoGrid.querySelector('[data-servo="2"]');
-    if (panSlider) { panSlider.value = newPan; document.getElementById('sv-2').textContent = newPan + '\u00B0'; }
-    if (tiltSlider) { tiltSlider.value = newTilt; document.getElementById('sv-1').textContent = newTilt + '\u00B0'; }
+    if (panSlider) { panSlider.value = newPan; document.getElementById('sv-1').textContent = newPan + '\u00B0'; }
+    if (tiltSlider) { tiltSlider.value = newTilt; document.getElementById('sv-2').textContent = newTilt + '\u00B0'; }
   }
 }
 
@@ -689,6 +692,15 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
     } else {
       sendCommand('buzzer', { melody: btn.dataset.buzzer });
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  CLAW CRANE
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('[data-claw]').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    sendCommand('claw', { action: btn.dataset.claw });
   });
 });
 

@@ -16,7 +16,11 @@ import time
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 from Server.camera.camera_opencv import Camera
-from Server.config import FLASK_PORT, DEFAULT_SPEED, SERVO_COUNT, SWITCH_PINS
+from Server.config import (
+    FLASK_PORT, DEFAULT_SPEED, SERVO_COUNT, SWITCH_PINS,
+    CRANE_ENABLED, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
+    CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+)
 from Server.modules import get_module_list
 
 
@@ -152,9 +156,9 @@ def create_app(state):
         elif direction == "backward":
             state.motors.move(state.speed, "backward", "no", 0.5)
         elif direction == "left":
-            state.motors.move(state.speed, "forward", "left", 0.4)
+            state.motors.stop()
         elif direction == "right":
-            state.motors.move(state.speed, "forward", "right", 0.4)
+            state.motors.stop()
         elif direction == "forward_left":
             state.motors.move(state.speed, "forward", "left", 0.3)
         elif direction == "forward_right":
@@ -226,6 +230,26 @@ def create_app(state):
     def cmd_buzzer_stop():
         state.buzzer.stop()
         return jsonify({"ok": True})
+
+    @app.route("/cmd/claw", methods=["POST"])
+    def cmd_claw():
+        if not CRANE_ENABLED:
+            return jsonify({"ok": False, "error": "Crane not enabled"}), 400
+        data = request.get_json(silent=True) or {}
+        action = data.get("action", "")
+        if action == "arm_up":
+            state.servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_UP)
+            return jsonify({"ok": True, "action": action})
+        elif action == "arm_down":
+            state.servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
+            return jsonify({"ok": True, "action": action})
+        elif action == "grip_open":
+            state.servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
+            return jsonify({"ok": True, "action": action})
+        elif action == "grip_close":
+            state.servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
+            return jsonify({"ok": True, "action": action})
+        return jsonify({"ok": False, "error": f"Unknown: {action}"}), 400
 
     @app.route("/cmd/switch", methods=["POST"])
     def cmd_switch():

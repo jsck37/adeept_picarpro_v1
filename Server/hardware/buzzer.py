@@ -1,18 +1,28 @@
-"""Buzzer — plays tones and melodies on an active buzzer via GPIO PWM.
+"""Buzzer — plays tones and melodies on the RobotHat active buzzer.
 
-Supports two drivers (tried in order):
-1. RPi.GPIO software PWM — works on any GPIO pin
-2. gpiozero.TonalBuzzer — simpler API but may conflict with other gpiozero
-   devices on the same pin
+RobotHat v1 uses an ACTIVE buzzer (built-in oscillator ~2-4kHz).
+Active buzzers need only DC power (GPIO HIGH = sound, LOW = silent).
+Sending PWM to an active buzzer creates terrible sound because the
+PWM frequency interferes with the buzzer's internal oscillator.
 
-Common issue on PiCar Pro v1: GPIO 24 is used for the buzzer. If gpiozero
-has already claimed GPIO 24 (e.g. for DistanceSensor echo), RPi.GPIO will
-fail. This module handles that gracefully by trying both drivers.
+Driver order:
+1. RPi.GPIO — simple on/off for active buzzer + PWM for passive buzzer
+2. gpiozero.Buzzer — simpler API for active buzzer only
+
+If you have a PASSIVE buzzer (no internal oscillator), set
+BUZZER_PASSIVE=True in config.py and PWM melodies will be enabled.
 """
 
 import threading
 import time
 from Server.config import BUZZER_PIN
+
+# Set to True if you have a passive buzzer (needs PWM to produce sound)
+# Default: False = active buzzer (just needs DC on/off)
+try:
+    from Server.config import BUZZER_PASSIVE
+except ImportError:
+    BUZZER_PASSIVE = False
 
 
 class BuzzerController:
@@ -43,35 +53,43 @@ class BuzzerController:
         self._flag = threading.Event()
         self._flag.clear()
         self._initialized = False
-        self._driver = None      # 'rpigpio' or 'gpiozero'
+        self._driver = None        # 'rpigpio' or 'gpiozero'
         self._gpio_pin = BUZZER_PIN
-        self._pwm = None         # RPi.GPIO PWM instance
-        self._GPIO = None        # RPi.GPIO module ref
-        self._buzzer = None      # gpiozero.TonalBuzzer instance
+        self._pwm = None           # RPi.GPIO PWM instance (passive mode only)
+        self._GPIO = None          # RPi.GPIO module ref
+        self._buzzer = None        # gpiozero.Buzzer instance
+        self._is_passive = BUZZER_PASSIVE
 
         self._try_rpi_gpio()
         if not self._initialized:
             self._try_gpiozero()
 
     def _try_rpi_gpio(self):
-        """Try RPi.GPIO software PWM — most reliable for active buzzers."""
+        """Try RPi.GPIO — on/off for active, PWM for passive."""
         try:
             import RPi.GPIO as GPIO
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)
             GPIO.setup(self._gpio_pin, GPIO.OUT)
-            initial = GPIO.PWM(self._gpio_pin, 440)
-            initial.start(0)   # Start with 0% duty cycle (silent)
-            self._pwm = initial
+
+            if self._is_passive:
+                # Passive buzzer: start PWM at 440Hz, 0% duty (silent)
+                initial = GPIO.PWM(self._gpio_pin, 440)
+                initial.start(0)
+                self._pwm = initial
+            else:
+                # Active buzzer: start with LOW (silent)
+                GPIO.output(self._gpio_pin, GPIO.LOW)
+
             self._GPIO = GPIO
             self._driver = 'rpigpio'
             self._initialized = True
-            print(f"[Buzzer] RPi.GPIO PWM on GPIO {self._gpio_pin}")
+            mode = "PWM (passive)" if self._is_passive else "on/off (active)"
+            print(f"[Buzzer] RPi.GPIO {mode} on GPIO {self._gpio_pin}")
         except ImportError:
             print("[Buzzer] RPi.GPIO not available")
         except Exception as e:
             print(f"[Buzzer] RPi.GPIO GPIO {self._gpio_pin} failed: {e}")
-            # Pin might be claimed by gpiozero — try cleanup
             self._try_rpi_gpio_cleanup()
 
     def _try_rpi_gpio_cleanup(self):
@@ -83,24 +101,35 @@ class BuzzerController:
             GPIO.cleanup(self._gpio_pin)
             time.sleep(0.05)
             GPIO.setup(self._gpio_pin, GPIO.OUT)
-            initial = GPIO.PWM(self._gpio_pin, 440)
-            initial.start(0)
-            self._pwm = initial
+
+            if self._is_passive:
+                initial = GPIO.PWM(self._gpio_pin, 440)
+                initial.start(0)
+                self._pwm = initial
+            else:
+                GPIO.output(self._gpio_pin, GPIO.LOW)
+
             self._GPIO = GPIO
             self._driver = 'rpigpio'
             self._initialized = True
-            print(f"[Buzzer] RPi.GPIO PWM on GPIO {self._gpio_pin} (after cleanup)")
+            mode = "PWM (passive)" if self._is_passive else "on/off (active)"
+            print(f"[Buzzer] RPi.GPIO {mode} on GPIO {self._gpio_pin} (after cleanup)")
         except Exception as e2:
             print(f"[Buzzer] RPi.GPIO cleanup retry failed: {e2}")
 
     def _try_gpiozero(self):
-        """Fallback: gpiozero TonalBuzzer."""
+        """Fallback: gpiozero Buzzer/TonalBuzzer."""
         try:
-            from gpiozero import TonalBuzzer
-            self._buzzer = TonalBuzzer(self._gpio_pin)
+            if self._is_passive:
+                from gpiozero import TonalBuzzer
+                self._buzzer = TonalBuzzer(self._gpio_pin)
+            else:
+                from gpiozero import Buzzer
+                self._buzzer = Buzzer(self._gpio_pin)
             self._driver = 'gpiozero'
             self._initialized = True
-            print(f"[Buzzer] gpiozero TonalBuzzer on GPIO {self._gpio_pin}")
+            mode = "TonalBuzzer (passive)" if self._is_passive else "Buzzer (active)"
+            print(f"[Buzzer] gpiozero {mode} on GPIO {self._gpio_pin}")
         except Exception as e:
             print(f"[Buzzer] gpiozero fallback failed: {e}")
             print(f"[Buzzer] Buzzer is NOT available on GPIO {self._gpio_pin}")
@@ -139,13 +168,35 @@ class BuzzerController:
                 if note_name == 'REST' or note_name not in self.NOTES:
                     self._note_off()
                 else:
-                    self._note_on(self.NOTES[note_name])
+                    if self._is_passive:
+                        self._note_on_pwm(self.NOTES[note_name])
+                    else:
+                        # Active buzzer: just on/off, same pitch for all notes
+                        self._note_on_active()
                 time.sleep(duration)
         finally:
             self._note_off()
             self._playing = False
 
-    def _note_on(self, freq):
+    # ── Active buzzer control (simple on/off) ───────────────────────────
+
+    def _note_on_active(self):
+        """Turn on active buzzer — just GPIO HIGH."""
+        if self._driver == 'rpigpio' and self._GPIO is not None:
+            try:
+                self._GPIO.output(self._gpio_pin, self._GPIO.HIGH)
+            except Exception:
+                pass
+        elif self._driver == 'gpiozero' and self._buzzer is not None:
+            try:
+                self._buzzer.on()
+            except Exception:
+                pass
+
+    # ── Passive buzzer control (PWM frequency) ──────────────────────────
+
+    def _note_on_pwm(self, freq):
+        """Play a specific frequency on passive buzzer via PWM."""
         if self._driver == 'rpigpio' and self._pwm is not None:
             try:
                 self._pwm.ChangeFrequency(freq)
@@ -159,15 +210,20 @@ class BuzzerController:
             except Exception:
                 pass
 
+    # ── Common off ──────────────────────────────────────────────────────
+
     def _note_off(self):
-        if self._driver == 'rpigpio' and self._pwm is not None:
+        if self._driver == 'rpigpio':
             try:
-                self._pwm.ChangeDutyCycle(0)
+                if self._is_passive and self._pwm is not None:
+                    self._pwm.ChangeDutyCycle(0)
+                elif self._GPIO is not None:
+                    self._GPIO.output(self._gpio_pin, self._GPIO.LOW)
             except Exception:
                 pass
         elif self._driver == 'gpiozero' and self._buzzer is not None:
             try:
-                self._buzzer.stop()
+                self._buzzer.off()
             except Exception:
                 pass
 
@@ -187,7 +243,7 @@ class BuzzerController:
         self._running = False
         self.stop()
         if self._driver == 'rpigpio':
-            if self._pwm is not None:
+            if self._is_passive and self._pwm is not None:
                 try:
                     self._pwm.stop()
                 except Exception:

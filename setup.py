@@ -580,17 +580,99 @@ def main():
     except Exception:
         current_ip = "(error)"
 
+    # Gather system info
+    cpu_info = "Unknown"
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            for line in f:
+                if line.startswith('Model'):
+                    cpu_info = line.split(':')[1].strip()
+                    break
+                elif line.startswith('Hardware'):
+                    cpu_info = line.split(':')[1].strip()
+    except Exception:
+        pass
+
+    mem_total = 0
+    mem_avail = 0
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                parts = line.split()
+                if parts[0] == 'MemTotal:':
+                    mem_total = int(parts[1]) // 1024
+                elif parts[0] == 'MemAvailable:':
+                    mem_avail = int(parts[1]) // 1024
+    except Exception:
+        pass
+    mem_used = mem_total - mem_avail
+
+    disk_info = shutil.disk_usage("/")
+    disk_total_gb = disk_info.total // (1024**3)
+    disk_used_gb = disk_info.used // (1024**3)
+    disk_free_gb = disk_info.free // (1024**3)
+
+    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+    i2c_devices = []
+    try:
+        i2c_result = subprocess.run(
+            "i2cdetect -y 1 2>/dev/null",
+            shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        for line in (i2c_result.stdout or "").split('\n'):
+            for part in line.split():
+                if part.startswith('--') or part.startswith('0'):
+                    continue
+                try:
+                    int(part, 16)
+                    i2c_devices.append(part)
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+
+    kernel_ver = platform.release()
+    arch = platform.machine()
+
     print(f"\n{BOLD}{GRN}{'=' * 55}{RST}")
     print(f"  {BOLD}{GRN}SETUP COMPLETE!{RST}")
     print(f"{BOLD}{GRN}{'=' * 55}{RST}")
-    print(f"  Model: {pi_model}")
-    print(f"  IP:    {current_ip}")
-    print(f"  Path:  {thisPath}")
-    print(f"  Log:   {LOG_FILE}")
     print(f"")
-    print(f"  Start: python3 Server/WebServer.py")
-    print(f"  Web:   http://{current_ip}:5000")
-    print(f"  Reboot: sudo reboot")
+    print(f"  {BOLD}System Information:{RST}")
+    print(f"  Model:    {pi_model}")
+    print(f"  CPU:      {cpu_info}")
+    print(f"  Kernel:   {kernel_ver}")
+    print(f"  Arch:     {arch}")
+    print(f"  OS:       Debian {debian_ver} ({codename})")
+    print(f"  Python:   {py_version}")
+    print(f"")
+    print(f"  {BOLD}Resources:{RST}")
+    print(f"  RAM:      {mem_used}MB / {mem_total}MB ({round(100*mem_used/mem_total if mem_total else 0,1)}%)")
+    print(f"  Disk:     {disk_used_gb}GB / {disk_total_gb}GB ({disk_free_gb}GB free)")
+    print(f"")
+    print(f"  {BOLD}I2C Devices:{RST}")
+    if i2c_devices:
+        print(f"  Found:    {', '.join('0x'+d for d in i2c_devices)}")
+    else:
+        print(f"  No I2C devices detected")
+    print(f"")
+    print(f"  {BOLD}Network:{RST}")
+    print(f"  IP:       {current_ip}")
+    print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
+    print(f"")
+    print(f"  {BOLD}Server:{RST}")
+    print(f"  Path:     {thisPath}")
+    print(f"  Start:    python3 Server/WebServer.py")
+    print(f"  Web:      http://{current_ip}:5000")
+    print(f"  WS:       ws://{current_ip}:8888")
+    print(f"  Service:  picarpro.service (auto-start)")
+    print(f"  Log:      {LOG_FILE}")
+    print(f"")
+    print(f"  {BOLD}Next Steps:{RST}")
+    print(f"  1. Reboot:  {YLW}sudo reboot{RST}")
+    print(f"  2. Open:    {YLW}http://{current_ip}:5000{RST}")
+    print(f"  3. Check:   {YLW}systemctl status picarpro{RST}")
     print(f"{BOLD}{GRN}{'=' * 55}{RST}")
 
     while True:

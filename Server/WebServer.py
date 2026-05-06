@@ -31,7 +31,9 @@ except ImportError:
 from Server.config import (
     FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
     SERVO_COUNT, SERVO_INIT_ANGLE, CRANE_ENABLED,
-    SERVO_STEERING, SWITCH_PINS,
+    SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
+    CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+    SWITCH_PINS,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
 )
 from Server.hardware.motors import MotorController
@@ -53,10 +55,24 @@ from Server.modules import get_module_list, get_module_by_id, get_module_path
 class ModuleRunner:
 
     def __init__(self):
-        self._process = None
+        self._thread = None
         self._current_module = None
         self._lock = threading.Lock()
         self._last_command = "Ready"
+        self._stop_flag = threading.Event()
+
+    def _get_hw_dict(self):
+        """Build hw dict from shared state for injection into modules."""
+        return {
+            'motors':     state.motors,
+            'servos':     state.servos,
+            'leds':       state.leds,
+            'switches':   state.switches,
+            'buzzer':     state.buzzer,
+            'oled':       state.oled,
+            'mpu6050':    state.mpu6050,
+            'ultrasonic':  state.ultrasonic,
+        }
 
     def start(self, module_id):
         with self._lock:
@@ -67,13 +83,13 @@ class ModuleRunner:
             if not os.path.isfile(path):
                 return False, f"File not found: {path}"
             try:
-                self._process = subprocess.Popen(
-                    [sys.executable, path],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    cwd=os.path.dirname(os.path.dirname(os.path.dirname(path))),
-                )
+                self._stop_flag.clear()
                 self._current_module = module_id
                 self._last_command = f"Run: {module_id}"
+                self._thread = threading.Thread(
+                    target=self._run_injected, args=(path,), daemon=True
+                )
+                self._thread.start()
                 return True, f"Started: {module_id}"
             except Exception as e:
                 return False, str(e)
@@ -84,33 +100,46 @@ class ModuleRunner:
             if not os.path.isfile(filepath):
                 return False, f"File not found: {filepath}"
             try:
-                self._process = subprocess.Popen(
-                    [sys.executable, filepath],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                )
+                self._stop_flag.clear()
                 name = os.path.basename(filepath)
                 self._current_module = name
                 self._last_command = f"Run: {name}"
+                self._thread = threading.Thread(
+                    target=self._run_injected, args=(filepath,), daemon=True
+                )
+                self._thread.start()
                 return True, f"Started: {name}"
             except Exception as e:
                 return False, str(e)
 
+    def _run_injected(self, path):
+        """Load module script and call main(hw=...) with injected state."""
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("module_script", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, 'main'):
+                mod.main(hw=self._get_hw_dict())
+            else:
+                print(f"[Module] {path} has no main() function")
+        except Exception as e:
+            print(f"[Module] Error running {path}: {e}")
+        finally:
+            with self._lock:
+                self._current_module = None
+                self._last_command = "Ready"
+
     def stop(self):
         with self._lock:
-            if self._process is not None:
-                self._process.terminate()
-                try:
-                    self._process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
-                    try:
-                        self._process.wait(timeout=2)
-                    except Exception:
-                        pass
-                self._process = None
-                self._current_module = None
-                self._last_command = "Stopped"
+            self._stop_flag.set()
+            if self._thread is not None and self._thread.is_alive():
+                # Modules using hw injection should check stop_flag
+                # or be finite (not infinite loops)
+                self._thread.join(timeout=3)
+            self._thread = None
+            self._current_module = None
+            self._last_command = "Stopped"
 
     def set_command(self, cmd):
         with self._lock:
@@ -119,10 +148,10 @@ class ModuleRunner:
     @property
     def running_module(self):
         with self._lock:
-            if self._process is not None and self._process.poll() is None:
+            if self._thread is not None and self._thread.is_alive():
                 return self._current_module
-            if self._process is not None:
-                self._process = None
+            if self._thread is not None:
+                self._thread = None
                 self._current_module = None
             return None
 
@@ -219,6 +248,7 @@ class SharedState:
                 "mpu6050":    mpu_ok,
                 "oled":       self.oled._initialized if self.oled else False,
                 "camera":     self.camera is not None,
+                "crane":      CRANE_ENABLED,
             },
         }
 
@@ -262,7 +292,7 @@ def oled_update_loop():
             ram = info['ram']
             line1 = f"{ip}:{port}"
             line2 = f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%"
-            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M"
+            line3 = f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"
             if state.oled:
                 state.oled.set_lines([line1, line2, line3])
         except Exception:
@@ -291,9 +321,9 @@ def process_command(data):
         elif direction == 'backward':
             state.motors.move(state.speed, 'backward', 'no', 0.5)
         elif direction == 'left':
-            state.motors.move(state.speed, 'forward', 'left', 0.4)
+            state.motors.stop()
         elif direction == 'right':
-            state.motors.move(state.speed, 'forward', 'right', 0.4)
+            state.motors.stop()
         elif direction == 'forward_left':
             state.motors.move(state.speed, 'forward', 'left', 0.3)
         elif direction == 'forward_right':
@@ -376,6 +406,30 @@ def process_command(data):
     elif cmd == 'buzzer_stop':
         state.buzzer.stop()
         result = {'ok': True, 'cmd': cmd}
+
+    elif cmd == 'claw':
+        if not CRANE_ENABLED:
+            result['error'] = 'Crane not enabled'
+        else:
+            action = params.get('action', '')
+            if action == 'arm_up':
+                state.servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_UP)
+                state.module_runner.set_command("Claw: Arm Up")
+                result = {'ok': True, 'cmd': cmd, 'action': action}
+            elif action == 'arm_down':
+                state.servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
+                state.module_runner.set_command("Claw: Arm Down")
+                result = {'ok': True, 'cmd': cmd, 'action': action}
+            elif action == 'grip_open':
+                state.servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
+                state.module_runner.set_command("Claw: Grip Open")
+                result = {'ok': True, 'cmd': cmd, 'action': action}
+            elif action == 'grip_close':
+                state.servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
+                state.module_runner.set_command("Claw: Grip Close")
+                result = {'ok': True, 'cmd': cmd, 'action': action}
+            else:
+                result['error'] = f'Unknown claw action: {action}'
 
     elif cmd == 'switch':
         switch_id = int(params.get('id', 0))
@@ -602,6 +656,7 @@ def main():
     print(f"  Buzzer:     {'ON' if state.buzzer._initialized else 'OFF'}")
     print(f"  LineTrack:  {'ON' if LINE_TRACKER_ENABLED else 'OFF'}")
     print(f"  OLED:       {'ON' if state.oled._initialized else 'OFF'}")
+    print(f"  Crane:      {'ON' if CRANE_ENABLED else 'OFF'}")
     print("-" * 55)
 
     print(f"[WebServer] WebSocket on port {WEBSOCKET_PORT}...")

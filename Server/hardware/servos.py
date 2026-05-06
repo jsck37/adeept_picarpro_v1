@@ -1,4 +1,13 @@
-"""Servo control — PCA9685 with single instance, smooth movement."""
+"""Servo control — PCA9685 with single instance, smooth movement.
+
+Channels:
+- 0: Steering
+- 1: Camera pan
+- 2: Camera tilt
+- 3: (reserved)
+- 4: Claw arm (up/down)
+- 5: Claw grip (open/close)
+"""
 
 import threading
 import time
@@ -6,17 +15,11 @@ import time
 from Server.config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
+    CRANE_ENABLED,
 )
 
 
 class ServoController:
-    """PCA9685 servo controller.
-
-    Channels:
-    - 0: Steering
-    - 1: Camera pan
-    - 2: Camera tilt
-    """
 
     def __init__(self):
         self._pca = None
@@ -58,14 +61,19 @@ class ServoController:
                     print(f"[Servos] Warning: servo {i} init failed: {e}")
 
             self._pwm_initialized = True
+            active = sum(1 for s in self._servos if s is not None)
             print(f"[Servos] PCA9685 at 0x{PCA9685_SERVO_ADDR:02X}, "
-                  f"{SERVO_COUNT} servos @ {PCA9685_SERVO_FREQ}Hz")
+                  f"{active}/{SERVO_COUNT} servos @ {PCA9685_SERVO_FREQ}Hz")
 
         except Exception as e:
             print(f"[Servos] Failed to initialize PCA9685: {e}")
 
     def set_angle(self, servo_id, angle):
-        if not self._pwm_initialized or servo_id >= SERVO_COUNT:
+        if not self._pwm_initialized:
+            return
+        if servo_id >= SERVO_COUNT:
+            return
+        if self._servos[servo_id] is None:
             return
         angle = max(0, min(180, angle))
         with self._lock:
@@ -128,7 +136,8 @@ class ServoController:
 
     def move_init(self):
         for i in range(SERVO_COUNT):
-            self.smooth_move(i, self._init_angles[i], steps=15, step_delay=0.02)
+            if self._servos[i] is not None:
+                self.smooth_move(i, self._init_angles[i], steps=15, step_delay=0.02)
         print("[Servos] All servos at init positions")
 
     def set_init_angle(self, servo_id, angle):
@@ -153,10 +162,11 @@ class ServoController:
         self.stop_all()
         if self._pwm_initialized:
             for i in range(SERVO_COUNT):
-                try:
-                    self._servos[i].angle = SERVO_INIT_ANGLE
-                except Exception:
-                    pass
+                if self._servos[i] is not None:
+                    try:
+                        self._servos[i].angle = SERVO_INIT_ANGLE
+                    except Exception:
+                        pass
             try:
                 self._pca.deinit()
             except Exception:
