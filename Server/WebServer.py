@@ -35,6 +35,7 @@ from Server.config import (
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
     SWITCH_PINS,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
+    CAMERA_COLOR_FORMAT, DS4_ENABLED,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController
@@ -210,6 +211,7 @@ class SharedState:
         self.autonomous = None
         self.voice = None
         self.camera = None
+        self.ds4 = None
         self.module_runner = ModuleRunner()
         self.ws_clients = set()
 
@@ -232,6 +234,7 @@ class SharedState:
             "distance": self.ultrasonic.get_last_distance() if ultra_ok else 0,
             "mpu6050": self.mpu6050.get_data() if mpu_ok else None,
             "cv_mode": self.camera.cv_thread.cv_mode if self.camera else "none",
+            "color_format": self.camera._color_format if self.camera else CAMERA_COLOR_FORMAT,
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
             "running_module": self.module_runner.running_module,
             "speed": self.speed,
@@ -249,7 +252,9 @@ class SharedState:
                 "oled":       self.oled._initialized if self.oled else False,
                 "camera":     self.camera is not None,
                 "crane":      CRANE_ENABLED,
+                "ds4":        self.ds4.connected if self.ds4 else False,
             },
+            "ds4": self.ds4.get_status() if self.ds4 else None,
         }
 
     def shutdown_hardware(self):
@@ -271,7 +276,7 @@ class SharedState:
             except Exception:
                 pass
         for hw in (self.servos, self.leds, self.switches, self.ultrasonic,
-                   self.buzzer, self.oled, self.mpu6050):
+                   self.buzzer, self.oled, self.mpu6050, self.ds4):
             if hw:
                 try:
                     hw.shutdown()
@@ -458,6 +463,27 @@ def process_command(data):
         else:
             result['error'] = 'Unknown mode'
 
+    elif cmd == 'color_format':
+        fmt = params.get('format', 'rgb2bgr')
+        if fmt in Camera.COLOR_FORMATS:
+            state.init_camera()
+            state.camera.set_color_format(fmt)
+            result = {'ok': True, 'cmd': cmd, 'format': fmt}
+        else:
+            result['error'] = f'Unknown format. Use: {", ".join(Camera.COLOR_FORMATS)}'
+
+    elif cmd == 'i2c_scan':
+        from Server.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
+        devices = i2c_scan()
+        mpu_addr, mpu_who = find_mpu6050_on_bus()
+        result = {
+            'ok': True, 'cmd': cmd,
+            'devices': [f'0x{a:02X}' for a in devices],
+            'mpu6050_found': mpu_addr is not None,
+            'mpu6050_addr': f'0x{mpu_addr:02X}' if mpu_addr else None,
+            'mpu6050_who_am_i': f'0x{mpu_who:02X}' if mpu_who else None,
+        }
+
     elif cmd == 'auto':
         func = params.get('func', 'stop')
         valid_funcs = ('radarScan', 'automatic', 'trackLine', 'keepDistance', 'stop')
@@ -507,6 +533,13 @@ def process_command(data):
     elif cmd == 'get_info':
         result = {'ok': True, 'cmd': cmd}
         result.update(state.get_status())
+
+    elif cmd == 'ds4_status':
+        if state.ds4:
+            result = {'ok': True, 'cmd': cmd}
+            result.update(state.ds4.get_status())
+        else:
+            result = {'ok': True, 'cmd': cmd, 'enabled': False, 'connected': False}
 
     else:
         result['error'] = f'Unknown command: {cmd}'
@@ -608,6 +641,14 @@ def main():
     # Ultrasonic — optional, controlled by ULTRASONIC_ENABLED flag
     state.ultrasonic = UltrasonicSensor()
 
+    # DS4 Bluetooth controller — optional
+    if DS4_ENABLED:
+        try:
+            from Server.hardware.ds4 import DS4Controller
+            state.ds4 = DS4Controller()
+        except Exception as e:
+            print(f"[WebServer] DS4 controller init error: {e}")
+
     # Autonomous controller — adapts to available hardware
     state.autonomous = AutonomousController(
         state.motors, state.servos, state.ultrasonic
@@ -649,6 +690,18 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # Start DS4 controller (after all hardware is initialized)
+    if state.ds4 is not None:
+        state.ds4.start(
+            motors=state.motors,
+            servos=state.servos,
+            leds=state.leds,
+            buzzer=state.buzzer,
+            switches=state.switches,
+            speed=state.speed,
+            shared_state=state,
+        )
+
     # Print hardware status summary
     print("-" * 55)
     print(f"  Ultrasonic: {'ON' if state.ultrasonic._initialized else 'OFF'}")
@@ -657,6 +710,7 @@ def main():
     print(f"  LineTrack:  {'ON' if LINE_TRACKER_ENABLED else 'OFF'}")
     print(f"  OLED:       {'ON' if state.oled._initialized else 'OFF'}")
     print(f"  Crane:      {'ON' if CRANE_ENABLED else 'OFF'}")
+    print(f"  DS4 Ctrl:   {'ON' if state.ds4 else 'OFF'}")
     print("-" * 55)
 
     print(f"[WebServer] WebSocket on port {WEBSOCKET_PORT}...")

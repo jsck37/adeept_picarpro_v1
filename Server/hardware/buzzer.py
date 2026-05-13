@@ -1,37 +1,36 @@
-"""Buzzer — plays tones and melodies on the RobotHat active buzzer.
+"""Buzzer — plays tones and melodies on the RobotHat buzzer.
 
-RobotHat v1 uses an ACTIVE buzzer (built-in oscillator ~2-4kHz).
-Active buzzers need only DC power (GPIO HIGH = sound, LOW = silent).
-Sending PWM to an active buzzer creates terrible sound because the
-PWM frequency interferes with the buzzer's internal oscillator.
+RobotHat buzzer is PASSIVE (no internal oscillator).
+Passive buzzers need PWM at the correct frequency to produce tones.
+Each musical note corresponds to a specific PWM frequency.
 
 Driver order:
-1. RPi.GPIO — simple on/off for active buzzer + PWM for passive buzzer
-2. gpiozero.Buzzer — simpler API for active buzzer only
+1. RPi.GPIO — PWM with frequency control for passive buzzer
+2. gpiozero.TonalBuzzer — simpler API fallback
 
-If you have a PASSIVE buzzer (no internal oscillator), set
-BUZZER_PASSIVE=True in config.py and PWM melodies will be enabled.
+If you have an ACTIVE buzzer (built-in oscillator, fixed pitch), set
+BUZZER_PASSIVE=False in config.py and simple on/off will be used.
 """
 
 import threading
 import time
 from Server.config import BUZZER_PIN
 
-# Set to True if you have a passive buzzer (needs PWM to produce sound)
-# Default: False = active buzzer (just needs DC on/off)
 try:
     from Server.config import BUZZER_PASSIVE
 except ImportError:
-    BUZZER_PASSIVE = False
+    BUZZER_PASSIVE = True
 
 
 class BuzzerController:
 
     NOTES = {
+        'C3': 131, 'D3': 147, 'E3': 165, 'F3': 175, 'G3': 196,
+        'A3': 220, 'B3': 247,
         'C4': 262, 'D4': 294, 'E4': 330, 'F4': 349,
         'G4': 392, 'A4': 440, 'B4': 494,
         'C5': 523, 'D5': 587, 'E5': 659, 'F5': 698,
-        'G5': 784, 'A5': 880,
+        'G5': 784, 'A5': 880, 'B5': 988,
         'REST': 0,
     }
 
@@ -55,17 +54,18 @@ class BuzzerController:
         self._initialized = False
         self._driver = None        # 'rpigpio' or 'gpiozero'
         self._gpio_pin = BUZZER_PIN
-        self._pwm = None           # RPi.GPIO PWM instance (passive mode only)
+        self._pwm = None           # RPi.GPIO PWM instance (passive mode)
         self._GPIO = None          # RPi.GPIO module ref
-        self._buzzer = None        # gpiozero.Buzzer instance
+        self._buzzer = None        # gpiozero TonalBuzzer instance
         self._is_passive = BUZZER_PASSIVE
+        self._current_freq = 0     # Track current PWM frequency
 
         self._try_rpi_gpio()
         if not self._initialized:
             self._try_gpiozero()
 
     def _try_rpi_gpio(self):
-        """Try RPi.GPIO — on/off for active, PWM for passive."""
+        """Try RPi.GPIO — PWM for passive, on/off for active."""
         try:
             import RPi.GPIO as GPIO
             GPIO.setmode(GPIO.BCM)
@@ -74,9 +74,9 @@ class BuzzerController:
 
             if self._is_passive:
                 # Passive buzzer: start PWM at 440Hz, 0% duty (silent)
-                initial = GPIO.PWM(self._gpio_pin, 440)
-                initial.start(0)
-                self._pwm = initial
+                pwm = GPIO.PWM(self._gpio_pin, 440)
+                pwm.start(0)
+                self._pwm = pwm
             else:
                 # Active buzzer: start with LOW (silent)
                 GPIO.output(self._gpio_pin, GPIO.LOW)
@@ -103,9 +103,9 @@ class BuzzerController:
             GPIO.setup(self._gpio_pin, GPIO.OUT)
 
             if self._is_passive:
-                initial = GPIO.PWM(self._gpio_pin, 440)
-                initial.start(0)
-                self._pwm = initial
+                pwm = GPIO.PWM(self._gpio_pin, 440)
+                pwm.start(0)
+                self._pwm = pwm
             else:
                 GPIO.output(self._gpio_pin, GPIO.LOW)
 
@@ -168,8 +168,9 @@ class BuzzerController:
                 if note_name == 'REST' or note_name not in self.NOTES:
                     self._note_off()
                 else:
+                    freq = self.NOTES[note_name]
                     if self._is_passive:
-                        self._note_on_pwm(self.NOTES[note_name])
+                        self._note_on_pwm(freq)
                     else:
                         # Active buzzer: just on/off, same pitch for all notes
                         self._note_on_active()
@@ -196,10 +197,20 @@ class BuzzerController:
     # ── Passive buzzer control (PWM frequency) ──────────────────────────
 
     def _note_on_pwm(self, freq):
-        """Play a specific frequency on passive buzzer via PWM."""
+        """Play a specific frequency on passive buzzer via PWM.
+
+        Uses 50% duty cycle for clean, loud tones.
+        Frequency changes are applied via ChangeFrequency().
+        """
+        if freq <= 0:
+            self._note_off()
+            return
+
         if self._driver == 'rpigpio' and self._pwm is not None:
             try:
-                self._pwm.ChangeFrequency(freq)
+                if self._current_freq != freq:
+                    self._pwm.ChangeFrequency(freq)
+                    self._current_freq = freq
                 self._pwm.ChangeDutyCycle(50)
             except Exception:
                 pass
@@ -217,6 +228,7 @@ class BuzzerController:
             try:
                 if self._is_passive and self._pwm is not None:
                     self._pwm.ChangeDutyCycle(0)
+                    self._current_freq = 0
                 elif self._GPIO is not None:
                     self._GPIO.output(self._gpio_pin, self._GPIO.LOW)
             except Exception:

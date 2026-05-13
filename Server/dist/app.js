@@ -23,6 +23,7 @@ var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
   switches: false, ultrasonic: false, mpu6050: false,
   oled: false, camera: false, autonomous: false, crane: false,
+  ds4: false,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -68,6 +69,7 @@ function updateHardwareUI(hardwareStatus) {
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
   toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
   toggleHwSection('card-claw', 'claw-missing-tag', hw.crane);
+  toggleHwSection('card-ds4', 'ds4-missing-tag', hw.ds4);
 }
 
 function toggleHwSection(cardId, tagId, available) {
@@ -121,7 +123,14 @@ function wsConnect() {
         var msgType = data.type || '';
         var msgData = data.data || {};
         if (msgType === 'status') updateStatus(msgData);
-        else if (msgType === 'response' && msgData.error) toast(msgData.error, 'error');
+        else if (msgType === 'response') {
+          if (msgData.error) toast(msgData.error, 'error');
+          // Handle I2C scan response
+          if (msgData.cmd === 'i2c_scan' && msgData.ok) {
+            var el = document.getElementById('i2c-scan-result');
+            if (el) showI2CResult(msgData, el);
+          }
+        }
       } catch(err) {}
     };
     ws.onclose = function() {
@@ -142,6 +151,7 @@ function sendCommand(cmd, params) {
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'claw': '/cmd/claw',
+      'color_format': '/cmd/color_format',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -194,6 +204,15 @@ function updateStatus(d) {
   if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
   if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
   document.getElementById('sb-module').textContent = d.running_module || 'Ready';
+  // Update color format label from server status
+  if (d.color_format) {
+    var fmtLabel = document.getElementById('color-fmt-label');
+    if (fmtLabel) fmtLabel.textContent = d.color_format;
+    // Highlight active button
+    document.querySelectorAll('[data-cfmt]').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.cfmt === d.color_format);
+    });
+  }
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
@@ -211,6 +230,31 @@ function updateStatus(d) {
     document.getElementById('mpu-pitch').textContent = mpu.pitch.toFixed(1);
   } else {
     document.getElementById('sb-imu').textContent = 'N/A';
+  }
+  // DS4 controller status
+  var ds4 = d.ds4;
+  if (ds4) {
+    var ds4Dot = document.getElementById('ds4-status-dot');
+    var ds4Text = document.getElementById('ds4-status-text');
+    if (ds4.connected) {
+      document.getElementById('sb-ds4').textContent = ds4.speed + '%';
+      document.getElementById('sb-ds4').style.color = '#34a853';
+      if (ds4Dot) ds4Dot.style.background = '#34a853';
+      if (ds4Text) { ds4Text.textContent = 'Connected (speed ' + ds4.speed + '%)'; ds4Text.style.color = '#34a853'; }
+    } else if (ds4.enabled) {
+      document.getElementById('sb-ds4').textContent = 'Searching';
+      document.getElementById('sb-ds4').style.color = '#fdd663';
+      if (ds4Dot) ds4Dot.style.background = '#fdd663';
+      if (ds4Text) { ds4Text.textContent = 'Searching...'; ds4Text.style.color = '#fdd663'; }
+    } else {
+      document.getElementById('sb-ds4').textContent = 'OFF';
+      document.getElementById('sb-ds4').style.color = '#9aa0a6';
+      if (ds4Dot) ds4Dot.style.background = '#9aa0a6';
+      if (ds4Text) { ds4Text.textContent = 'Disabled'; ds4Text.style.color = '#9aa0a6'; }
+    }
+  } else {
+    document.getElementById('sb-ds4').textContent = 'OFF';
+    document.getElementById('sb-ds4').style.color = '#9aa0a6';
   }
 }
 
@@ -238,15 +282,28 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
 // ═══════════════════════════════════════════════════════════════
 //  CV MODE BUTTONS
 // ═══════════════════════════════════════════════════════════════
-document.querySelectorAll('.cv-btn').forEach(function(btn) {
+document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
   btn.addEventListener('click', function() {
-    document.querySelectorAll('.cv-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.querySelectorAll('.cv-btn[data-cv]').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     var mode = btn.dataset.cv;
     var badge = document.getElementById('cv-badge');
     badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
     badge.classList.toggle('visible', mode !== 'none');
     sendCommand('cv_mode', { mode: mode });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  COLOR FORMAT BUTTONS (camera color debug)
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('[data-cfmt]').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('[data-cfmt]').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    var fmt = btn.dataset.cfmt;
+    document.getElementById('color-fmt-label').textContent = fmt;
+    sendCommand('color_format', { format: fmt });
   });
 });
 
@@ -703,6 +760,35 @@ document.querySelectorAll('[data-claw]').forEach(function(btn) {
     sendCommand('claw', { action: btn.dataset.claw });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  I2C SCAN BUTTON (MPU6050 debug)
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('i2c-scan-btn').addEventListener('click', function() {
+  var resultEl = document.getElementById('i2c-scan-result');
+  resultEl.textContent = 'Scanning...';
+  resultEl.style.color = '#fdd663';
+  sendCommand('i2c_scan', {});
+  // Also try REST API fallback
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    fetch('/api/i2c_scan').then(function(r) { return r.json(); }).then(function(d) {
+      showI2CResult(d, resultEl);
+    }).catch(function() { resultEl.textContent = 'Scan failed'; resultEl.style.color = '#ea4335'; });
+  }
+});
+
+function showI2CResult(d, el) {
+  if (d.mpu6050_found) {
+    el.textContent = 'MPU6050 at ' + d.mpu6050_addr + ' (WHO_AM_I=' + d.mpu6050_who_am_i + ')';
+    el.style.color = '#34a853';
+  } else if (d.devices && d.devices.length > 0) {
+    el.textContent = 'No MPU6050. Devices: ' + d.devices.join(', ');
+    el.style.color = '#ea4335';
+  } else {
+    el.textContent = 'No I2C devices found!';
+    el.style.color = '#ea4335';
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  AUTONOMOUS

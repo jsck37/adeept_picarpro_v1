@@ -26,6 +26,9 @@ pillow
 # IMU Sensor (optional — also uses smbus from apt package python3-smbus)
 mpu6050-raspberrypi
 
+# DS4 Bluetooth Controller (optional — for PS4 gamepad support)
+evdev
+
 # GPIO (usually pre-installed on Raspberry Pi OS)
 # RPi.GPIO
 # gpiozero

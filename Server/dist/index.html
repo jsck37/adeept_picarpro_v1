@@ -24,6 +24,8 @@
   <div class="sb-sep"></div>
   <div class="sb-item"><span class="sb-label">Module</span><span class="sb-value" id="sb-module">Ready</span></div>
   <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
+  <div class="sb-sep"></div>
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
@@ -60,6 +62,31 @@
           <div class="camera-wrap">
             <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
             <div class="cv-badge" id="cv-badge">CV: Off</div>
+          </div>
+          <!-- Color Format Debug -->
+          <div style="margin-top:8px;padding:6px 8px;background:#1a1a2e;border-radius:6px;font-size:.75rem">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="color:#8ab4f8;font-weight:600">Color Format:</span>
+              <span id="color-fmt-label" style="color:#e8eaed">rgb2bgr</span>
+            </div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
+              <button class="cv-btn active" data-cfmt="rgb2bgr" title="Capture RGB888, convert to BGR (default)">RGB&gt;BGR</button>
+              <button class="cv-btn" data-cfmt="bgr2rgb" title="Capture BGR888, swap R↔B">BGR&gt;RGB</button>
+              <button class="cv-btn" data-cfmt="bgr_raw" title="Capture BGR888, no conversion">BGR raw</button>
+              <button class="cv-btn" data-cfmt="rgb_raw" title="Capture RGB888, no conversion (diagnosis)">RGB raw</button>
+            </div>
+            <!-- Color reference strip -->
+            <div style="color:#9aa0a6;margin-bottom:4px">Reference — compare with camera:</div>
+            <div style="display:flex;gap:2px;height:24px;border-radius:3px;overflow:hidden">
+              <div style="flex:1;background:#ff0000;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">R</div>
+              <div style="flex:1;background:#00ff00;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">G</div>
+              <div style="flex:1;background:#0000ff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">B</div>
+              <div style="flex:1;background:#ffff00;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">Y</div>
+              <div style="flex:1;background:#00ffff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">C</div>
+              <div style="flex:1;background:#ff00ff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">M</div>
+              <div style="flex:1;background:#ff8800;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">O</div>
+              <div style="flex:1;background:#ffffff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">W</div>
+            </div>
           </div>
         </div>
       </div>
@@ -215,6 +242,10 @@
                 <div class="mpu-row"><span class="mpu-label">Roll</span><span class="mpu-val" id="mpu-roll">0.0</span></div>
                 <div class="mpu-row"><span class="mpu-label">Pitch</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
               </div>
+              <div style="margin-top:8px">
+                <button class="btn-sm btn-secondary" id="i2c-scan-btn" style="font-size:.75rem">Scan I2C Bus</button>
+                <span id="i2c-scan-result" style="font-size:.72rem;color:#8ab4f8;margin-left:6px"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -319,6 +350,43 @@
             <div class="btn-group" id="claw-grip-group">
               <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
               <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DS4 Controller -->
+      <div class="card" id="card-ds4">
+        <div class="card-title collapsible-header open" data-target="ds4-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
+            DS4 Controller<span class="hw-missing-tag" id="ds4-missing-tag" style="display:none">Module not found</span>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="ds4-body">
+          <div id="ds4-controls">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
+              <span id="ds4-status-text" style="font-size:.82rem;color:#9aa0a6">Not connected</span>
+            </div>
+            <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
+              <div style="font-weight:600;color:#8ab4f8;margin-bottom:4px">Controls:</div>
+              <div><b>Left stick</b> &mdash; Drive (fwd/back/turn)</div>
+              <div><b>Right stick</b> &mdash; Camera pan/tilt</div>
+              <div><b>L2 / R2</b> &mdash; Speed down / up</div>
+              <div><b>D-pad</b> &mdash; Claw arm &amp; grip</div>
+              <div><b>Cross</b> &mdash; Claw grip toggle</div>
+              <div><b>Circle</b> &mdash; Claw arm toggle</div>
+              <div><b>Triangle</b> &mdash; Buzzer beep</div>
+              <div><b>Square</b> &mdash; LED mode cycle</div>
+              <div><b>L1</b> &mdash; Headlights toggle</div>
+              <div><b>R1</b> &mdash; Horn (alarm)</div>
+              <div><b>Options</b> &mdash; Emergency stop</div>
+              <div><b>PS</b> &mdash; Home all servos</div>
+              <div><b>Share</b> &mdash; CV mode cycle</div>
+              <div><b>L3</b> &mdash; Speed reset</div>
+              <div><b>R3</b> &mdash; Center camera</div>
             </div>
           </div>
         </div>

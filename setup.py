@@ -337,6 +337,8 @@ def stage_4_pip_packages(debian_ver):
          f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
          f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
+        ("DS4 Controller",
+         f"sudo -H pip3 install {pip_flag} evdev"),
     ]
 
     for group_name, cmd in pip_groups:

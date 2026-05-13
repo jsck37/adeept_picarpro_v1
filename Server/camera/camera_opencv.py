@@ -1,7 +1,13 @@
 """Camera + OpenCV processing module.
 
-RGB888 format for correct colors, single JPEG encoding, FPS control,
-frame skip when CV lags (Pi 3B+ friendly).
+Configurable pixel format for color debugging, single JPEG encoding,
+FPS control, frame skip when CV lags (Pi 3B+ friendly).
+
+Color format options (CAMERA_COLOR_FORMAT in config.py):
+  'rgb2bgr'  — Capture RGB888, convert to BGR for OpenCV (default)
+  'bgr2rgb'  — Capture BGR888, convert to RGB for OpenCV
+  'bgr_raw'  — Capture BGR888, use as-is (no conversion)
+  'rgb_raw'  — Capture RGB888, use as-is (no conversion)
 """
 
 import threading
@@ -19,6 +25,7 @@ from Server.camera.base_camera import BaseCamera
 from Server.config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
+    CAMERA_COLOR_FORMAT,
     CV_COLOR_LOWER_H, CV_COLOR_LOWER_S, CV_COLOR_LOWER_V,
     CV_COLOR_UPPER_H, CV_COLOR_UPPER_S, CV_COLOR_UPPER_V,
     CV_LINE_POS_1, CV_LINE_POS_2, CV_LINE_THRESHOLD,
@@ -249,22 +256,50 @@ class CVThread(threading.Thread):
 class Camera(BaseCamera):
     """PiCamera2 + OpenCV with JPEG streaming.
 
-    Uses RGB888 format and converts to BGR for OpenCV.
-    Single JPEG encoding, FPS control, CV thread.
+    Configurable pixel format for color debugging.
+    Default: capture RGB888, convert to BGR for OpenCV.
     """
+
+    # Color format options for live switching
+    COLOR_FORMATS = ['rgb2bgr', 'bgr2rgb', 'bgr_raw', 'rgb_raw']
 
     def __init__(self):
         self.cv_thread = CVThread()
         self.cv_thread.start()
         self._picam = None
         self._overlay_data = {}
+        self._color_format = CAMERA_COLOR_FORMAT
+        self._capture_format = 'RGB888'  # picamera2 capture format
         super().__init__(target_fps=CAMERA_FPS)
 
+    def set_color_format(self, fmt):
+        """Switch color format at runtime for debugging.
+        Re-initializes the camera with the new format."""
+        if fmt not in self.COLOR_FORMATS:
+            print(f"[Camera] Unknown format: {fmt}, using rgb2bgr")
+            fmt = 'rgb2bgr'
+        self._color_format = fmt
+
+        # Determine picamera2 capture format
+        if fmt in ('rgb2bgr', 'rgb_raw'):
+            self._capture_format = 'RGB888'
+        else:
+            self._capture_format = 'BGR888'
+
+        # Re-initialize camera with new format
+        if self._picam is not None:
+            try:
+                self._picam.stop()
+                self._picam.close()
+            except Exception:
+                pass
+            self._picam = None
+
+        print(f"[Camera] Color format set to: {fmt} (capture: {self._capture_format})")
+
     def _init_camera(self):
-        """Initialize the PiCamera2 instance (only once!).
-        Uses RGB888 format (guaranteed correct on all Pi firmware versions)
-        and converts to BGR for OpenCV processing.
-        BGR888 format causes color swap on many Pi OS / libcamera versions.
+        """Initialize the PiCamera2 instance (only once per format!).
+        The capture format depends on the current color_format setting.
         """
         if self._picam is not None:
             return
@@ -273,11 +308,8 @@ class Camera(BaseCamera):
             raise RuntimeError("picamera2 not installed")
 
         self._picam = Picamera2()
-        # RGB888 is the reliable format — BGR888 has color swap bugs
-        # on many Raspberry Pi OS / libcamera versions.
-        # We convert RGB->BGR after capture for correct OpenCV processing.
         config = self._picam.create_preview_configuration(
-            main={"size": CAMERA_RESOLUTION, "format": "RGB888"}
+            main={"size": CAMERA_RESOLUTION, "format": self._capture_format}
         )
         self._picam.configure(config)
 
@@ -287,25 +319,24 @@ class Camera(BaseCamera):
             self._picam.set_control("flip_v", True)
 
         self._picam.start()
-        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps quality={CAMERA_JPEG_QUALITY}% (RGB888->BGR)")
+        print(f"[Camera] Initialized at {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps "
+              f"quality={CAMERA_JPEG_QUALITY}% (capture:{self._capture_format}, fmt:{self._color_format})")
 
     def frames(self):
         """Generator that yields JPEG-encoded frames.
-        Camera captures in RGB888, converts to BGR for OpenCV processing.
-        This fixes the color swap (orange->blue) caused by BGR888 bug.
+        Color conversion depends on CAMERA_COLOR_FORMAT setting.
         """
         self._init_camera()
 
         while True:
             try:
-                # Capture in RGB888 (reliable), then convert to BGR for OpenCV
-                frame_rgb = self._picam.capture_array()
+                frame_raw = self._picam.capture_array()
 
-                if frame_rgb is None or len(frame_rgb.shape) != 3:
+                if frame_raw is None or len(frame_raw.shape) != 3:
                     continue
 
-                # Convert RGB -> BGR for correct OpenCV color processing
-                frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                # Apply color conversion based on format setting
+                frame = self._convert_frame(frame_raw)
 
                 # Submit to CV thread if a mode is active (CV works in BGR)
                 # No .copy() needed — submit_frame skips if still processing
@@ -326,6 +357,39 @@ class Camera(BaseCamera):
             except Exception as e:
                 print(f"[Camera] Frame capture error: {e}")
                 time.sleep(0.1)
+
+    def _convert_frame(self, frame_raw):
+        """Convert raw captured frame based on current color format setting.
+
+        OpenCV imencode() expects BGR input. All formats ultimately
+        produce BGR output so JPEG encoding works correctly.
+
+        Format logic:
+          rgb2bgr  — capture RGB888 → convert to BGR (default, correct for most Pi)
+          bgr2rgb  — capture BGR888 → swap R↔B channels (if rgb2bgr gives wrong colors)
+          bgr_raw  — capture BGR888 → use as-is (BGR is already correct for imencode)
+          rgb_raw  — capture RGB888 → use as-is (will show swapped colors in browser
+                     to help diagnose which channel is which)
+        """
+        fmt = self._color_format
+
+        if fmt == 'rgb2bgr':
+            # Standard: capture RGB888, convert to BGR for OpenCV
+            return cv2.cvtColor(frame_raw, cv2.COLOR_RGB2BGR)
+        elif fmt == 'bgr2rgb':
+            # Alternative: capture BGR888, swap channels
+            return cv2.cvtColor(frame_raw, cv2.COLOR_BGR2RGB)
+        elif fmt == 'bgr_raw':
+            # Raw BGR888 — already in BGR, correct for OpenCV
+            return frame_raw
+        elif fmt == 'rgb_raw':
+            # Raw RGB888 — NO conversion, colors will be swapped in JPEG
+            # This is for DIAGNOSIS: if colors look correct in this mode,
+            # it means the camera is actually outputting BGR888 not RGB888
+            # and you should use 'bgr_raw' format.
+            return frame_raw
+        else:
+            return cv2.cvtColor(frame_raw, cv2.COLOR_RGB2BGR)
 
     def _draw_overlays(self, frame):
         """Draw CV overlay information on the frame."""

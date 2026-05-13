@@ -47,7 +47,7 @@ CLAW_GRIP_CLOSED = 130         # Claw closed (grabbed)
 
 # ── Buzzer ──────────────────────────────────────────────────────────────
 BUZZER_PIN = 24
-BUZZER_PASSIVE = False         # Active buzzer on RobotHat v1
+BUZZER_PASSIVE = True          # Passive buzzer on RobotHat (PWM needed for tones/melodies)
 
 # ── Ultrasonic HC-SR04 (only used when ULTRASONIC_ENABLED=True) ────────
 ULTRASONIC_TRIGGER = 11
@@ -72,6 +72,14 @@ CAMERA_FPS = 30
 CAMERA_JPEG_QUALITY = 80
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL = False
+# Color format — controls how raw frames are converted for display.
+# If colors look wrong (e.g. orange shows as blue), try different options:
+#   'rgb2bgr'  — Capture RGB888, convert to BGR (default, correct for most Pi)
+#   'bgr2rgb'  — Capture BGR888, swap R↔B channels
+#   'bgr_raw'  — Capture BGR888, use as-is (no conversion)
+#   'rgb_raw'  — Capture RGB888, no conversion (for diagnosis only)
+# You can also switch format live from the web UI.
+CAMERA_COLOR_FORMAT = 'rgb2bgr'
 
 # ── OpenCV defaults ─────────────────────────────────────────────────────
 CV_COLOR_LOWER_H = 35
@@ -85,6 +93,13 @@ CV_LINE_POS_2 = 380
 CV_LINE_THRESHOLD = 80
 CV_WATCHDOG_THRESHOLD = 25
 CV_WATCHDOG_BLUR_SIZE = (7, 7)
+
+# ── DualShock 4 Bluetooth Controller ────────────────────────────────────
+DS4_ENABLED = True               # Enable DS4 controller support
+DS4_DEVICE_NAME = "Wireless Controller"  # Bluetooth name (paired via bluetoothctl)
+DS4_DEADZONE = 0.12              # Stick deadzone (0.0-1.0), prevents drift
+DS4_STEER_SENSITIVITY = 1.0      # Steering sensitivity multiplier (0.5-2.0)
+DS4_CAM_SENSITIVITY = 0.8        # Camera stick sensitivity multiplier (0.5-2.0)
 
 # ── Network ─────────────────────────────────────────────────────────────
 WEBSOCKET_PORT = 8888

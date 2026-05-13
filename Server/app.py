@@ -20,6 +20,7 @@ from Server.config import (
     FLASK_PORT, DEFAULT_SPEED, SERVO_COUNT, SWITCH_PINS,
     CRANE_ENABLED, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+    CAMERA_COLOR_FORMAT,
 )
 from Server.modules import get_module_list
 
@@ -277,6 +278,29 @@ def create_app(state):
             state.camera.set_cv_mode(cv_mode)
             return jsonify({"ok": True, "mode": mode})
         return jsonify({"ok": False}), 400
+
+    @app.route("/cmd/color_format", methods=["POST"])
+    def cmd_color_format():
+        data = request.get_json(silent=True) or {}
+        fmt = data.get("format", "rgb2bgr")
+        if fmt in Camera.COLOR_FORMATS:
+            state.init_camera()
+            state.camera.set_color_format(fmt)
+            return jsonify({"ok": True, "format": fmt})
+        return jsonify({"ok": False, "error": f"Use: {', '.join(Camera.COLOR_FORMATS)}"}), 400
+
+    @app.route("/api/i2c_scan", methods=["GET"])
+    def api_i2c_scan():
+        from Server.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
+        devices = i2c_scan()
+        mpu_addr, mpu_who = find_mpu6050_on_bus()
+        return jsonify({
+            "ok": True,
+            "devices": [f"0x{a:02X}" for a in devices],
+            "mpu6050_found": mpu_addr is not None,
+            "mpu6050_addr": f"0x{mpu_addr:02X}" if mpu_addr else None,
+            "mpu6050_who_am_i": f"0x{mpu_who:02X}" if mpu_who else None,
+        })
 
     @app.route("/cmd/auto", methods=["POST"])
     def cmd_auto():
