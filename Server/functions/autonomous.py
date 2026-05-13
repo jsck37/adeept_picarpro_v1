@@ -7,7 +7,7 @@ When LINE_TRACKER_ENABLED=False: trackLine is disabled.
 import threading
 import time
 from Server.config import (
-    RADAR_SCAN_SPEED, SERVO_STEERING,
+    SERVO_STEERING,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
     LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN,
 )
