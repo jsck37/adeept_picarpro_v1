@@ -63,18 +63,7 @@
             <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
             <div class="cv-badge" id="cv-badge">CV: Off</div>
           </div>
-          <!-- Color Format Debug -->
-          <div style="margin-top:8px;padding:6px 8px;background:#1a1a2e;border-radius:6px;font-size:.75rem">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-              <span style="color:#8ab4f8;font-weight:600">Color Format:</span>
-              <span id="color-fmt-label" style="color:#e8eaed">rgb2bgr</span>
-            </div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
-              <button class="cv-btn active" data-cfmt="rgb2bgr" title="Capture RGB888, convert to BGR (default)">RGB&gt;BGR</button>
-              <button class="cv-btn" data-cfmt="bgr2rgb" title="Capture BGR888, swap R↔B">BGR&gt;RGB</button>
-              <button class="cv-btn" data-cfmt="bgr_raw" title="Capture BGR888, no conversion">BGR raw</button>
-              <button class="cv-btn" data-cfmt="rgb_raw" title="Capture RGB888, no conversion (diagnosis)">RGB raw</button>
-            </div>
+          <!-- Color: RGB raw (no conversion) -->
             <!-- Color reference strip -->
             <div style="color:#9aa0a6;margin-bottom:4px">Reference — compare with camera:</div>
             <div style="display:flex;gap:2px;height:24px;border-radius:3px;overflow:hidden">

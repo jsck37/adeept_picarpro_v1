@@ -468,8 +468,8 @@ function arrowCamUpdate() {
   var newTilt = camTiltAngle;
   if (left)  newPan  = Math.max(0,  camPanAngle  - CAM_ARROW_STEP);
   if (right) newPan  = Math.min(180, camPanAngle  + CAM_ARROW_STEP);
-  if (up)    newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
-  if (down)  newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
+  if (up)    newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
+  if (down)  newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
 
   if (newPan !== camPanAngle || newTilt !== camTiltAngle) {
     camPanAngle = newPan;
@@ -634,7 +634,7 @@ function updateCamJoystick(clientX, clientY) {
   var panRange = 90;
   var tiltRange = 90;
   var newPan = Math.round(90 + (dx / maxR) * panRange);
-  var newTilt = Math.round(90 + (dy / maxR) * tiltRange);
+  var newTilt = Math.round(90 - (dy / maxR) * tiltRange);
   newPan = Math.max(0, Math.min(180, newPan));
   newTilt = Math.max(0, Math.min(180, newTilt));
   camJoystickLabel.textContent = 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';

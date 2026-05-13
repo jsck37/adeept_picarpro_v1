@@ -1,68 +1,38 @@
-"""HC-SR04 ultrasonic distance sensor with median filtering.
+"""Ultrasonic HC-SR04 — disabled by default."""
 
-When ULTRASONIC_ENABLED=False in config, this becomes a no-op stub
-that always returns 0 and never touches GPIO pins.
-"""
-
-import time
-import threading
-from Server.config import (
-    ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
-    ULTRASONIC_MAX_DISTANCE,
-)
-
+import threading, time
+from Server.config import ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
 
 class UltrasonicSensor:
-
     def __init__(self):
-        self._sensor = None
-        self._last_distance = 0.0
-        self._lock = threading.Lock()
         self._initialized = False
-
+        self._distance = 0.0
+        self._running = False
+        self._thread = None
         if not ULTRASONIC_ENABLED:
-            print("[Ultra] DISABLED in config (no sensor present)")
             return
-
         try:
             from gpiozero import DistanceSensor
-            self._sensor = DistanceSensor(
-                echo=ULTRASONIC_ECHO, trigger=ULTRASONIC_TRIGGER,
-                max_distance=ULTRASONIC_MAX_DISTANCE,
-            )
+            self._sensor = DistanceSensor(echo=ULTRASONIC_ECHO, trigger=ULTRASONIC_TRIGGER, max_distance=ULTRASONIC_MAX_DISTANCE)
             self._initialized = True
-            print("[Ultra] Initialized")
+            self._running = True
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+            print("[Ultrasonic] OK")
         except Exception as e:
-            print(f"[Ultra] Init failed: {e}")
+            print(f"[Ultrasonic] Failed: {e}")
 
-    def get_distance(self):
-        if self._sensor is None:
-            return 0.0
-        try:
-            readings = []
-            for _ in range(5):
-                dist = self._sensor.distance * 100
-                if dist > 0:
-                    readings.append(dist)
-                time.sleep(0.01)
-            if readings:
-                readings.sort()
-                median = readings[len(readings) // 2]
-                with self._lock:
-                    self._last_distance = round(median, 1)
-                return self._last_distance
-            return self._last_distance
-        except Exception:
-            return self._last_distance
-
-    def get_last_distance(self):
-        with self._lock:
-            return self._last_distance
-
-    def shutdown(self):
-        if self._sensor is not None:
+    def _loop(self):
+        while self._running:
             try:
-                self._sensor.close()
+                self._distance = round(self._sensor.distance * 100, 1)
             except Exception:
                 pass
-        print("[Ultra] Shutdown")
+            time.sleep(0.1)
+
+    def get_last_distance(self):
+        return self._distance
+
+    def shutdown(self):
+        self._running = False
+        print("[Ultrasonic] Shutdown")

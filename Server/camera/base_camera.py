@@ -1,89 +1,61 @@
-"""Base camera class with FPS control and frame management."""
+"""Base camera — background capture thread with FPS control."""
 
-import threading
-import time
-from io import BytesIO
-
-
-class CameraEvent(threading.Event):
-    """Custom event that tracks the last frame timestamp for FPS control."""
-
-    def __init__(self):
-        super().__init__()
-        self.last_frame_time = 0
-
+import threading, time
 
 class BaseCamera:
-    """Base camera class — background thread for frame capture with FPS limiting."""
+    thread = None
+    frame = None
+    last_access = 0
+    event = threading.Event()
+    _running = False
+    _target_fps = 30
+    _frame_interval = 1.0 / 30
 
-    thread = None           # Background capture thread
-    frame = None            # Current JPEG frame bytes
-    last_access = 0         # Timestamp of last client access
-    event = CameraEvent()   # Signaling event for new frames
-    _running = False        # Thread control flag
-    _target_fps = 20        # Default FPS
-    _frame_interval = 1.0 / 20  # Time between frames
-
-    def __init__(self, target_fps=20):
-        """Initialize camera with target FPS."""
+    def __init__(self, target_fps=30):
         self._target_fps = target_fps
         self._frame_interval = 1.0 / target_fps if target_fps > 0 else 0
-
         if BaseCamera.thread is None:
             BaseCamera.last_access = time.time()
             BaseCamera._running = True
             BaseCamera.thread = threading.Thread(target=self._capture_thread, daemon=True)
             BaseCamera.thread.start()
-
-            # Wait for first frame
-            while self.event.wait(1) is False:
+            while not self.event.wait(1):
                 if not BaseCamera._running:
                     raise RuntimeError("Camera thread failed to start")
             self.event.clear()
 
     def _capture_thread(self):
-        """Background thread that continuously captures frames."""
-        frames_iterator = self.frames()
+        frames_gen = self.frames()
         last_time = time.time()
-
         try:
-            for frame in frames_iterator:
+            for frame in frames_gen:
                 BaseCamera.frame = frame
                 self.event.set()
                 self.event.clear()
-
-                # FPS limiting: sleep if we're ahead of schedule
                 if self._target_fps > 0:
-                    elapsed = time.time() - last_time
-                    sleep_time = self._frame_interval - elapsed
-                    if sleep_time > 0:
-                        time.sleep(sleep_time)
+                    sleep = self._frame_interval - (time.time() - last_time)
+                    if sleep > 0:
+                        time.sleep(sleep)
                 last_time = time.time()
-
-                # Auto-stop if no clients for 60 seconds
                 if time.time() - BaseCamera.last_access > 60:
-                    frames_iterator.close()
+                    frames_gen.close()
                     break
-
         except Exception as e:
-            print(f"[Camera] Capture thread error: {e}")
+            print(f"[Camera] Thread error: {e}")
         finally:
             BaseCamera.thread = None
             BaseCamera._running = False
 
     @staticmethod
     def get_frame():
-        """Get the latest JPEG frame. Blocks until a new frame is available."""
         BaseCamera.last_access = time.time()
         BaseCamera.event.wait()
         return BaseCamera.frame
 
     @staticmethod
     def shutdown():
-        """Stop the camera capture thread."""
         BaseCamera._running = False
-        BaseCamera.event.set()  # Unblock any waiting threads
+        BaseCamera.event.set()
 
     def frames(self):
-        """Generator that yields JPEG frames. Must be overridden by subclass."""
-        raise NotImplementedError("Subclass must implement frames()")
+        raise NotImplementedError
