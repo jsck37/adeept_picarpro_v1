@@ -29,6 +29,7 @@ from Server.hardware.mpu6050 import MPU6050Controller
 from Server.camera.camera_opencv import Camera, CV_NONE, CV_COLOR, CV_LINE, CV_WATCH
 from Server.functions.autonomous import AutonomousController
 from Server.utils.system_info import SystemInfo
+from Server.utils.log_buffer import log_buffer
 from Server.modules import get_module_list, get_module_path
 
 SERVO_CAL_FILE = os.path.join(os.path.dirname(__file__), "servo_cal.json")
@@ -376,16 +377,59 @@ def process_command(data):
         r = {'ok': True}
         r.update(state.ds4.get_status() if state.ds4 else {'enabled': False, 'connected': False})
 
+    elif cmd == 'get_log':
+        after = p.get('after_ts', 0.0)
+        lines = log_buffer.get_lines_since(after_ts=after, max_lines=500)
+        r = {'ok': True, 'lines': [[ts, txt] for ts, txt in lines]}
+
+    elif cmd == 'clear_log':
+        with log_buffer._lock:
+            log_buffer._lines.clear()
+        r = {'ok': True}
+
     return r
 
 
 async def ws_handler(ws, path=None):
     state.ws_clients.add(ws)
+    # Send initial status + recent log history
     try:
         await ws.send(json.dumps({'type': 'status', 'data': state.get_status()}))
+        # Send last 100 log lines
+        recent = log_buffer.get_lines(last_n=100)
+        if recent:
+            await ws.send(json.dumps({'type': 'log_history', 'lines': [[ts, txt] for ts, txt in recent]}))
     except Exception:
         pass
+
+    # Subscribe to new log lines
+    log_queue = asyncio.Queue()
+
+    def on_log(text):
+        try:
+            log_queue.put_nowait(text)
+        except Exception:
+            pass
+
+    log_buffer.subscribe(on_log)
+
     try:
+        # Start log forwarding task
+        async def forward_logs():
+            try:
+                while state.running:
+                    try:
+                        text = await asyncio.wait_for(log_queue.get(), timeout=0.5)
+                        await ws.send(json.dumps({'type': 'log', 'text': text}))
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        break
+            except Exception:
+                pass
+
+        log_task = asyncio.create_task(forward_logs())
+
         async for msg in ws:
             try:
                 r = process_command(json.loads(msg))
@@ -399,6 +443,8 @@ async def ws_handler(ws, path=None):
     except Exception:
         pass
     finally:
+        log_task.cancel()
+        log_buffer.unsubscribe(on_log)
         state.ws_clients.discard(ws)
 
 
@@ -420,6 +466,9 @@ async def status_broadcast():
 
 
 def main():
+    # ── Install log capture FIRST ──────────────────────────────────
+    log_buffer.install()
+
     print("=" * 50)
     print("  PiCar Pro v1 (Flask + WebSocket)")
     print("=" * 50)
@@ -428,6 +477,7 @@ def main():
         print("[WebServer] ERROR: websockets not installed!")
         sys.exit(1)
 
+    # ── Hardware init ──────────────────────────────────────────────
     state.motors = MotorController()
     state.servos = ServoController()
     state.leds = LEDController()
@@ -501,6 +551,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        log_buffer.uninstall()
         state.shutdown_hardware()
 
 

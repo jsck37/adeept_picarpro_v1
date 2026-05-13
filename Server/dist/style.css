@@ -243,6 +243,30 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .i2c-device-addr{font-family:'Courier New',monospace;font-weight:700;color:#137333}
 .i2c-device-name{color:#202124;margin-top:2px}
 
+/* ========== LOG CONSOLE ========== */
+.console-card{background:#1a1a2e;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.15);overflow:hidden;display:flex;flex-direction:column;height:calc(100vh - 180px);min-height:300px}
+.console-toolbar{background:#16213e;padding:8px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #0f3460;flex-shrink:0}
+.console-toolbar-left{display:flex;align-items:center;gap:8px;color:#a8b2d1}
+.console-toolbar-right{display:flex;align-items:center;gap:10px}
+.console-title{font-size:.85rem;font-weight:600;color:#e6f1ff}
+.console-line-count{font-size:.7rem;color:#5f6368;background:rgba(255,255,255,.06);padding:2px 8px;border-radius:4px}
+.console-autoscroll-label{font-size:.72rem;color:#8892b0;display:flex;align-items:center;gap:4px;cursor:pointer}
+.console-autoscroll-label input{accent-color:#1a73e8}
+.console-output{flex:1;overflow-y:auto;padding:10px 14px;font-family:'Courier New',Consolas,monospace;font-size:.78rem;line-height:1.6;color:#ccd6f6;white-space:pre-wrap;word-break:break-all}
+.console-output::-webkit-scrollbar{width:6px}
+.console-output::-webkit-scrollbar-track{background:#1a1a2e}
+.console-output::-webkit-scrollbar-thumb{background:#0f3460;border-radius:3px}
+.console-output::-webkit-scrollbar-thumb:hover{background:#1a73e8}
+.log-line{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.02)}
+.log-line:hover{background:rgba(255,255,255,.03)}
+.log-ts{color:#5f6368;font-size:.65rem;margin-right:8px;user-select:none}
+.log-tag-error{color:#ea4335}
+.log-tag-warn{color:#fbbc04}
+.log-tag-info{color:#8ab4f8}
+.log-text{color:#ccd6f6}
+.log-text-error{color:#f28b82}
+.log-text-warn{color:#fdd663}
+
 /* ========== TOAST ========== */
 .toast-container{position:fixed;bottom:20px;right:20px;z-index:999;display:flex;flex-direction:column;gap:6px}
 .toast{padding:10px 16px;border-radius:6px;font-size:.82rem;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:toast-in .3s ease;max-width:340px}

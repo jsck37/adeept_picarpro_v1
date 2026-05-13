@@ -123,6 +123,12 @@ function wsConnect() {
         var msgType = data.type || '';
         var msgData = data.data || {};
         if (msgType === 'status') updateStatus(msgData);
+        else if (msgType === 'log') appendConsoleLine(data.text);
+        else if (msgType === 'log_history') {
+          if (data.lines && data.lines.length) {
+            data.lines.forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+          }
+        }
         else if (msgType === 'response') {
           if (msgData.error) toast(msgData.error, 'error');
           // Handle I2C scan response
@@ -1177,4 +1183,61 @@ function esc(str) {
   var div = document.createElement('div');
   div.appendChild(document.createTextNode(String(str)));
   return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOG CONSOLE
+// ═══════════════════════════════════════════════════════════════
+var consoleOutput = document.getElementById('console-output');
+var consoleLineCount = document.getElementById('console-line-count');
+var consoleAutoscroll = document.getElementById('console-autoscroll');
+var consoleClearBtn = document.getElementById('console-clear-btn');
+var consoleLineTotal = 0;
+var CONSOLE_MAX_LINES = 3000;
+
+function classifyLogLine(text) {
+  var lower = text.toLowerCase();
+  if (lower.indexOf('error') !== -1 || lower.indexOf('fail') !== -1 || lower.indexOf('traceback') !== -1 || lower.indexOf('exception') !== -1) return 'error';
+  if (lower.indexOf('warn') !== -1 || lower.indexOf('deprecated') !== -1) return 'warn';
+  if (lower.indexOf('[webserver]') !== -1 || lower.indexOf('[ds4]') !== -1 || lower.indexOf('[mpu') !== -1 || lower.indexOf('[module]') !== -1) return 'info';
+  return '';
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return '';
+  var d = new Date(ts * 1000);
+  var h = d.getHours().toString().padStart(2, '0');
+  var m = d.getMinutes().toString().padStart(2, '0');
+  var s = d.getSeconds().toString().padStart(2, '0');
+  return h + ':' + m + ':' + s;
+}
+
+function appendConsoleLine(text, ts) {
+  if (!consoleOutput) return;
+  var div = document.createElement('div');
+  div.className = 'log-line';
+  var cls = classifyLogLine(text);
+  var tsStr = formatTimestamp(ts);
+  div.innerHTML = '<span class="log-ts">' + escapeHtml(tsStr) + '</span>' +
+    '<span class="log-text' + (cls ? ' log-text-' + cls : '') + '">' + escapeHtml(text) + '</span>';
+  consoleOutput.appendChild(div);
+  consoleLineTotal++;
+  // Trim old lines
+  while (consoleOutput.childElementCount > CONSOLE_MAX_LINES) {
+    consoleOutput.removeChild(consoleOutput.firstChild);
+  }
+  if (consoleLineCount) consoleLineCount.textContent = consoleLineTotal + ' lines';
+  // Auto-scroll
+  if (consoleAutoscroll && consoleAutoscroll.checked) {
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+  }
+}
+
+if (consoleClearBtn) {
+  consoleClearBtn.addEventListener('click', function() {
+    if (consoleOutput) consoleOutput.innerHTML = '';
+    consoleLineTotal = 0;
+    if (consoleLineCount) consoleLineCount.textContent = '0 lines';
+    sendCommand('clear_log', {});
+  });
 }

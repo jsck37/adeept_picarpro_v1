@@ -528,8 +528,8 @@ def stage_7_systemd_service():
 
     service_content = f"""[Unit]
 Description=PiCar Pro Robot Server (Flask + WebSocket)
-After=network-online.target picarpro-wifi.service
-Wants=network-online.target picarpro-wifi.service
+After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
