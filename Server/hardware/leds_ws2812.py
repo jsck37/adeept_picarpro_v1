@@ -68,12 +68,16 @@ class LEDController:
         self.fill(0, 0, 0)
 
     def set_mode(self, mode, color=(255, 0, 0)):
-        self._mode = mode
         self._color = color
         if mode in ("off", "solid"):
+            self._mode = mode
             self.fill(*color) if mode == "solid" else self.clear()
             self._flag.clear()
         else:
+            # For animated modes: restart animation so it picks up new color
+            self._flag.clear()
+            time.sleep(0.05)
+            self._mode = mode
             self._flag.set()
 
     def _run(self):
@@ -87,8 +91,8 @@ class LEDController:
                 time.sleep(0.1)
 
     def _anim_breath(self):
-        r, g, b = self._color
         while self._flag.is_set() and self._mode == "breath":
+            r, g, b = self._color
             for i in range(0, 256, 5):
                 if not self._flag.is_set() or self._mode != "breath":
                     return
@@ -105,8 +109,14 @@ class LEDController:
     def _anim_flow(self):
         off = 0
         while self._flag.is_set() and self._mode in ("flow", "flowing"):
+            r, g, b = self._color
             for i in range(LED_COUNT):
-                self._pixels[i] = self._wheel((i * 256 // LED_COUNT + off) % 256)
+                base = self._wheel((i * 256 // LED_COUNT + off) % 256)
+                self._pixels[i] = (
+                    (base[0] * r) >> 8,
+                    (base[1] * g) >> 8,
+                    (base[2] * b) >> 8,
+                )
             self._show()
             off = (off + 1) % 256
             time.sleep(0.02)

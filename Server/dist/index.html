@@ -79,7 +79,7 @@
           <div class="cv-modes">
             <button class="cv-btn active" data-cv="none">Off</button>
             <button class="cv-btn" data-cv="findColor">Color</button>
-            <button class="cv-btn" data-cv="findlineCV" style="background:#1a73e8;color:#fff">CV Line</button>
+            <button class="cv-btn" data-cv="findlineCV">CV Line</button>
             <button class="cv-btn" data-cv="watchDog">Motion</button>
           </div>
         </div>
@@ -104,12 +104,21 @@
               <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
           </div>
+        </div>
+      </div>
 
-          <!-- DS4 Controller (inside Autonomous card) -->
-          <div id="ds4-controls" style="margin-top:14px;padding-top:12px;border-top:1px solid #3c4043">
+      <!-- DS4 Controller (own card) -->
+      <div class="card" id="card-ds4">
+        <div class="card-title collapsible-header open" data-target="ds4-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
+            DS4 Controller<span class="hw-missing-tag" id="ds4-missing-tag" style="display:none">Module not found</span>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="ds4-body">
+          <div id="ds4-controls">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
-              <span style="font-size:.85rem;font-weight:600;color:#e8eaed">DS4 Controller</span>
               <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335;margin-left:auto"></div>
               <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
             </div>
@@ -166,6 +175,21 @@
                 </div>
               </div>
               <div class="cam-joystick-label" id="cam-joystick-label">Camera — Arrows</div>
+            </div>
+          </div>
+
+          <!-- Claw Crane controls inside Movement -->
+          <div id="claw-controls" style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
+            <div style="margin-bottom:6px;font-size:.82rem;color:#5f6368;font-weight:600">Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span></div>
+            <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
+            <div class="btn-group" id="claw-arm-group">
+              <button class="gbtn" data-claw="arm_up" style="background:#1a73e8;color:#fff">Arm Up</button>
+              <button class="gbtn" data-claw="arm_down" style="background:#5f6368;color:#fff">Arm Down</button>
+            </div>
+            <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip</div>
+            <div class="btn-group" id="claw-grip-group">
+              <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
+              <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
             </div>
           </div>
         </div>
@@ -320,31 +344,6 @@
               <button class="gbtn" data-buzzer="alarm">Alarm</button>
               <button class="gbtn" data-buzzer="birthday">Birthday</button>
               <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Claw Crane -->
-      <div class="card" id="card-claw">
-        <div class="card-title collapsible-header open" data-target="claw-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="claw-body">
-          <div id="claw-controls">
-            <div style="margin-bottom:10px;font-size:.82rem;color:#5f6368;font-weight:600">Arm</div>
-            <div class="btn-group" id="claw-arm-group">
-              <button class="gbtn" data-claw="arm_up" style="background:#1a73e8;color:#fff">Arm Up</button>
-              <button class="gbtn" data-claw="arm_down" style="background:#5f6368;color:#fff">Arm Down</button>
-            </div>
-            <div style="margin:10px 0 8px;font-size:.82rem;color:#5f6368;font-weight:600">Grip</div>
-            <div class="btn-group" id="claw-grip-group">
-              <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
-              <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
             </div>
           </div>
         </div>

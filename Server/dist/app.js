@@ -63,13 +63,13 @@ function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
   toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
+  toggleHwSection('card-ds4', 'ds4-missing-tag', hw.ds4);
   toggleHwSection(null, 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
   toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
-  toggleHwSection('card-claw', 'claw-missing-tag', hw.crane);
-  // DS4 is now inside the Autonomous card — no separate card to toggle
+  toggleHwSection(null, 'claw-missing-tag', hw.crane);
 }
 
 function toggleHwSection(cardId, tagId, available) {
@@ -718,7 +718,7 @@ document.querySelectorAll('.color-preset').forEach(function(btn) {
   });
 });
 ledColorInput.addEventListener('input', function() {
-  if (currentLedMode === 'solid' || currentLedMode === 'breath' || currentLedMode === 'colorWipe') {
+  if (currentLedMode === 'solid' || currentLedMode === 'breath' || currentLedMode === 'flow' || currentLedMode === 'colorWipe') {
     sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
   }
 });
