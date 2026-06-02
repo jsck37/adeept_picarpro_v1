@@ -178,10 +178,11 @@ def create_app(state):
 
     @app.route("/cmd/cv_mode", methods=["POST"])
     def cmd_cv():
-        from Server.camera.camera_opencv import CV_NONE, CV_COLOR, CV_LINE, CV_WATCH
+        from Server.camera.camera_opencv import CV_NONE, CV_COLOR, CV_LINE, CV_WATCH, CV_HAND
         mode_map = {
             "none": CV_NONE, "findColor": CV_COLOR,
             "findlineCV": CV_LINE, "watchDog": CV_WATCH,
+            "trackHand": CV_HAND,
         }
         m = mode_map.get((request.get_json(silent=True) or {}).get("mode", "none"))
         if m is not None:

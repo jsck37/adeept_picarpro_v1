@@ -22,6 +22,7 @@ CV_NONE = "none"
 CV_COLOR = "findColor"
 CV_LINE = "findlineCV"
 CV_WATCH = "watchDog"
+CV_HAND = "trackHand"
 
 
 class CVThread(threading.Thread):
@@ -51,6 +52,11 @@ class CVThread(threading.Thread):
         self.on_color_found = None
         self.on_line_found = None
         self.on_motion_detected = None
+        # Hand tracking state
+        self.hand_pos = [0, 0]       # (cx, cy) of hand centroid
+        self.hand_detected = False
+        self.hand_area = 0
+        self.on_hand_found = None    # callback(pos, area, shake_detected)
 
     def run(self):
         while self._running:
@@ -88,6 +94,8 @@ class CVThread(threading.Thread):
                 self._find_line(frame)
             elif self.cv_mode == CV_WATCH:
                 self._watchdog(frame)
+            elif self.cv_mode == CV_HAND:
+                self._find_hand(frame)
         finally:
             self._processing = False
 
@@ -137,6 +145,66 @@ class CVThread(threading.Thread):
         self.motion_detected = any(cv2.contourArea(c) > 500 for c in contours)
         if self.on_motion_detected:
             self.on_motion_detected(self.motion_detected, contours)
+
+    def _find_hand(self, frame):
+        """Detect a hand using skin-colour segmentation in HSV.
+
+        Uses multiple HSV ranges for robust skin detection across different
+        lighting conditions and skin tones.  Finds the largest skin-coloured
+        contour, computes its centroid and area, and calls the callback
+        with the hand position and area.
+
+        The callback (on_hand_found) also receives a shake_detected flag
+        that is True when rapid position changes are observed — this is
+        used by the autonomous controller to auto-stop the mode.
+        """
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Two HSV ranges for skin detection (works for a variety of skin tones)
+        lower1 = np.array([0, 40, 60])
+        upper1 = np.array([25, 255, 255])
+        lower2 = np.array([170, 40, 60])
+        upper2 = np.array([180, 255, 255])
+
+        mask1 = cv2.inRange(hsv, lower1, upper1)
+        mask2 = cv2.inRange(hsv, lower2, upper2)
+        mask = cv2.bitwise_or(mask1, mask2)
+
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        # Smooth edges
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+
+        self.hand_detected = False
+        if contours:
+            c = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(c)
+            if area > 1500:  # minimum hand size
+                M = cv2.moments(c)
+                if M["m00"] > 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    self.hand_pos = [cx, cy]
+                    self.hand_area = int(area)
+                    self.hand_detected = True
+
+                    # Shake detection: check if on_hand_found callback reports shake
+                    shake = False
+                    if self.on_hand_found:
+                        shake = self.on_hand_found(self.hand_pos, self.hand_area)
+                    if shake:
+                        self.hand_detected = False
+                        return
+                    return
+
+        # No hand found — still call callback so tracker knows hand is lost
+        if self.on_hand_found:
+            self.on_hand_found([0, 0], 0)
 
     def set_color_range(self, lh, ls, lv, uh, us, uv):
         self.color_lower = np.array([lh, ls, lv])
@@ -209,6 +277,16 @@ class Camera(BaseCamera):
                 cv2.circle(frame, (p2, self.cv_thread.line_pos_2), 5, (0, 0, 255), -1)
         elif mode == CV_WATCH and self.cv_thread.motion_detected:
             cv2.putText(frame, "MOTION", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        elif mode == CV_HAND and self.cv_thread.hand_detected:
+            x, y = self.cv_thread.hand_pos
+            cv2.circle(frame, (x, y), 15, (0, 255, 0), 2)
+            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+            h, w = frame.shape[:2]
+            # Crosshair at frame centre (target)
+            cv2.line(frame, (w // 2 - 20, h // 2), (w // 2 + 20, h // 2), (255, 255, 0), 1)
+            cv2.line(frame, (w // 2, h // 2 - 20), (w // 2, h // 2 + 20), (255, 255, 0), 1)
+            cv2.putText(frame, f"HAND ({x},{y})", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         if mode != CV_NONE:
             cv2.putText(frame, mode, (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         return frame

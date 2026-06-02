@@ -33,7 +33,7 @@ from Server.hardware.switch import SwitchController
 from Server.hardware.oled import OLEDDisplay
 from Server.hardware.buzzer import BuzzerController
 from Server.hardware.mpu6050 import MPU6050Controller
-from Server.camera.camera_opencv import Camera, CV_NONE, CV_COLOR, CV_LINE, CV_WATCH
+from Server.camera.camera_opencv import Camera, CV_NONE, CV_COLOR, CV_LINE, CV_WATCH, CV_HAND
 from Server.functions.autonomous import AutonomousController
 from Server.utils.system_info import SystemInfo
 from Server.utils.log_buffer import log_buffer
@@ -278,6 +278,7 @@ def process_command(data):
         mode_map = {
             'none': CV_NONE, 'findColor': CV_COLOR,
             'findlineCV': CV_LINE, 'watchDog': CV_WATCH,
+            'trackHand': CV_HAND,
         }
         cv = mode_map.get(p.get('mode', 'none'))
         if cv is not None:
@@ -300,10 +301,15 @@ def process_command(data):
     elif cmd == 'auto':
         func = p.get('func', 'stop')
         valid_funcs = ('radarScan', 'automatic', 'trackLine',
-                       'trackLineCV', 'keepDistance', 'stop')
+                       'trackLineCV', 'trackHand', 'keepDistance', 'stop')
         if func in valid_funcs:
             # For CV line following, ensure camera is available
             if func == 'trackLineCV':
+                state.init_camera()
+                if state.camera:
+                    state.autonomous._camera = state.camera
+            # For hand tracking, ensure camera is available
+            if func == 'trackHand':
                 state.init_camera()
                 if state.camera:
                     state.autonomous._camera = state.camera

@@ -10,8 +10,9 @@ Modes:
 
 import threading
 import time
+import math
 from Server.config import (
-    SERVO_STEERING,
+    SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
     LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN, CV_LINE_FOLLOW_SCAN_Y_RATIO,
@@ -55,6 +56,13 @@ class AutonomousController:
         # Camera ref for CV line following (set later)
         self._camera = None
 
+        # Hand tracking state
+        self._hand_pan = 90
+        self._hand_tilt = 90
+        self._hand_history = []       # list of (timestamp, x, y) for shake detection
+        self._hand_shake_count = 0
+        self._hand_last_callback_time = 0
+
     def set_camera(self, camera):
         """Set camera reference for CV-based line following."""
         self._camera = camera
@@ -75,6 +83,8 @@ class AutonomousController:
                     self._track_line_cv()
                 elif self._current_mode == "keepDistance":
                     self._keep_distance()
+                elif self._current_mode == "trackHand":
+                    self._track_hand()
             except Exception as e:
                 print(f"[Auto] Error in {self._current_mode}: {e}")
                 self.stop()
@@ -93,6 +103,10 @@ class AutonomousController:
             if not self._camera:
                 print("[Auto] Cannot start trackLineCV: camera not available")
                 return False, "Camera not available"
+        if mode == "trackHand":
+            if not self._camera:
+                print("[Auto] Cannot start trackHand: camera not available")
+                return False, "Camera not available"
 
         self.stop()
         self._current_mode = mode
@@ -106,6 +120,10 @@ class AutonomousController:
         self._flag.clear()
         self.motors.stop()
         self.servos.stop_all()
+        # Reset CV mode when stopping autonomous functions
+        if self._camera:
+            self._camera.cv_thread.on_hand_found = None
+            self._camera.set_cv_mode("none")
         self._current_mode = "none"
 
     def is_active(self):
@@ -304,6 +322,148 @@ class AutonomousController:
             else:
                 self.motors.stop()
             time.sleep(0.1)
+
+    # ── Hand tracking ──────────────────────────────────────────────────
+
+    def _track_hand(self):
+        """Track a hand using OpenCV skin-colour detection.
+
+        The camera (pan/tilt servos) follows the hand to keep it centred
+        in the frame.  If the hand moves too far horizontally for the
+        camera to track, the car rotates in place to follow it.
+
+        Shake detection: if rapid horizontal position reversals are
+        detected (the hand is shaken left-right), the mode automatically
+        stops.  This is detected by tracking the hand x-position history
+        and counting direction reversals within a short time window.
+        """
+        from Server.camera.camera_opencv import CV_HAND
+
+        if not self._camera:
+            print("[Auto] No camera for hand tracking")
+            self.stop()
+            return
+
+        # Ensure camera is initialised
+        self._camera._init_camera()
+        if not self._camera._picam:
+            print("[Auto] Camera init failed")
+            self.stop()
+            return
+
+        # Set CV mode to hand tracking
+        self._camera.set_cv_mode(CV_HAND)
+
+        frame_w, frame_h = CAMERA_RESOLUTION
+        centre_x = frame_w / 2.0
+        centre_y = frame_h / 2.0
+
+        # Reset state
+        self._hand_pan = 90
+        self._hand_tilt = 90
+        self._hand_history = []
+        self._hand_shake_count = 0
+        self.servos.set_angle(SERVO_CAM_PAN, 90)
+        self.servos.set_angle(SERVO_CAM_TILT, 90)
+        self.servos.set_angle(SERVO_STEERING, 90)
+
+        PAN_STEP = 3       # degrees per update
+        TILT_STEP = 2      # degrees per update
+        STEER_STEP = 5     # steering servo degrees per update
+        DEADZONE = 0.08    # fraction of frame — ignore small offsets
+        SHAKE_WINDOW = 1.5 # seconds to look back for shake detection
+        SHAKE_THRESHOLD = 5 # number of direction reversals = shake
+
+        # Callback for hand detection from CV thread
+        def on_hand(pos, area):
+            now = time.time()
+
+            if area == 0:
+                # Hand lost
+                self.motors.stop()
+                self.servos.set_angle(SERVO_STEERING, 90)
+                return False
+
+            x, y = pos
+            # Normalised offset from centre (-1..+1)
+            offset_x = (x - centre_x) / centre_x
+            offset_y = (y - centre_y) / centre_y
+
+            # ── Shake detection ──
+            self._hand_history.append((now, offset_x))
+            # Prune old entries
+            self._hand_history = [(t, ox) for t, ox in self._hand_history if now - t < SHAKE_WINDOW]
+            # Count direction reversals in the window
+            reversals = 0
+            if len(self._hand_history) > 2:
+                prev_dir = None
+                for t, ox in self._hand_history:
+                    cur_dir = 1 if ox > 0 else -1
+                    if prev_dir is not None and cur_dir != prev_dir:
+                        reversals += 1
+                    prev_dir = cur_dir
+
+            if reversals >= SHAKE_THRESHOLD:
+                print("[Auto] Hand shake detected — stopping hand tracking")
+                self._hand_shake_count += 1  # flag for main loop
+                return True  # signal shake detected
+
+            # ── Camera pan/tilt ──
+            if abs(offset_x) > DEADZONE:
+                self._hand_pan -= int(offset_x * PAN_STEP)
+                self._hand_pan = max(0, min(180, self._hand_pan))
+            if abs(offset_y) > DEADZONE:
+                self._hand_tilt += int(offset_y * TILT_STEP)
+                self._hand_tilt = max(0, min(180, self._hand_tilt))
+
+            self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
+            self.servos.set_angle(SERVO_CAM_TILT, self._hand_tilt)
+
+            # ── Car rotation when hand is near camera edge ──
+            # If camera pan is near its limit, rotate the car to follow
+            if self._hand_pan < 30 or self._hand_pan > 150:
+                if self._hand_pan < 30:
+                    # Hand is far left — rotate car left
+                    steer_angle = max(30, 90 - STEER_STEP * 3)
+                    self.motors.move(20, 'forward', 'left', 0.4)
+                else:
+                    # Hand is far right — rotate car right
+                    steer_angle = min(150, 90 + STEER_STEP * 3)
+                    self.motors.move(20, 'forward', 'right', 0.4)
+                self.servos.set_angle(SERVO_STEERING, steer_angle)
+
+                # Re-centre camera slightly so it doesn't stay at the edge
+                if self._hand_pan < 30:
+                    self._hand_pan += STEER_STEP
+                else:
+                    self._hand_pan -= STEER_STEP
+                self._hand_pan = max(0, min(180, self._hand_pan))
+                self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
+            else:
+                # Hand is within camera range — stay still, just track
+                self.motors.stop()
+                self.servos.set_angle(SERVO_STEERING, 90)
+
+            return False
+
+        # Register callback
+        self._camera.cv_thread.on_hand_found = on_hand
+
+        print("[Auto] Hand tracking started — shake hand to stop")
+
+        # Keep the thread alive until stopped or shake detected
+        try:
+            while self._active and self._hand_shake_count == 0:
+                time.sleep(0.1)
+        finally:
+            # Clean up
+            self._camera.cv_thread.on_hand_found = None
+            self._camera.set_cv_mode("none")
+            self.motors.stop()
+            self.servos.set_angle(SERVO_STEERING, 90)
+            self.servos.set_angle(SERVO_CAM_PAN, 90)
+            self.servos.set_angle(SERVO_CAM_TILT, 90)
+            print("[Auto] Hand tracking stopped")
 
     def shutdown(self):
         self.stop()

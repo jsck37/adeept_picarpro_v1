@@ -63,7 +63,7 @@ function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
   toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
-  toggleHwSection('card-ds4', 'ds4-missing-tag', hw.ds4);
+  // DS4 card is always visible — it's informational (shows Searching/Connected/Disabled status)
   toggleHwSection(null, 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
@@ -212,7 +212,8 @@ function updateStatus(d) {
   // Show current autonomous mode or 'Ready'
   var autoModeLabels = {
     'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
-    'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'keepDistance': 'Distance'
+    'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
+    'keepDistance': 'Distance'
   };
   document.getElementById('sb-module').textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {
@@ -289,11 +290,15 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     btn.classList.add('active');
     var mode = btn.dataset.cv;
     var badge = document.getElementById('cv-badge');
-    // CV Line is an autonomous function, not just a visual overlay
+    // CV Line and Hand tracking are autonomous functions, not just visual overlays
     if (mode === 'findlineCV') {
       badge.textContent = 'CV: Line Follow';
       badge.classList.toggle('visible', true);
       sendCommand('auto', { func: 'trackLineCV' });
+    } else if (mode === 'trackHand') {
+      badge.textContent = 'CV: Hand Track';
+      badge.classList.toggle('visible', true);
+      sendCommand('auto', { func: 'trackHand' });
     } else {
       badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
       badge.classList.toggle('visible', mode !== 'none');
