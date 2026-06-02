@@ -528,7 +528,7 @@ def stage_7_systemd_service():
 
     service_content = f"""[Unit]
 Description=PiCar Pro Robot Server (Flask + WebSocket)
-After=network.target
+After=network.target NetworkManager.service
 Wants=network.target
 
 [Service]
@@ -536,12 +536,14 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory={thisPath}
+ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/python3 {server_path}
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60
 StartLimitBurst=3
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH={thisPath}
 
 [Install]
 WantedBy=multi-user.target

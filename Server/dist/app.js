@@ -209,16 +209,12 @@ function updateStatus(d) {
   }
   if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
   if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
-  document.getElementById('sb-module').textContent = d.running_module || 'Ready';
-  // Update color format label from server status
-  if (d.color_format) {
-    var fmtLabel = document.getElementById('color-fmt-label');
-    if (fmtLabel) fmtLabel.textContent = d.color_format;
-    // Highlight active button
-    document.querySelectorAll('[data-cfmt]').forEach(function(b) {
-      b.classList.toggle('active', b.dataset.cfmt === d.color_format);
-    });
-  }
+  // Show current autonomous mode or 'Ready'
+  var autoModeLabels = {
+    'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
+    'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'keepDistance': 'Distance'
+  };
+  document.getElementById('sb-module').textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
@@ -280,7 +276,6 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
     document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
     btn.classList.add('active');
     document.getElementById('content-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'modules') loadModules();
     if (btn.dataset.tab === 'info') loadDocs();
   });
 });
@@ -297,19 +292,6 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
     badge.classList.toggle('visible', mode !== 'none');
     sendCommand('cv_mode', { mode: mode });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-//  COLOR FORMAT BUTTONS (camera color debug)
-// ═══════════════════════════════════════════════════════════════
-document.querySelectorAll('[data-cfmt]').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('[data-cfmt]').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    var fmt = btn.dataset.cfmt;
-    document.getElementById('color-fmt-label').textContent = fmt;
-    sendCommand('color_format', { format: fmt });
   });
 });
 
@@ -807,60 +789,7 @@ document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULES
-// ═══════════════════════════════════════════════════════════════
-var currentRunningModule = null;
-
-async function loadModules() {
-  var grid = document.getElementById('modules-grid');
-  grid.innerHTML = '<div style="color:#5f6368;font-size:.82rem">Loading...</div>';
-  try {
-    var res = await fetch('/api/modules');
-    var data = await res.json();
-    var modules = data.modules || [];
-    var uploads = data.uploads || [];
-    currentRunningModule = data.running;
-    var all = modules.concat(uploads);
-    if (all.length === 0) { grid.innerHTML = '<div style="color:#5f6368;font-size:.82rem">No modules found</div>'; return; }
-    grid.innerHTML = '';
-    all.forEach(function(mod) {
-      var isRunning = currentRunningModule === mod.id || currentRunningModule === mod.name;
-      var card = document.createElement('div');
-      card.className = 'module-card' + (isRunning ? ' running' : '');
-      var tags = (mod.hardware || []).map(function(h) { return '<span class="module-tag">' + h + '</span>'; }).join('');
-      card.innerHTML =
-        '<div class="module-header">' +
-          '<div class="module-icon">' + (mod.icon || '\u2699') + '</div>' +
-          '<div class="module-info"><h3>' + (mod.name || mod.id) + '</h3>' +
-          '<p>' + (mod.desc || '') + '</p></div></div>' +
-        (tags ? '<div class="module-tags">' + tags + '</div>' : '') +
-        '<div class="module-actions">' +
-          (isRunning
-            ? '<button class="btn-sm btn-danger" data-mod-stop="1">Stop</button><span style="font-size:.75rem;color:#34a853;font-weight:600">Running</span>'
-            : '<button class="btn-sm btn-primary" data-mod-run="' + mod.id + '">Run</button>') +
-        '</div>';
-      grid.appendChild(card);
-    });
-    grid.querySelectorAll('[data-mod-run]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var mid = btn.dataset.modRun;
-        sendCommand('module_start', { id: mid });
-        fetch('/api/modules/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: mid }) })
-          .then(function(r) { return r.json(); }).then(function(d) {
-            if (d.ok) { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); }
-            else { toast('Error: ' + (d.message || 'Failed'), 'error'); }
-          }).catch(function() { toast('Started: ' + mid, 'success'); setTimeout(loadModules, 500); });
-      });
-    });
-    grid.querySelectorAll('[data-mod-stop]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        sendCommand('module_stop', {});
-        fetch('/api/modules/stop', { method: 'POST' }).then(function() { toast('Stopped', 'success'); setTimeout(loadModules, 500); });
-      });
-    });
-  } catch(e) { grid.innerHTML = '<div style="color:#ea4335;font-size:.82rem">Error loading modules</div>'; }
-}
+// Module system removed — all features are built-in
 
 // ═══════════════════════════════════════════════════════════════
 //  FILE UPLOAD

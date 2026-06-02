@@ -112,7 +112,12 @@ class CVThread(threading.Thread):
 
     def _find_line(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Gaussian blur to reduce noise before thresholding
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
         _, binary = cv2.threshold(gray, self.line_threshold, 255, cv2.THRESH_BINARY_INV)
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
         indices1 = np.where(binary[self.line_pos_1] > 0)[0]
         indices2 = np.where(binary[self.line_pos_2] > 0)[0]
         pos1 = int(np.mean(indices1)) if len(indices1) > 0 else 0

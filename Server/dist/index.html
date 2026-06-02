@@ -22,7 +22,7 @@
   <div class="sb-sep"></div>
   <div class="sb-item"><span class="sb-label">Speed</span><span class="sb-value" id="sb-speed">50%</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Module</span><span class="sb-value" id="sb-module">Ready</span></div>
+  <div class="sb-item"><span class="sb-label">Mode</span><span class="sb-value" id="sb-module">Ready</span></div>
   <div class="sb-sep"></div>
   <div class="sb-item"><span class="sb-label">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
   <div class="sb-sep"></div>
@@ -39,7 +39,6 @@
     <button class="tab-btn active" data-tab="control">Control</button>
     <button class="tab-btn" data-tab="console">Console</button>
     <button class="tab-btn" data-tab="info">Info</button>
-    <button class="tab-btn" data-tab="modules">Modules</button>
   </nav>
 </header>
 
@@ -63,20 +62,6 @@
           <div class="camera-wrap">
             <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
             <div class="cv-badge" id="cv-badge">CV: Off</div>
-          </div>
-          <!-- Color: RGB raw (no conversion) -->
-            <!-- Color reference strip -->
-            <div style="color:#9aa0a6;margin-bottom:4px">Reference — compare with camera:</div>
-            <div style="display:flex;gap:2px;height:24px;border-radius:3px;overflow:hidden">
-              <div style="flex:1;background:#ff0000;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">R</div>
-              <div style="flex:1;background:#00ff00;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">G</div>
-              <div style="flex:1;background:#0000ff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">B</div>
-              <div style="flex:1;background:#ffff00;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">Y</div>
-              <div style="flex:1;background:#00ffff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">C</div>
-              <div style="flex:1;background:#ff00ff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700">M</div>
-              <div style="flex:1;background:#ff8800;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">O</div>
-              <div style="flex:1;background:#ffffff;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">W</div>
-            </div>
           </div>
         </div>
       </div>
@@ -114,9 +99,13 @@
             <div class="btn-group" id="auto-group">
               <button class="gbtn" data-auto="radarScan">Radar</button>
               <button class="gbtn" data-auto="automatic">Drive</button>
-              <button class="gbtn" data-auto="trackLine">Line</button>
+              <button class="gbtn" data-auto="trackLine">IR Line</button>
+              <button class="gbtn" data-auto="trackLineCV" style="background:#1a73e8;color:#fff">CV Line</button>
               <button class="gbtn" data-auto="keepDistance">Distance</button>
               <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
+            </div>
+            <div style="margin-top:8px;font-size:.72rem;color:#5f6368;line-height:1.5">
+              <b>CV Line</b> — Follow black lines on white background using camera + OpenCV
             </div>
           </div>
         </div>
@@ -362,21 +351,20 @@
             </div>
             <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
               <div style="font-weight:600;color:#8ab4f8;margin-bottom:4px">Controls:</div>
-              <div><b>Left stick</b> &mdash; Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> &mdash; Camera pan/tilt</div>
-              <div><b>L2 / R2</b> &mdash; Speed down / up</div>
-              <div><b>D-pad</b> &mdash; Claw arm &amp; grip</div>
-              <div><b>Cross</b> &mdash; Claw grip toggle</div>
-              <div><b>Circle</b> &mdash; Claw arm toggle</div>
-              <div><b>Triangle</b> &mdash; Buzzer beep</div>
-              <div><b>Square</b> &mdash; LED mode cycle</div>
-              <div><b>L1</b> &mdash; Headlights toggle</div>
-              <div><b>R1</b> &mdash; Horn (alarm)</div>
-              <div><b>Options</b> &mdash; Emergency stop</div>
-              <div><b>PS</b> &mdash; Home all servos</div>
-              <div><b>Share</b> &mdash; CV mode cycle</div>
-              <div><b>L3</b> &mdash; Speed reset</div>
-              <div><b>R3</b> &mdash; Center camera</div>
+              <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
+              <div><b>Right stick</b> — Camera pan/tilt</div>
+              <div><b>L2 / R2</b> — Speed down / up</div>
+              <div><b>D-pad</b> — Claw arm &amp; grip</div>
+              <div><b>Cross</b> — Claw grip toggle</div>
+              <div><b>Circle</b> — Claw arm toggle</div>
+              <div><b>Triangle</b> — Buzzer beep</div>
+              <div><b>Square</b> — LED mode cycle</div>
+              <div><b>L1</b> — Headlights toggle</div>
+              <div><b>R1</b> — Horn (alarm)</div>
+              <div><b>Options</b> — Emergency stop</div>
+              <div><b>PS</b> — Home all servos</div>
+              <div><b>L3</b> — Speed reset</div>
+              <div><b>R3</b> — Center camera</div>
             </div>
           </div>
         </div>
@@ -417,40 +405,6 @@
     </div>
     <div class="info-main" id="info-main">
       <div class="info-loading">Loading documentation...</div>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== MODULES TAB ==================== -->
-<div class="tab-content" id="content-modules">
-  <div class="card">
-    <div class="card-title collapsible-header open" data-target="modules-list-body">
-      <div style="display:flex;align-items:center;gap:8px">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Available Modules
-      </div>
-      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="collapsible-body open" id="modules-list-body">
-      <div class="modules-grid" id="modules-grid"></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-title collapsible-header open" data-target="upload-body">
-      <div style="display:flex;align-items:center;gap:8px">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Upload Module
-      </div>
-      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="collapsible-body open" id="upload-body">
-      <div class="upload-area" id="upload-area">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <p>Drop .py files here or click to browse</p>
-        <input type="file" id="file-input" accept=".py" multiple>
-        <button class="btn-sm btn-primary upload-btn" id="upload-btn">Upload</button>
-        <div class="upload-progress" id="upload-progress"><div class="upload-progress-bar" id="upload-progress-bar"></div></div>
-      </div>
     </div>
   </div>
 </div>

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""PiCar Pro v1 — Flask (5000) + WebSocket (8888) server."""
+"""PiCar Pro v1 — Flask (5000) + WebSocket (8888) server.
+
+Refactored:
+  - Module system removed (no more dynamic script loading)
+  - Lazy hardware init for fast systemd startup
+  - OpenCV line-following added as autonomous mode
+  - Log console fully integrated via WebSocket
+"""
 
 import asyncio, json, os, signal, socket, sys, threading, time
 
@@ -30,10 +37,11 @@ from Server.camera.camera_opencv import Camera, CV_NONE, CV_COLOR, CV_LINE, CV_W
 from Server.functions.autonomous import AutonomousController
 from Server.utils.system_info import SystemInfo
 from Server.utils.log_buffer import log_buffer
-from Server.modules import get_module_list, get_module_path
 
 SERVO_CAL_FILE = os.path.join(os.path.dirname(__file__), "servo_cal.json")
 
+
+# ── Servo calibration persistence ──────────────────────────────────────
 
 def load_servo_cal():
     try:
@@ -64,83 +72,7 @@ def get_ip():
         return "0.0.0.0"
 
 
-class ModuleRunner:
-    def __init__(self):
-        self._thread = None
-        self._current = None
-        self._lock = threading.Lock()
-        self._last_cmd = "Ready"
-        self._stop = threading.Event()
-
-    def start(self, module_id):
-        with self._lock:
-            self.stop()
-            path = get_module_path(module_id)
-            if not path or not os.path.isfile(path):
-                return False, f"Module '{module_id}' not found"
-            self._stop.clear()
-            self._current = module_id
-            self._last_cmd = f"Run: {module_id}"
-            self._thread = threading.Thread(target=self._run, args=(path,), daemon=True)
-            self._thread.start()
-            return True, f"Started: {module_id}"
-
-    def start_upload(self, fp):
-        with self._lock:
-            self.stop()
-            if not os.path.isfile(fp):
-                return False, "File not found"
-            self._stop.clear()
-            self._current = os.path.basename(fp)
-            self._last_cmd = f"Run: {self._current}"
-            self._thread = threading.Thread(target=self._run, args=(fp,), daemon=True)
-            self._thread.start()
-            return True, f"Started: {self._current}"
-
-    def _run(self, path):
-        try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("mod", path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            if hasattr(mod, 'main'):
-                mod.main(hw={'motors': state.motors, 'servos': state.servos, 'leds': state.leds,
-                             'switches': state.switches, 'buzzer': state.buzzer, 'oled': state.oled,
-                             'mpu6050': state.mpu6050, 'ultrasonic': state.ultrasonic})
-        except Exception as e:
-            print(f"[Module] Error: {e}")
-        finally:
-            with self._lock:
-                self._current = None
-                self._last_cmd = "Ready"
-
-    def stop(self):
-        with self._lock:
-            self._stop.set()
-            if self._thread and self._thread.is_alive():
-                self._thread.join(timeout=3)
-            self._thread = None
-            self._current = None
-            self._last_cmd = "Stopped"
-
-    def set_command(self, cmd):
-        with self._lock:
-            self._last_cmd = cmd
-
-    @property
-    def running_module(self):
-        with self._lock:
-            if self._thread and self._thread.is_alive():
-                return self._current
-            self._thread = None
-            self._current = None
-            return None
-
-    @property
-    def last_command(self):
-        with self._lock:
-            return self._last_cmd
-
+# ── Shared state ──────────────────────────────────────────────────────
 
 class SharedState:
     def __init__(self):
@@ -149,8 +81,8 @@ class SharedState:
         self.motors = self.servos = self.leds = self.ultrasonic = None
         self.switches = self.oled = self.buzzer = self.mpu6050 = None
         self.autonomous = self.voice = self.camera = self.ds4 = None
-        self.module_runner = ModuleRunner()
         self.ws_clients = set()
+        self._hw_inited = False
 
     def init_camera(self):
         if not self.camera:
@@ -162,24 +94,31 @@ class SharedState:
         ultra_ok = self.ultrasonic and self.ultrasonic._initialized
         mpu_ok = self.mpu6050 and self.mpu6050.initialized
         return {
-            "cpu_temp": info["cpu_temp"], "cpu_usage": info["cpu_usage"],
-            "ram_percent": ram["percent"], "ram_used_mb": ram["used_mb"], "ram_total_mb": ram["total_mb"],
+            "cpu_temp": info["cpu_temp"],
+            "cpu_usage": info["cpu_usage"],
+            "ram_percent": ram["percent"],
+            "ram_used_mb": ram["used_mb"],
+            "ram_total_mb": ram["total_mb"],
             "distance": self.ultrasonic.get_last_distance() if ultra_ok else 0,
             "mpu6050": self.mpu6050.get_data() if mpu_ok else None,
             "cv_mode": self.camera.cv_thread.cv_mode if self.camera else "none",
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
-            "running_module": self.module_runner.running_module,
-            "speed": self.speed, "crane_enabled": CRANE_ENABLED,
-            "ultrasonic_enabled": ULTRASONIC_ENABLED, "line_tracker_enabled": LINE_TRACKER_ENABLED,
+            "auto_mode": self.autonomous._current_mode if self.autonomous else "none",
+            "speed": self.speed,
+            "crane_enabled": CRANE_ENABLED,
+            "ultrasonic_enabled": ULTRASONIC_ENABLED,
+            "line_tracker_enabled": LINE_TRACKER_ENABLED,
             "hw": {
                 "motors": self.motors._initialized if self.motors else False,
                 "servos": self.servos._pwm_initialized if self.servos else False,
                 "leds": self.leds._initialized if self.leds else False,
                 "buzzer": self.buzzer._initialized if self.buzzer else False,
                 "switches": self.switches._initialized if self.switches else False,
-                "ultrasonic": ultra_ok, "mpu6050": mpu_ok,
+                "ultrasonic": ultra_ok,
+                "mpu6050": mpu_ok,
                 "oled": self.oled._initialized if self.oled else False,
-                "camera": self.camera is not None, "crane": CRANE_ENABLED,
+                "camera": self.camera is not None,
+                "crane": CRANE_ENABLED,
                 "ds4": self.ds4.connected if self.ds4 else False,
             },
             "ds4": self.ds4.get_status() if self.ds4 else None,
@@ -188,20 +127,23 @@ class SharedState:
     def shutdown_hardware(self):
         self.running = False
         print("[WebServer] Shutting down...")
-        self.module_runner.stop()
-        for hw in (self.motors, self.autonomous, self.voice):
-            if hw:
-                try:
-                    hw.stop() if hasattr(hw, 'stop') else None
-                except Exception:
-                    pass
+        if self.autonomous:
+            try:
+                self.autonomous.shutdown()
+            except Exception:
+                pass
+        if self.voice:
+            try:
+                self.voice.shutdown()
+            except Exception:
+                pass
         if self.camera:
             try:
                 self.camera.shutdown()
             except Exception:
                 pass
-        for hw in (self.servos, self.leds, self.switches, self.ultrasonic,
-                   self.buzzer, self.oled, self.mpu6050, self.ds4):
+        for hw in (self.motors, self.servos, self.leds, self.switches,
+                   self.ultrasonic, self.buzzer, self.oled, self.mpu6050, self.ds4):
             if hw:
                 try:
                     hw.shutdown()
@@ -213,6 +155,8 @@ class SharedState:
 state = SharedState()
 
 
+# ── OLED info display loop ────────────────────────────────────────────
+
 def oled_loop():
     ip, port = get_ip(), FLASK_PORT
     while state.running:
@@ -220,12 +164,17 @@ def oled_loop():
             info = SystemInfo.get_all()
             ram = info['ram']
             if state.oled:
-                state.oled.set_lines([f"{ip}:{port}", f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%",
-                                      f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%"])
+                state.oled.set_lines([
+                    f"{ip}:{port}",
+                    f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%",
+                    f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%",
+                ])
         except Exception:
             pass
         time.sleep(1.5)
 
+
+# ── Command processing ────────────────────────────────────────────────
 
 def process_command(data):
     cmd = data.get('cmd', '')
@@ -234,9 +183,11 @@ def process_command(data):
 
     if cmd == 'move':
         d = p.get('dir', 'stop')
-        state.module_runner.set_command(f"Move: {d}")
-        steer = {'forward':90,'backward':90,'left':150,'right':30,
-                 'forward_left':120,'forward_right':60,'backward_left':120,'backward_right':60,'stop':90}
+        steer_map = {
+            'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
+            'forward_left': 120, 'forward_right': 60,
+            'backward_left': 120, 'backward_right': 60, 'stop': 90,
+        }
         if d in ('forward',):
             state.motors.move(state.speed, 'forward', 'no', 0.5)
         elif d in ('backward',):
@@ -249,9 +200,8 @@ def process_command(data):
             state.motors.move(state.speed, 'backward', d.split('_')[1], 0.3)
         elif d == 'stop':
             state.motors.stop()
-            state.module_runner.set_command("Ready")
-        state.servos.set_angle(SERVO_STEERING, steer.get(d, 90))
-        r = {'ok': True, 'cmd': cmd, 'dir': d, 'steer': steer.get(d, 90)}
+        state.servos.set_angle(SERVO_STEERING, steer_map.get(d, 90))
+        r = {'ok': True, 'cmd': cmd, 'dir': d, 'steer': steer_map.get(d, 90)}
 
     elif cmd == 'speed':
         try:
@@ -283,7 +233,7 @@ def process_command(data):
     elif cmd == 'led':
         mode = p.get('mode', 'off')
         color = p.get('color', [255, 0, 0])
-        if mode in ('off','solid','breath','flow','rainbow','police','colorWipe'):
+        if mode in ('off', 'solid', 'breath', 'flow', 'rainbow', 'police', 'colorWipe'):
             try:
                 color = tuple(max(0, min(255, int(c))) for c in color[:3])
             except Exception:
@@ -292,7 +242,8 @@ def process_command(data):
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep':'beep','alarm':'alarm','birthday':'happy_birthday'}.get(p.get('melody','beep'))
+        key = {'beep': 'beep', 'alarm': 'alarm', 'birthday': 'happy_birthday'}.get(
+            p.get('melody', 'beep'))
         if key:
             state.buzzer.play_melody(key)
             r = {'ok': True}
@@ -306,8 +257,12 @@ def process_command(data):
             r['error'] = 'Crane not enabled'
         else:
             act = p.get('action', '')
-            actions = {'arm_up':(SERVO_CLAW_ARM,CLAW_ARM_UP),'arm_down':(SERVO_CLAW_ARM,CLAW_ARM_DOWN),
-                       'grip_open':(SERVO_CLAW_GRIP,CLAW_GRIP_OPEN),'grip_close':(SERVO_CLAW_GRIP,CLAW_GRIP_CLOSED)}
+            actions = {
+                'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
+                'arm_down': (SERVO_CLAW_ARM, CLAW_ARM_DOWN),
+                'grip_open': (SERVO_CLAW_GRIP, CLAW_GRIP_OPEN),
+                'grip_close': (SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED),
+            }
             if act in actions:
                 state.servos.set_angle(*actions[act])
                 r = {'ok': True, 'action': act}
@@ -320,8 +275,11 @@ def process_command(data):
             r = {'ok': True}
 
     elif cmd == 'cv_mode':
-        mode_map = {'none':CV_NONE,'findColor':CV_COLOR,'findlineCV':CV_LINE,'watchDog':CV_WATCH}
-        cv = mode_map.get(p.get('mode','none'))
+        mode_map = {
+            'none': CV_NONE, 'findColor': CV_COLOR,
+            'findlineCV': CV_LINE, 'watchDog': CV_WATCH,
+        }
+        cv = mode_map.get(p.get('mode', 'none'))
         if cv is not None:
             state.init_camera()
             state.camera.set_cv_mode(cv)
@@ -331,43 +289,31 @@ def process_command(data):
         from Server.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
         devs = i2c_scan()
         addr, who = find_mpu6050_on_bus()
-        r = {'ok': True, 'devices': [f'0x{a:02X}' for a in devs],
-             'mpu6050_found': addr is not None,
-             'mpu6050_addr': f'0x{addr:02X}' if addr else None,
-             'mpu6050_who_am_i': f'0x{who:02X}' if who else None}
+        r = {
+            'ok': True,
+            'devices': [f'0x{a:02X}' for a in devs],
+            'mpu6050_found': addr is not None,
+            'mpu6050_addr': f'0x{addr:02X}' if addr else None,
+            'mpu6050_who_am_i': f'0x{who:02X}' if who else None,
+        }
 
     elif cmd == 'auto':
         func = p.get('func', 'stop')
-        if func in ('radarScan','automatic','trackLine','keepDistance','stop'):
+        valid_funcs = ('radarScan', 'automatic', 'trackLine',
+                       'trackLineCV', 'keepDistance', 'stop')
+        if func in valid_funcs:
+            # For CV line following, ensure camera is available
+            if func == 'trackLineCV':
+                state.init_camera()
+                if state.camera:
+                    state.autonomous._camera = state.camera
             if func == 'stop':
                 state.autonomous.stop()
             else:
                 state.autonomous.start(func)
             r = {'ok': True, 'func': func}
-
-    elif cmd == 'module_start':
-        mid = p.get('id', '')
-        updir = os.path.join(os.path.dirname(__file__), "modules", "uploads")
-        if mid.startswith('upload_'):
-            ok, msg = state.module_runner.start_upload(os.path.join(updir, mid[7:]))
         else:
-            ok, msg = state.module_runner.start(mid)
-        r = {'ok': ok, 'message': msg, 'id': mid}
-
-    elif cmd == 'module_stop':
-        state.module_runner.stop()
-        r = {'ok': True}
-
-    elif cmd == 'get_modules':
-        modules = get_module_list(p.get('lang', 'en'))
-        updir = os.path.join(os.path.dirname(__file__), "modules", "uploads")
-        uploaded = []
-        if os.path.isdir(updir):
-            for f in sorted(os.listdir(updir)):
-                if f.endswith('.py'):
-                    uploaded.append({'id':f'upload_{f}','name':f,'desc':f'Uploaded: {f}',
-                                    'icon':'page','hardware':[],'file':f,'is_upload':True})
-        r = {'ok': True, 'modules': modules, 'uploads': uploaded, 'running': state.module_runner.running_module}
+            r['error'] = f'Unknown auto function: {func}'
 
     elif cmd == 'get_info':
         r = {'ok': True}
@@ -390,15 +336,19 @@ def process_command(data):
     return r
 
 
+# ── WebSocket handler ─────────────────────────────────────────────────
+
 async def ws_handler(ws, path=None):
     state.ws_clients.add(ws)
     # Send initial status + recent log history
     try:
         await ws.send(json.dumps({'type': 'status', 'data': state.get_status()}))
-        # Send last 100 log lines
         recent = log_buffer.get_lines(last_n=100)
         if recent:
-            await ws.send(json.dumps({'type': 'log_history', 'lines': [[ts, txt] for ts, txt in recent]}))
+            await ws.send(json.dumps({
+                'type': 'log_history',
+                'lines': [[ts, txt] for ts, txt in recent],
+            }))
     except Exception:
         pass
 
@@ -414,7 +364,6 @@ async def ws_handler(ws, path=None):
     log_buffer.subscribe(on_log)
 
     try:
-        # Start log forwarding task
         async def forward_logs():
             try:
                 while state.running:
@@ -435,9 +384,15 @@ async def ws_handler(ws, path=None):
                 r = process_command(json.loads(msg))
                 await ws.send(json.dumps({'type': 'response', 'data': r}))
             except json.JSONDecodeError:
-                await ws.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': 'Invalid JSON'}}))
+                await ws.send(json.dumps({
+                    'type': 'response',
+                    'data': {'ok': False, 'error': 'Invalid JSON'},
+                }))
             except Exception as e:
-                await ws.send(json.dumps({'type': 'response', 'data': {'ok': False, 'error': str(e)}}))
+                await ws.send(json.dumps({
+                    'type': 'response',
+                    'data': {'ok': False, 'error': str(e)},
+                }))
     except websockets.exceptions.ConnectionClosed:
         pass
     except Exception:
@@ -465,8 +420,10 @@ async def status_broadcast():
         await asyncio.sleep(1.5)
 
 
+# ── Main ──────────────────────────────────────────────────────────────
+
 def main():
-    # ── Install log capture FIRST ──────────────────────────────────
+    # Install log capture FIRST so all prints go to the console
     log_buffer.install()
 
     print("=" * 50)
@@ -477,17 +434,22 @@ def main():
         print("[WebServer] ERROR: websockets not installed!")
         sys.exit(1)
 
-    # ── Hardware init ──────────────────────────────────────────────
+    # ── Hardware init (lazy where possible) ──────────────────────────
+    print("[WebServer] Initialising hardware...")
+
     state.motors = MotorController()
     state.servos = ServoController()
     state.leds = LEDController()
     state.switches = SwitchController()
     state.oled = OLEDDisplay()
     state.buzzer = BuzzerController()
+
+    # MPU6050 — init in background to avoid blocking startup
     try:
         state.mpu6050 = MPU6050Controller()
     except Exception as e:
         print(f"[MPU6050] Error: {e}")
+
     state.ultrasonic = UltrasonicSensor()
 
     if DS4_ENABLED:
@@ -498,12 +460,16 @@ def main():
             print(f"[DS4] Init error: {e}")
 
     state.autonomous = AutonomousController(state.motors, state.servos, state.ultrasonic)
+    # Camera ref for CV line following — set lazily when camera is initialised
+    state.autonomous.set_camera = lambda: setattr(state.autonomous, '_camera', state.camera) if state.camera else None
+
     try:
         from Server.functions.voice_command import VoiceCommandController
         state.voice = VoiceCommandController(state.servos, state.motors)
     except Exception:
         pass
 
+    # Apply saved servo calibration
     cal = load_servo_cal()
     for i, a in enumerate(cal):
         if 0 <= i < SERVO_COUNT:
@@ -513,29 +479,38 @@ def main():
     except Exception:
         pass
 
+    # OLED info display
     ip = get_ip()
     if state.oled:
         state.oled.set_lines([f"{ip}:{FLASK_PORT}", "Starting...", "", ""])
     threading.Thread(target=oled_loop, daemon=True).start()
 
-    # Flask thread
+    # Flask in background thread
     from Server.app import create_app
     app = create_app(state)
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True,
-                                            debug=False, use_reloader=False), daemon=True).start()
+    threading.Thread(
+        target=lambda: app.run(
+            host="0.0.0.0", port=FLASK_PORT, threaded=True,
+            debug=False, use_reloader=False,
+        ),
+        daemon=True,
+    ).start()
     print(f"[WebServer] Flask on :{FLASK_PORT}")
 
+    # Signal handlers
     signal.signal(signal.SIGINT, lambda s, f: (state.shutdown_hardware(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda s, f: (state.shutdown_hardware(), sys.exit(0)))
 
     # DS4 start
     if state.ds4:
-        state.ds4.start(motors=state.motors, servos=state.servos, leds=state.leds,
-                        buzzer=state.buzzer, switches=state.switches,
-                        speed=state.speed, shared_state=state)
+        state.ds4.start(
+            motors=state.motors, servos=state.servos, leds=state.leds,
+            buzzer=state.buzzer, switches=state.switches,
+            speed=state.speed, shared_state=state,
+        )
 
     print("-" * 50)
-    print(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF'}")
+    print(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")
     print(f"  Buzzer:  {'ON' if state.buzzer._initialized else 'OFF'}")
     print(f"  Crane:   {'ON' if CRANE_ENABLED else 'OFF'}")
     print(f"  DS4:     {'ON' if state.ds4 else 'OFF'}")

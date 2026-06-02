@@ -4,7 +4,7 @@ import threading, time
 from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
 
 class OLEDDisplay:
-    SCROLL_TEXT = "modded by turik <3 from 8241117 "
+    SCROLL_TEXT = "PiCar Pro v1 "
 
     def __init__(self):
         self._device = None

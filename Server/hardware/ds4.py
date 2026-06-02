@@ -8,9 +8,15 @@ We MUST select the main gamepad, not the touchpad.
 The main gamepad has BTN_SOUTH (Cross) in its key capabilities.
 
 Stick ranges vary by connection:
-  - Bluetooth (hid-sony): 0-255, center 128
-  - USB (hid-playstation): -32768..32767, center 0
+  - Bluetooth (hid-sony): 0–255, centre 128
+  - USB (hid-playstation): -32768..32767, centre 0
 Axis ranges are auto-detected from device capabilities.
+
+Fixes applied:
+  - D-pad mapping corrected (hat_y > 0 = DOWN → arm down, not up)
+  - Safe grab/ungrab with error recovery
+  - Watchdog reconnection without resource leaks
+  - Proper event loop with blocking read instead of polling
 """
 
 import math, threading, time
@@ -33,6 +39,8 @@ from Server.config import (
 
 
 class DS4Controller:
+    """DualShock 4 gamepad controller with auto-reconnect."""
+
     def __init__(self):
         self._running = False
         self._connected = False
@@ -41,13 +49,13 @@ class DS4Controller:
         self._watchdog_thread = None
         self._axis_ranges = {}  # {code: (min, max)}
 
-        # Stick state
+        # Stick state (normalised –1..+1)
         self._lx = self._ly = self._rx = self._ry = 0.0
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
         self._btn_state = {}
 
-        # Hardware refs
+        # Hardware refs (set in start())
         self._motors = self._servos = self._leds = None
         self._buzzer = self._switches = self._shared_state = None
         self._speed = DEFAULT_SPEED
@@ -57,7 +65,10 @@ class DS4Controller:
         self._led_modes = ['off', 'solid', 'breath', 'flow', 'rainbow', 'police']
         self._lock = threading.Lock()
 
-    def start(self, motors, servos, leds, buzzer, switches, speed=DEFAULT_SPEED, shared_state=None):
+    # ── Public API ─────────────────────────────────────────────────────
+
+    def start(self, motors, servos, leds, buzzer, switches,
+              speed=DEFAULT_SPEED, shared_state=None):
         if not DS4_ENABLED or not HAS_EVDEV:
             print("[DS4] Disabled or evdev missing")
             return
@@ -78,14 +89,20 @@ class DS4Controller:
         return self._connected
 
     def get_status(self):
-        return {'enabled': DS4_ENABLED, 'connected': self._connected,
-                'speed': self._speed, 'lx': round(self._lx, 2),
-                'ly': round(self._ly, 2), 'rx': round(self._rx, 2), 'ry': round(self._ry, 2)}
+        return {
+            'enabled': DS4_ENABLED,
+            'connected': self._connected,
+            'speed': self._speed,
+            'lx': round(self._lx, 2),
+            'ly': round(self._ly, 2),
+            'rx': round(self._rx, 2),
+            'ry': round(self._ry, 2),
+        }
 
     # ── Device discovery ────────────────────────────────────────────────
 
     def _find_device(self):
-        """Find the MAIN gamepad device (not touchpad)."""
+        """Find the MAIN gamepad device (not the touchpad)."""
         if not HAS_EVDEV:
             return None
         try:
@@ -93,19 +110,22 @@ class DS4Controller:
             candidates = []
             for dev in devices:
                 name = dev.name.lower()
-                if DS4_DEVICE_NAME.lower() in name or 'dualshock' in name or 'sony interactive' in name:
+                if (DS4_DEVICE_NAME.lower() in name
+                        or 'dualshock' in name
+                        or 'sony interactive' in name):
                     candidates.append(dev)
             if not candidates:
                 return None
             if len(candidates) == 1:
                 return candidates[0]
+
             # Multiple devices: find the one with gamepad buttons (not touchpad)
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 keys = caps.get(ecodes.EV_KEY, [])
-                # Main gamepad has BTN_SOUTH (Cross/A) — touchpad does not
                 if ecodes.BTN_SOUTH in keys or ecodes.BTN_A in keys:
                     return dev
+
             # Fallback: first with ABS_X
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
@@ -119,24 +139,29 @@ class DS4Controller:
     def _connect(self, device):
         try:
             device.grab()
-            self._device = device
-            self._connected = True
-            # Cache axis ranges
-            self._axis_ranges = {}
-            try:
-                caps = device.capabilities(absinfo=True)
-                for code, info in caps.get(ecodes.EV_ABS, []):
-                    self._axis_ranges[code] = (info.min, info.max)
-                abs_info = {ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}' for k, v in self._axis_ranges.items()}
-                print(f"[DS4] Connected: {device.name} @ {device.path}")
-                print(f"[DS4] Axes: {abs_info}")
-            except Exception:
-                print(f"[DS4] Connected: {device.name}")
-            self._thread = threading.Thread(target=self._event_loop, daemon=True)
-            self._thread.start()
         except Exception as e:
-            print(f"[DS4] Connect failed: {e}")
-            self._connected = False
+            print(f"[DS4] Grab failed (non-fatal): {e}")
+            # Continue without exclusive access — other processes may still read
+
+        self._device = device
+        self._connected = True
+        self._axis_ranges = {}
+
+        try:
+            caps = device.capabilities(absinfo=True)
+            for code, info in caps.get(ecodes.EV_ABS, []):
+                self._axis_ranges[code] = (info.min, info.max)
+            abs_info = {
+                ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}'
+                for k, v in self._axis_ranges.items()
+            }
+            print(f"[DS4] Connected: {device.name} @ {device.path}")
+            print(f"[DS4] Axes: {abs_info}")
+        except Exception:
+            print(f"[DS4] Connected: {device.name}")
+
+        self._thread = threading.Thread(target=self._event_loop, daemon=True)
+        self._thread.start()
 
     def _disconnect(self):
         self._connected = False
@@ -167,34 +192,36 @@ class DS4Controller:
     def _event_loop(self):
         while self._running and self._connected:
             try:
-                ev = self._device.read_one()
-                if ev is None:
-                    time.sleep(0.005)
-                    continue
-                if ev.type == ecodes.EV_ABS:
-                    self._on_axis(ev.code, ev.value)
-                elif ev.type == ecodes.EV_KEY:
-                    self._on_key(ev.code, ev.value)
+                # Use blocking read with timeout for responsiveness
+                for ev in self._device.read_loop():
+                    if not self._running or not self._connected:
+                        break
+                    if ev.type == ecodes.EV_ABS:
+                        self._on_axis(ev.code, ev.value)
+                    elif ev.type == ecodes.EV_KEY:
+                        self._on_key(ev.code, ev.value)
             except OSError:
+                print("[DS4] Device lost")
                 self._disconnect()
                 break
             except Exception as e:
                 print(f"[DS4] Event error: {e}")
                 time.sleep(0.01)
-        self._disconnect()
+        if self._connected:
+            self._disconnect()
 
-    # ── Axis normalization ──────────────────────────────────────────────
+    # ── Axis normalisation ──────────────────────────────────────────────
 
     def _range(self, code):
         return self._axis_ranges.get(code, (0, 255))
 
     def _norm_axis(self, value, code):
         lo, hi = self._range(code)
-        center = (lo + hi) / 2.0
+        centre = (lo + hi) / 2.0
         half = (hi - lo) / 2.0
         if half == 0:
             return 0.0
-        n = (value - center) / half
+        n = (value - centre) / half
         if abs(n) < DS4_DEADZONE:
             return 0.0
         if n > 0:
@@ -212,79 +239,79 @@ class DS4Controller:
     # ── Event handlers ──────────────────────────────────────────────────
 
     def _on_axis(self, code, value):
-        ABS = ecodes if HAS_EVDEV else None
-        if code == ABS.ABS_X:
+        if code == ecodes.ABS_X:
             self._lx = self._norm_axis(value, code)
             self._apply_move()
-        elif code == ABS.ABS_Y:
-            self._ly = self._norm_axis(value, code)   # NOT inverted — up=forward in raw
+        elif code == ecodes.ABS_Y:
+            self._ly = self._norm_axis(value, code)
             self._apply_move()
-        elif code == ABS.ABS_RX:
+        elif code == ecodes.ABS_RX:
             self._rx = self._norm_axis(value, code)
             self._apply_camera()
-        elif code == ABS.ABS_RY:
-            self._ry = self._norm_axis(value, code)   # NOT inverted — tilt fixed separately
+        elif code == ecodes.ABS_RY:
+            self._ry = self._norm_axis(value, code)
             self._apply_camera()
-        elif code == ABS.ABS_Z:
+        elif code == ecodes.ABS_Z:
             self._l2 = self._norm_trigger(value, code)
             self._apply_triggers()
-        elif code == ABS.ABS_RZ:
+        elif code == ecodes.ABS_RZ:
             self._r2 = self._norm_trigger(value, code)
             self._apply_triggers()
-        elif code == ABS.ABS_HAT0X:
+        elif code == ecodes.ABS_HAT0X:
             self._hat_x = value
             self._apply_dpad()
-        elif code == ABS.ABS_HAT0Y:
+        elif code == ecodes.ABS_HAT0Y:
             self._hat_y = value
             self._apply_dpad()
 
     def _on_key(self, code, value):
         was = self._btn_state.get(code, False)
         self._btn_state[code] = value
-        if value and not was:
+        if value and not was:          # rising edge only
             self._btn_press(code)
 
     def _btn_press(self, code):
-        E = ecodes if HAS_EVDEV else None
-        if code == E.BTN_SOUTH or code == E.BTN_A:    # Cross — claw grip
+        if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):       # Cross — claw grip
             if CRANE_ENABLED and self._servos:
                 self._claw_grip_closed = not self._claw_grip_closed
-                self._servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED if self._claw_grip_closed else CLAW_GRIP_OPEN)
-        elif code == E.BTN_EAST or code == E.BTN_B:   # Circle — claw arm
+                angle = CLAW_GRIP_CLOSED if self._claw_grip_closed else CLAW_GRIP_OPEN
+                self._servos.set_angle(SERVO_CLAW_GRIP, angle)
+        elif code in (ecodes.BTN_EAST, ecodes.BTN_B):      # Circle — claw arm
             if CRANE_ENABLED and self._servos:
                 self._claw_arm_down = not self._claw_arm_down
-                self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP)
-        elif code == E.BTN_NORTH or code == E.BTN_Y:  # Triangle — beep
+                angle = CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP
+                self._servos.set_angle(SERVO_CLAW_ARM, angle)
+        elif code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle — beep
             if self._buzzer:
                 self._buzzer.beep()
-        elif code == E.BTN_WEST or code == E.BTN_X:   # Square — LED cycle
+        elif code in (ecodes.BTN_WEST, ecodes.BTN_X):      # Square — LED cycle
             if self._leds:
                 self._led_mode_idx = (self._led_mode_idx + 1) % len(self._led_modes)
                 self._leds.set_mode(self._led_modes[self._led_mode_idx], (255, 0, 0))
-        elif code == E.BTN_TL:                         # L1 — headlights
+        elif code == ecodes.BTN_TL:                         # L1 — headlights
             if self._switches and self._switches._initialized:
                 self._headlights_on = not self._headlights_on
                 (self._switches.on if self._headlights_on else self._switches.off)(0)
                 (self._switches.on if self._headlights_on else self._switches.off)(1)
-        elif code == E.BTN_TR:                         # R1 — alarm
+        elif code == ecodes.BTN_TR:                         # R1 — alarm
             if self._buzzer:
                 self._buzzer.play_alarm()
-        elif code == E.BTN_MODE:                       # PS — home servos
+        elif code == ecodes.BTN_MODE:                       # PS — home servos
             if self._servos:
                 self._servos.move_init()
                 self._cam_pan = self._cam_tilt = 90
-        elif code == E.BTN_START:                      # Options — e-stop
+        elif code == ecodes.BTN_START:                      # Options — e-stop
             if self._motors:
                 self._motors.stop()
             if self._servos:
                 self._servos.set_angle(SERVO_STEERING, 90)
             self._lx = self._ly = 0.0
-        elif code == E.BTN_SELECT:                     # Share — unused
+        elif code == ecodes.BTN_SELECT:                     # Share — unused
             pass
-        elif code == E.BTN_THUMBL:                     # L3 — speed reset
+        elif code == ecodes.BTN_THUMBL:                     # L3 — speed reset
             with self._lock:
                 self._speed = DEFAULT_SPEED
-        elif code == E.BTN_THUMBR:                     # R3 — center camera
+        elif code == ecodes.BTN_THUMBR:                     # R3 — centre camera
             if self._servos:
                 self._cam_pan = self._cam_tilt = 90
                 self._servos.set_angle(SERVO_CAM_PAN, 90)
@@ -323,9 +350,8 @@ class DS4Controller:
             return
         rx, ry = self._rx, self._ry
         pan = max(0, min(180, int(90 + rx * 90 * DS4_CAM_SENSITIVITY)))
-        # Tilt: ry > 0 means stick down → tilt down (lower angle)
-        # ry < 0 means stick up → tilt up (higher angle)
-        # So we SUBTRACT ry to invert the tilt direction
+        # Tilt: ry > 0 = stick down → tilt down (lower angle)
+        #       ry < 0 = stick up → tilt up (higher angle)
         tilt = max(0, min(180, int(90 - ry * 90 * DS4_CAM_SENSITIVITY)))
         if pan != self._cam_pan or tilt != self._cam_tilt:
             self._cam_pan, self._cam_tilt = pan, tilt
@@ -341,15 +367,20 @@ class DS4Controller:
                     self._shared_state.speed = self._speed
 
     def _apply_dpad(self):
+        """D-pad controls the claw.
+
+        FIX: hat_y > 0 means D-pad DOWN → arm goes DOWN (CLAW_ARM_DOWN).
+             hat_y < 0 means D-pad UP   → arm goes UP   (CLAW_ARM_UP).
+        """
         if not CRANE_ENABLED or not self._servos:
             return
-        if self._hat_y > 0:
-            self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_UP)
-        elif self._hat_y < 0:
+        if self._hat_y > 0:                                    # D-pad DOWN
             self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
-        if self._hat_x < 0:
+        elif self._hat_y < 0:                                  # D-pad UP
+            self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_UP)
+        if self._hat_x < 0:                                    # D-pad LEFT
             self._servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
-        elif self._hat_x > 0:
+        elif self._hat_x > 0:                                  # D-pad RIGHT
             self._servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
 
     def shutdown(self):
