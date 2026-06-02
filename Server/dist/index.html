@@ -79,7 +79,7 @@
           <div class="cv-modes">
             <button class="cv-btn active" data-cv="none">Off</button>
             <button class="cv-btn" data-cv="findColor">Color</button>
-            <button class="cv-btn" data-cv="findlineCV">Line</button>
+            <button class="cv-btn" data-cv="findlineCV" style="background:#1a73e8;color:#fff">CV Line</button>
             <button class="cv-btn" data-cv="watchDog">Motion</button>
           </div>
         </div>
@@ -100,12 +100,28 @@
               <button class="gbtn" data-auto="radarScan">Radar</button>
               <button class="gbtn" data-auto="automatic">Drive</button>
               <button class="gbtn" data-auto="trackLine">IR Line</button>
-              <button class="gbtn" data-auto="trackLineCV" style="background:#1a73e8;color:#fff">CV Line</button>
               <button class="gbtn" data-auto="keepDistance">Distance</button>
               <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
-            <div style="margin-top:8px;font-size:.72rem;color:#5f6368;line-height:1.5">
-              <b>CV Line</b> — Follow black lines on white background using camera + OpenCV
+          </div>
+
+          <!-- DS4 Controller (inside Autonomous card) -->
+          <div id="ds4-controls" style="margin-top:14px;padding-top:12px;border-top:1px solid #3c4043">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
+              <span style="font-size:.85rem;font-weight:600;color:#e8eaed">DS4 Controller</span>
+              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335;margin-left:auto"></div>
+              <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
+            </div>
+            <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
+              <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
+              <div><b>Right stick</b> — Camera pan/tilt</div>
+              <div><b>L2 / R2</b> — Speed down / up</div>
+              <div><b>D-pad</b> — Claw arm &amp; grip</div>
+              <div><b>Cross</b> — Claw grip toggle &nbsp; <b>Circle</b> — Claw arm toggle</div>
+              <div><b>Triangle</b> — Buzzer &nbsp; <b>Square</b> — LED mode &nbsp; <b>L1</b> — Headlights</div>
+              <div><b>R1</b> — Horn &nbsp; <b>Options</b> — E-stop &nbsp; <b>PS</b> — Home servos</div>
+              <div><b>L3</b> — Speed reset &nbsp; <b>R3</b> — Center camera</div>
             </div>
           </div>
         </div>
@@ -334,41 +350,6 @@
         </div>
       </div>
 
-      <!-- DS4 Controller -->
-      <div class="card" id="card-ds4">
-        <div class="card-title collapsible-header open" data-target="ds4-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
-            DS4 Controller<span class="hw-missing-tag" id="ds4-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="ds4-body">
-          <div id="ds4-controls">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
-              <span id="ds4-status-text" style="font-size:.82rem;color:#9aa0a6">Not connected</span>
-            </div>
-            <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
-              <div style="font-weight:600;color:#8ab4f8;margin-bottom:4px">Controls:</div>
-              <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> — Camera pan/tilt</div>
-              <div><b>L2 / R2</b> — Speed down / up</div>
-              <div><b>D-pad</b> — Claw arm &amp; grip</div>
-              <div><b>Cross</b> — Claw grip toggle</div>
-              <div><b>Circle</b> — Claw arm toggle</div>
-              <div><b>Triangle</b> — Buzzer beep</div>
-              <div><b>Square</b> — LED mode cycle</div>
-              <div><b>L1</b> — Headlights toggle</div>
-              <div><b>R1</b> — Horn (alarm)</div>
-              <div><b>Options</b> — Emergency stop</div>
-              <div><b>PS</b> — Home all servos</div>
-              <div><b>L3</b> — Speed reset</div>
-              <div><b>R3</b> — Center camera</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
     </div><!-- /col-right -->
   </div>

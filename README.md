@@ -36,6 +36,13 @@ git clone https://github.com/jsck37/adeept_picarpro_v1
 sudo python3 adeept_picarpro_v1/setup.py
 ```
 
-### 3. Просмотр веб-интерфейса
+### 3. Проверка службы автозагрузки
 
-http://localhost:5000
+```bash
+systemctl status picarpro
+```
+
+### 4. Запуск веб-интерфейса
+
+1. http://localhost:5000
+2. http://192.168.ваш_ip_адрес:5000

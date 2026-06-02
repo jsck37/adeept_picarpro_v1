@@ -69,7 +69,7 @@ function updateHardwareUI(hardwareStatus) {
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
   toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
   toggleHwSection('card-claw', 'claw-missing-tag', hw.crane);
-  toggleHwSection('card-ds4', 'ds4-missing-tag', hw.ds4);
+  // DS4 is now inside the Autonomous card — no separate card to toggle
 }
 
 function toggleHwSection(cardId, tagId, available) {
@@ -289,9 +289,18 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     btn.classList.add('active');
     var mode = btn.dataset.cv;
     var badge = document.getElementById('cv-badge');
-    badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
-    badge.classList.toggle('visible', mode !== 'none');
-    sendCommand('cv_mode', { mode: mode });
+    // CV Line is an autonomous function, not just a visual overlay
+    if (mode === 'findlineCV') {
+      badge.textContent = 'CV: Line Follow';
+      badge.classList.toggle('visible', true);
+      sendCommand('auto', { func: 'trackLineCV' });
+    } else {
+      badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+      badge.classList.toggle('visible', mode !== 'none');
+      // Stop autonomous mode if switching to a non-line CV mode
+      if (mode !== 'none') sendCommand('auto', { func: 'stop' });
+      sendCommand('cv_mode', { mode: mode });
+    }
   });
 });
 
@@ -791,41 +800,7 @@ document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
 
 // Module system removed — all features are built-in
 
-// ═══════════════════════════════════════════════════════════════
-//  FILE UPLOAD
-// ═══════════════════════════════════════════════════════════════
-var uploadArea = document.getElementById('upload-area');
-var fileInput = document.getElementById('file-input');
-var uploadBtn = document.getElementById('upload-btn');
-var uploadProgress = document.getElementById('upload-progress');
-var uploadProgressBar = document.getElementById('upload-progress-bar');
-
-uploadArea.addEventListener('click', function() { fileInput.click(); });
-uploadArea.addEventListener('dragover', function(e) { e.preventDefault(); uploadArea.classList.add('drag-over'); });
-uploadArea.addEventListener('dragleave', function() { uploadArea.classList.remove('drag-over'); });
-uploadArea.addEventListener('drop', function(e) { e.preventDefault(); uploadArea.classList.remove('drag-over'); if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files); });
-uploadBtn.addEventListener('click', function(e) { e.stopPropagation(); if (fileInput.files.length > 0) uploadFiles(fileInput.files); });
-
-function uploadFiles(files) {
-  uploadProgress.classList.add('visible');
-  var completed = 0, total = files.length;
-  for (var i = 0; i < files.length; i++) {
-    (function(file) {
-      var fd = new FormData(); fd.append('file', file);
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/modules/upload');
-      xhr.upload.onprogress = function(e) {
-        if (e.lengthComputable) uploadProgressBar.style.width = Math.round((completed / total) * 100 + (e.loaded / e.total) * (100 / total)) + '%';
-      };
-      xhr.onload = function() {
-        completed++;
-        if (completed === total) { uploadProgressBar.style.width = '100%'; setTimeout(function() { uploadProgress.classList.remove('visible'); uploadProgressBar.style.width = '0%'; toast('Upload complete!', 'success'); loadModules(); }, 500); }
-      };
-      xhr.onerror = function() { toast('Upload failed', 'error'); };
-      xhr.send(fd);
-    })(files[i]);
-  }
-}
+// Module system removed — file upload code deleted
 
 // ═══════════════════════════════════════════════════════════════
 //  INFO TAB — Documentation viewer

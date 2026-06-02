@@ -122,6 +122,9 @@ DS4_DEVICE_NAME      = "Wireless Controller"
 DS4_DEADZONE         = 0.12
 DS4_STEER_SENSITIVITY = 1.0
 DS4_CAM_SENSITIVITY  = 0.8
+DS4_HEARTBEAT_TIMEOUT = 10.0   # seconds without events -> consider disconnected
+DS4_WATCHDOG_INTERVAL = 3.0    # seconds between watchdog checks
+DS4_READ_TIMEOUT      = 2.0    # select() timeout for event reading
 
 # ── Network ────────────────────────────────────────────────────────────
 WEBSOCKET_PORT = 8888
