@@ -1,6 +1,6 @@
 # -*- coding: utf8 -*-
 # Logger — loguru + LogBuffer (WebSocket web console) -----------------
-import os, sys, logging, re
+import os, sys, logging
 from loguru import logger
 
 
@@ -41,14 +41,11 @@ logger.remove()
 logger.level('ERROR',   color='<red><bold>')
 logger.level('WARNING', color='<yellow><bold>')
 logger.level('INFO',    color='<cyan><bold>')
-logger.level('DEBUG',   color='<fg #808080><bold>')
 
 
-# ── Custom sink: LogBuffer (WebSocket web console) ────────────────────
-# Sends plain-text log messages to LogBuffer so they appear in the
-# web UI console in real time via the existing WebSocket subscription.
-
-_STRIP_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+# ── Custom sink: LogBuffer → WebSocket web console ───────────────────
+# This is the ONLY mechanism that delivers logs to the web UI.
+# log_buffer.write() triggers subscribers → ws_handler → browser.
 
 def _logbuffer_sink(message):
     """Loguru sink that writes to LogBuffer for WebSocket delivery."""
@@ -58,14 +55,10 @@ def _logbuffer_sink(message):
         level_name = record['level'].name
         text = record['message']
         # Prepend level tag so the web console can colour-code it
-        # (the web UI already detects "error"/"warn" keywords, but
-        #  an explicit tag is more reliable)
         if level_name == 'ERROR':
             tag = '[ERROR] '
         elif level_name == 'WARNING':
             tag = '[WARN] '
-        elif level_name == 'DEBUG':
-            tag = '[DBG] '
         else:
             tag = ''
         log_buffer.write(tag + text)
@@ -73,22 +66,13 @@ def _logbuffer_sink(message):
         pass  # Never let the sink raise
 
 
-# Always-active LogBuffer sink (INFO and above)
+# LogBuffer sink — always active, INFO and above (no DEBUG in web console)
 logger.add(
     sink=_logbuffer_sink,
     format="{message}",
     filter=lambda record: record['level'].no >= 20,   # INFO+
     level="INFO",
 )
-
-# DEBUG-level LogBuffer sink (only when log_file is enabled)
-# This allows debug messages to reach the web console when file logging is on
-def _debug_logbuffer_sink(message):
-    try:
-        from Server.utils.log_buffer import log_buffer
-        log_buffer.write('[DBG] ' + message.record['message'])
-    except Exception:
-        pass
 
 
 # ── Console / file sink ──────────────────────────────────────────────
@@ -121,7 +105,7 @@ else:
             "<green><b><u>{file}</u></b></green> "
             "- <white>{message}</white>"
         ),
-        level="DEBUG",
+        level="INFO",
     )
 
 

@@ -431,8 +431,8 @@ async def status_broadcast():
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
-    # Install log capture FIRST so all prints go to the console
-    log_buffer.install()
+    # LogBuffer already receives logs via loguru _logbuffer_sink
+    # (no need for log_buffer.install() since we don't use print() anymore)
 
     logger.info("=" * 50)
     logger.info("  PiCar Pro v1 (Flask + WebSocket)")
@@ -534,7 +534,6 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        log_buffer.uninstall()
         state.shutdown_hardware()
 
 

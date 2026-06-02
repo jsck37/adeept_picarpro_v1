@@ -197,7 +197,7 @@ class DS4Controller:
             }
             logger.info(f"[DS4] Connected #{self._connect_count}: "
                   f"{device.name} @ {device.path}")
-            logger.debug(f"[DS4] Axes: {abs_info}")
+            logger.info(f"[DS4] Axes: {abs_info}")
         except Exception:
             logger.info(f"[DS4] Connected #{self._connect_count}: {device.name}")
 

@@ -46,7 +46,7 @@ def find_mpu6050_on_bus(bus_number=None):
             try:
                 who = bus.read_byte_data(addr, REG_WHO_AM_I)
                 if who in WHO_AM_I_VALUES:
-                    logger.debug(f"[MPU6050] Found WHO_AM_I=0x{who:02X} at 0x{addr:02X}")
+                    logger.info(f"[MPU6050] Found WHO_AM_I=0x{who:02X} at 0x{addr:02X}")
                     bus.close()
                     return addr, who
             except Exception:
@@ -81,7 +81,7 @@ class MPU6050Controller:
         found_addr, _ = find_mpu6050_on_bus()
         self._scan_results = i2c_scan()
         if self._scan_results:
-            logger.debug(f"[MPU6050] I2C devices: {', '.join(f'0x{a:02X}' for a in self._scan_results)}")
+            logger.info(f"[MPU6050] I2C devices: {', '.join(f'0x{a:02X}' for a in self._scan_results)}")
         else:
             logger.warning("[MPU6050] No I2C devices found!")
         if found_addr and self._try_smbus(found_addr):
