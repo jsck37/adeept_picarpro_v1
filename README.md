@@ -45,4 +45,4 @@ systemctl status picarpro
 ### 4. Запуск веб-интерфейса
 
 1. http://localhost:5000
-2. http://192.168.ваш_ip_адрес:5000
+2. http://192.168.x.x:5000
