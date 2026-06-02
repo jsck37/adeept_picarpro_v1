@@ -14,6 +14,9 @@ LINE_TRACKER_ENABLED = False
 CRANE_ENABLED       = True
 DS4_ENABLED         = True
 
+# ── Logging ────────────────────────────────────────────────────────────
+log_file = False           # True = write logs to file, False = console only
+
 # ── I2C bus ────────────────────────────────────────────────────────────
 I2C_BUS = 1
 

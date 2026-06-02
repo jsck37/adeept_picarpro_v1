@@ -23,6 +23,7 @@ Fixes applied:
 """
 
 import math, os, select, threading, time
+from Server.logger import logger
 
 try:
     import evdev
@@ -76,7 +77,7 @@ class DS4Controller:
     def start(self, motors, servos, leds, buzzer, switches,
               speed=DEFAULT_SPEED, shared_state=None):
         if not DS4_ENABLED or not HAS_EVDEV:
-            print("[DS4] Disabled or evdev missing")
+            logger.warning("[DS4] Disabled or evdev missing")
             return
         self._motors, self._servos, self._leds = motors, servos, leds
         self._buzzer, self._switches = buzzer, switches
@@ -84,7 +85,7 @@ class DS4Controller:
         self._running = True
         self._watchdog_thread = threading.Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
-        print("[DS4] Searching for controller...")
+        logger.info("[DS4] Searching for controller...")
 
     def stop(self):
         self._running = False
@@ -153,7 +154,7 @@ class DS4Controller:
                     return dev
             return candidates[0]
         except Exception as e:
-            print(f"[DS4] Search error: {e}")
+            logger.error(f"[DS4] Search error: {e}")
             return None
 
     def _device_alive(self):
@@ -177,7 +178,7 @@ class DS4Controller:
         try:
             device.grab()
         except Exception as e:
-            print(f"[DS4] Grab failed (non-fatal): {e}")
+            logger.warning(f"[DS4] Grab failed (non-fatal): {e}")
             # Continue without exclusive access
 
         self._device = device
@@ -194,11 +195,11 @@ class DS4Controller:
                 ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}'
                 for k, v in self._axis_ranges.items()
             }
-            print(f"[DS4] Connected #{self._connect_count}: "
+            logger.info(f"[DS4] Connected #{self._connect_count}: "
                   f"{device.name} @ {device.path}")
-            print(f"[DS4] Axes: {abs_info}")
+            logger.debug(f"[DS4] Axes: {abs_info}")
         except Exception:
-            print(f"[DS4] Connected #{self._connect_count}: {device.name}")
+            logger.info(f"[DS4] Connected #{self._connect_count}: {device.name}")
 
         self._thread = threading.Thread(target=self._event_loop, daemon=True)
         self._thread.start()
@@ -226,7 +227,7 @@ class DS4Controller:
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
         if was_connected:
-            print("[DS4] Disconnected — will auto-reconnect when available")
+            logger.warning("[DS4] Disconnected — will auto-reconnect when available")
 
     # -- Background threads -----------------------------------------------
 
@@ -244,13 +245,13 @@ class DS4Controller:
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
                     if not self._device_alive():
-                        print(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
+                        logger.warning(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
                               f"and device gone — disconnecting")
                         self._disconnect()
                     else:
                         # Device file still there but no events — might be
                         # a temporary BT hiccup.  Reset the timer and wait.
-                        print(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
+                        logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
                               f"but device still present — resetting timer")
                         self._last_event_time = time.monotonic()
             time.sleep(DS4_WATCHDOG_INTERVAL)
@@ -270,7 +271,7 @@ class DS4Controller:
                 # select() waits until data is available or timeout
                 fd = self._device.fd
                 if fd is None:
-                    print("[DS4] File descriptor became None")
+                    logger.warning("[DS4] File descriptor became None")
                     self._disconnect()
                     break
 
@@ -291,22 +292,22 @@ class DS4Controller:
                     # EV_SYN and others are ignored
 
             except OSError as e:
-                print(f"[DS4] Device lost (OSError): {e}")
+                logger.error(f"[DS4] Device lost (OSError): {e}")
                 self._disconnect()
                 break
             except ValueError as e:
                 # "file descriptor cannot be a negative integer" — fd closed
-                print(f"[DS4] Device lost (ValueError): {e}")
+                logger.error(f"[DS4] Device lost (ValueError): {e}")
                 self._disconnect()
                 break
             except Exception as e:
                 err_str = str(e).lower()
                 if 'not open' in err_str or 'closed' in err_str or 'bad file' in err_str:
-                    print(f"[DS4] Device lost: {e}")
+                    logger.error(f"[DS4] Device lost: {e}")
                     self._disconnect()
                     break
                 # Transient error — log and continue
-                print(f"[DS4] Event read error (will retry): {e}")
+                logger.warning(f"[DS4] Event read error (will retry): {e}")
                 time.sleep(0.05)
 
         # Clean up if we exited the loop while still marked connected

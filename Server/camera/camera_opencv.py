@@ -1,6 +1,7 @@
 """Camera — PiCamera2 + OpenCV, rgb_raw only, 30fps."""
 
 import threading, time, math, cv2, numpy as np
+from Server.logger import logger
 
 try:
     from picamera2 import Picamera2
@@ -68,7 +69,7 @@ class CVThread(threading.Thread):
                 try:
                     self._process()
                 except Exception as e:
-                    print(f"[CV] Error: {e}")
+                    logger.error(f"[CV] Error: {e}")
 
     def submit_frame(self, frame):
         if self._processing:
@@ -233,7 +234,7 @@ class Camera(BaseCamera):
         if CAMERA_FLIP_VERTICAL:
             self._picam.set_control("flip_v", True)
         self._picam.start()
-        print(f"[Camera] {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps q={CAMERA_JPEG_QUALITY}%")
+        logger.info(f"[Camera] {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps q={CAMERA_JPEG_QUALITY}%")
 
     def frames(self):
         self._init_camera()
@@ -256,7 +257,7 @@ class Camera(BaseCamera):
                 if ok:
                     yield jpg.tobytes()
             except Exception as e:
-                print(f"[Camera] Error: {e}")
+                logger.error(f"[Camera] Error: {e}")
                 time.sleep(0.1)
 
     def _draw_overlays(self, frame):

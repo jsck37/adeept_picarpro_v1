@@ -1,6 +1,7 @@
 """Base camera — background capture thread with FPS control."""
 
 import threading, time
+from Server.logger import logger
 
 class BaseCamera:
     thread = None
@@ -41,7 +42,7 @@ class BaseCamera:
                     frames_gen.close()
                     break
         except Exception as e:
-            print(f"[Camera] Thread error: {e}")
+            logger.error(f"[Camera] Thread error: {e}")
         finally:
             BaseCamera.thread = None
             BaseCamera._running = False

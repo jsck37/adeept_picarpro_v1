@@ -2,6 +2,7 @@
 
 import time, threading
 from Server.config import LED_COUNT, LED_BRIGHTNESS
+from Server.logger import logger
 
 class LEDController:
     def __init__(self):
@@ -22,7 +23,7 @@ class LEDController:
             self._strip = ws.PixelStrip(LED_COUNT, 12, 800000, 10, False, LED_BRIGHTNESS, 0)
             self._strip.begin()
             self._initialized = True
-            print(f"[LEDs] WS2812: {LED_COUNT} LEDs")
+            logger.info(f"[LEDs] WS2812: {LED_COUNT} LEDs")
             threading.Thread(target=self._run, daemon=True).start()
         except Exception:
             self._try_spi()
@@ -35,10 +36,10 @@ class LEDController:
             self._spi.max_speed_hz = 4000000
             self._use_spi = True
             self._initialized = True
-            print(f"[LEDs] SPI fallback: {LED_COUNT} LEDs")
+            logger.warning(f"[LEDs] SPI fallback: {LED_COUNT} LEDs")
             threading.Thread(target=self._run, daemon=True).start()
         except Exception as e:
-            print(f"[LEDs] Failed: {e}")
+            logger.error(f"[LEDs] Failed: {e}")
 
     def _show(self):
         if not self._initialized:
@@ -182,4 +183,4 @@ class LEDController:
                 self._spi.close()
             except Exception:
                 pass
-        print("[LEDs] Shutdown")
+        logger.info("[LEDs] Shutdown")

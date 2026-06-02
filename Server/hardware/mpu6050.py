@@ -2,6 +2,7 @@
 
 import math, threading, time
 from Server.config import MPU6050_ADDR, I2C_BUS
+from Server.logger import logger
 
 REG_PWR_MGMT_1 = 0x6B
 REG_SMPLRT_DIV = 0x19
@@ -31,7 +32,7 @@ def i2c_scan(bus_number=None):
                 pass
         bus.close()
     except Exception as e:
-        print(f"[I2C] Scan failed: {e}")
+        logger.error(f"[I2C] Scan failed: {e}")
     return found
 
 
@@ -45,14 +46,14 @@ def find_mpu6050_on_bus(bus_number=None):
             try:
                 who = bus.read_byte_data(addr, REG_WHO_AM_I)
                 if who in WHO_AM_I_VALUES:
-                    print(f"[MPU6050] Found WHO_AM_I=0x{who:02X} at 0x{addr:02X}")
+                    logger.debug(f"[MPU6050] Found WHO_AM_I=0x{who:02X} at 0x{addr:02X}")
                     bus.close()
                     return addr, who
             except Exception:
                 pass
         bus.close()
     except Exception as e:
-        print(f"[MPU6050] Bus scan failed: {e}")
+        logger.error(f"[MPU6050] Bus scan failed: {e}")
     return None, None
 
 
@@ -76,16 +77,16 @@ class MPU6050Controller:
         for addr in POSSIBLE_ADDRS:
             if self._try_smbus(addr):
                 return
-        print("[MPU6050] Standard addresses failed, scanning bus...")
+        logger.warning("[MPU6050] Standard addresses failed, scanning bus...")
         found_addr, _ = find_mpu6050_on_bus()
         self._scan_results = i2c_scan()
         if self._scan_results:
-            print(f"[MPU6050] I2C devices: {', '.join(f'0x{a:02X}' for a in self._scan_results)}")
+            logger.debug(f"[MPU6050] I2C devices: {', '.join(f'0x{a:02X}' for a in self._scan_results)}")
         else:
-            print("[MPU6050] No I2C devices found!")
+            logger.warning("[MPU6050] No I2C devices found!")
         if found_addr and self._try_smbus(found_addr):
             return
-        print("[MPU6050] Not found — will retry in background")
+        logger.warning("[MPU6050] Not found — will retry in background")
         self._running = True
         self._thread = threading.Thread(target=self._retry_loop, daemon=True)
         self._thread.start()
@@ -98,7 +99,7 @@ class MPU6050Controller:
             # Read WHO_AM_I
             who = bus.read_byte_data(addr, REG_WHO_AM_I)
             if who not in WHO_AM_I_VALUES:
-                print(f"[MPU6050] WHO_AM_I=0x{who:02X} at 0x{addr:02X} — unexpected")
+                logger.warning(f"[MPU6050] WHO_AM_I=0x{who:02X} at 0x{addr:02X} — unexpected")
                 bus.close()
                 return False
             # Wake up: clear SLEEP bit
@@ -117,10 +118,10 @@ class MPU6050Controller:
             self._running = True
             self._thread = threading.Thread(target=self._read_loop, daemon=True)
             self._thread.start()
-            print(f"[MPU6050] OK at 0x{addr:02X} (WHO_AM_I=0x{who:02X})")
+            logger.info(f"[MPU6050] OK at 0x{addr:02X} (WHO_AM_I=0x{who:02X})")
             return True
         except Exception as e:
-            print(f"[MPU6050] smbus@0x{addr:02X} failed: {e}")
+            logger.error(f"[MPU6050] smbus@0x{addr:02X} failed: {e}")
         return False
 
     @staticmethod
@@ -158,7 +159,7 @@ class MPU6050Controller:
         while self._running and not self.initialized:
             time.sleep(5)
             retry += 1
-            print(f"[MPU6050] Retry #{retry}...")
+            logger.info(f"[MPU6050] Retry #{retry}...")
             for addr in POSSIBLE_ADDRS:
                 if self._try_smbus(addr):
                     return
@@ -178,7 +179,7 @@ class MPU6050Controller:
                 self._read_word(self._bus, self._addr, 0x3B)
                 self.initialized = True
         except Exception:
-            print("[MPU6050] Re-init failed")
+            logger.error("[MPU6050] Re-init failed")
 
     def get_data(self):
         if not self.initialized:
@@ -197,4 +198,4 @@ class MPU6050Controller:
                 self._bus.write_byte_data(self._addr, REG_PWR_MGMT_1, 0x40)
             except Exception:
                 pass
-        print("[MPU6050] Shutdown")
+        logger.info("[MPU6050] Shutdown")

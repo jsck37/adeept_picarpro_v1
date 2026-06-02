@@ -18,6 +18,7 @@ from Server.config import (
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN, CV_LINE_FOLLOW_SCAN_Y_RATIO,
     CAMERA_RESOLUTION,
 )
+from Server.logger import logger
 
 
 class AutonomousController:
@@ -47,11 +48,11 @@ class AutonomousController:
                     InputDevice(LINE_MIDDLE_PIN),
                     InputDevice(LINE_RIGHT_PIN),
                 ]
-                print("[Auto] IR line sensors initialized")
+                logger.info("[Auto] IR line sensors initialized")
             except Exception as e:
-                print(f"[Auto] IR sensors failed: {e}")
+                logger.error(f"[Auto] IR sensors failed: {e}")
         else:
-            print("[Auto] Line tracker DISABLED in config")
+            logger.warning("[Auto] Line tracker DISABLED in config")
 
         # Camera ref for CV line following (set later)
         self._camera = None
@@ -86,33 +87,33 @@ class AutonomousController:
                 elif self._current_mode == "trackHand":
                     self._track_hand()
             except Exception as e:
-                print(f"[Auto] Error in {self._current_mode}: {e}")
+                logger.error(f"[Auto] Error in {self._current_mode}: {e}")
                 self.stop()
 
     def start(self, mode):
         """Start an autonomous mode."""
         if mode in ("radarScan", "automatic", "keepDistance"):
             if not ULTRASONIC_ENABLED or not self.ultrasonic._initialized:
-                print(f"[Auto] Cannot start {mode}: ultrasonic not available")
+                logger.warning(f"[Auto] Cannot start {mode}: ultrasonic not available")
                 return False, "Ultrasonic sensor not available"
         if mode == "trackLine":
             if not LINE_TRACKER_ENABLED or len(self._ir_sensors) < 3:
-                print("[Auto] Cannot start trackLine: IR sensors not available")
+                logger.warning("[Auto] Cannot start trackLine: IR sensors not available")
                 return False, "Line tracker not available"
         if mode == "trackLineCV":
             if not self._camera:
-                print("[Auto] Cannot start trackLineCV: camera not available")
+                logger.warning("[Auto] Cannot start trackLineCV: camera not available")
                 return False, "Camera not available"
         if mode == "trackHand":
             if not self._camera:
-                print("[Auto] Cannot start trackHand: camera not available")
+                logger.warning("[Auto] Cannot start trackHand: camera not available")
                 return False, "Camera not available"
 
         self.stop()
         self._current_mode = mode
         self._active = True
         self._flag.set()
-        print(f"[Auto] Started: {mode}")
+        logger.info(f"[Auto] Started: {mode}")
         return True, f"Started: {mode}"
 
     def stop(self):
@@ -189,7 +190,7 @@ class AutonomousController:
 
     def _track_line(self):
         if len(self._ir_sensors) < 3:
-            print("[Auto] Line tracker sensors not available")
+            logger.warning("[Auto] Line tracker sensors not available")
             self.stop()
             return
 
@@ -233,14 +234,14 @@ class AutonomousController:
         import numpy as np
 
         if not self._camera:
-            print("[Auto] No camera for CV line following")
+            logger.warning("[Auto] No camera for CV line following")
             self.stop()
             return
 
         # Ensure camera is initialised
         self._camera._init_camera()
         if not self._camera._picam:
-            print("[Auto] Camera init failed")
+            logger.error("[Auto] Camera init failed")
             self.stop()
             return
 
@@ -250,7 +251,7 @@ class AutonomousController:
         speed = CV_LINE_FOLLOW_SPEED
         steer_gain = CV_LINE_FOLLOW_STEER_GAIN
 
-        print(f"[Auto] CV line follow started (speed={speed}, gain={steer_gain})")
+        logger.info(f"[Auto] CV line follow started (speed={speed}, gain={steer_gain})")
 
         while self._active:
             try:
@@ -303,7 +304,7 @@ class AutonomousController:
                 time.sleep(0.05)
 
             except Exception as e:
-                print(f"[Auto] CV line error: {e}")
+                logger.error(f"[Auto] CV line error: {e}")
                 time.sleep(0.1)
 
     # ── Keep distance ──────────────────────────────────────────────────
@@ -340,14 +341,14 @@ class AutonomousController:
         from Server.camera.camera_opencv import CV_HAND
 
         if not self._camera:
-            print("[Auto] No camera for hand tracking")
+            logger.warning("[Auto] No camera for hand tracking")
             self.stop()
             return
 
         # Ensure camera is initialised
         self._camera._init_camera()
         if not self._camera._picam:
-            print("[Auto] Camera init failed")
+            logger.error("[Auto] Camera init failed")
             self.stop()
             return
 
@@ -404,7 +405,7 @@ class AutonomousController:
                     prev_dir = cur_dir
 
             if reversals >= SHAKE_THRESHOLD:
-                print("[Auto] Hand shake detected — stopping hand tracking")
+                logger.info("[Auto] Hand shake detected — stopping hand tracking")
                 self._hand_shake_count += 1  # flag for main loop
                 return True  # signal shake detected
 
@@ -449,7 +450,7 @@ class AutonomousController:
         # Register callback
         self._camera.cv_thread.on_hand_found = on_hand
 
-        print("[Auto] Hand tracking started — shake hand to stop")
+        logger.info("[Auto] Hand tracking started — shake hand to stop")
 
         # Keep the thread alive until stopped or shake detected
         try:
@@ -463,7 +464,7 @@ class AutonomousController:
             self.servos.set_angle(SERVO_STEERING, 90)
             self.servos.set_angle(SERVO_CAM_PAN, 90)
             self.servos.set_angle(SERVO_CAM_TILT, 90)
-            print("[Auto] Hand tracking stopped")
+            logger.info("[Auto] Hand tracking stopped")
 
     def shutdown(self):
         self.stop()
@@ -474,4 +475,4 @@ class AutonomousController:
                 sensor.close()
             except Exception:
                 pass
-        print("[Auto] Shutdown")
+        logger.info("[Auto] Shutdown")

@@ -2,6 +2,7 @@
 
 import threading, time
 from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
+from Server.logger import logger
 
 class OLEDDisplay:
     SCROLL_TEXT = "PiCar Pro v1 "
@@ -19,9 +20,9 @@ class OLEDDisplay:
             self._device = ssd1306(i2c(port=1, address=OLED_I2C_ADDR), width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             threading.Thread(target=self._loop, daemon=True).start()
-            print("[OLED] OK")
+            logger.info("[OLED] OK")
         except Exception as e:
-            print(f"[OLED] Failed: {e}")
+            logger.error(f"[OLED] Failed: {e}")
 
     def set_lines(self, lines):
         with self._lock:
@@ -61,4 +62,4 @@ class OLEDDisplay:
                 self._device.cleanup()
             except Exception:
                 pass
-        print("[OLED] Shutdown")
+        logger.info("[OLED] Shutdown")

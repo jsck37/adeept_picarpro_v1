@@ -12,6 +12,8 @@ import asyncio, json, os, signal, socket, sys, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from Server.logger import logger
+
 try:
     import websockets
     HAS_WS = True
@@ -126,7 +128,7 @@ class SharedState:
 
     def shutdown_hardware(self):
         self.running = False
-        print("[WebServer] Shutting down...")
+        logger.info("[WebServer] Shutting down...")
         if self.autonomous:
             try:
                 self.autonomous.shutdown()
@@ -149,7 +151,7 @@ class SharedState:
                     hw.shutdown()
                 except Exception:
                     pass
-        print("[WebServer] Shutdown complete")
+        logger.info("[WebServer] Shutdown complete")
 
 
 state = SharedState()
@@ -432,16 +434,16 @@ def main():
     # Install log capture FIRST so all prints go to the console
     log_buffer.install()
 
-    print("=" * 50)
-    print("  PiCar Pro v1 (Flask + WebSocket)")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("  PiCar Pro v1 (Flask + WebSocket)")
+    logger.info("=" * 50)
 
     if not HAS_WS:
-        print("[WebServer] ERROR: websockets not installed!")
+        logger.error("[WebServer] websockets not installed!")
         sys.exit(1)
 
     # ── Hardware init (lazy where possible) ──────────────────────────
-    print("[WebServer] Initialising hardware...")
+    logger.info("[WebServer] Initialising hardware...")
 
     state.motors = MotorController()
     state.servos = ServoController()
@@ -454,7 +456,7 @@ def main():
     try:
         state.mpu6050 = MPU6050Controller()
     except Exception as e:
-        print(f"[MPU6050] Error: {e}")
+        logger.error(f"[MPU6050] Error: {e}")
 
     state.ultrasonic = UltrasonicSensor()
 
@@ -463,7 +465,7 @@ def main():
             from Server.hardware.ds4 import DS4Controller
             state.ds4 = DS4Controller()
         except Exception as e:
-            print(f"[DS4] Init error: {e}")
+            logger.error(f"[DS4] Init error: {e}")
 
     state.autonomous = AutonomousController(state.motors, state.servos, state.ultrasonic)
     # Camera ref for CV line following — set lazily when camera is initialised
@@ -501,7 +503,7 @@ def main():
         ),
         daemon=True,
     ).start()
-    print(f"[WebServer] Flask on :{FLASK_PORT}")
+    logger.info(f"[WebServer] Flask on :{FLASK_PORT}")
 
     # Signal handlers
     signal.signal(signal.SIGINT, lambda s, f: (state.shutdown_hardware(), sys.exit(0)))
@@ -515,16 +517,16 @@ def main():
             speed=state.speed, shared_state=state,
         )
 
-    print("-" * 50)
-    print(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")
-    print(f"  Buzzer:  {'ON' if state.buzzer._initialized else 'OFF'}")
-    print(f"  Crane:   {'ON' if CRANE_ENABLED else 'OFF'}")
-    print(f"  DS4:     {'ON' if state.ds4 else 'OFF'}")
-    print("-" * 50)
+    logger.info("-" * 50)
+    logger.info(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")
+    logger.info(f"  Buzzer:  {'ON' if state.buzzer._initialized else 'OFF'}")
+    logger.info(f"  Crane:   {'ON' if CRANE_ENABLED else 'OFF'}")
+    logger.info(f"  DS4:     {'ON' if state.ds4 else 'OFF'}")
+    logger.info("-" * 50)
 
     async def run():
         async with websockets.serve(ws_handler, "0.0.0.0", WEBSOCKET_PORT):
-            print(f"[WebServer] Ready! http://{ip}:{FLASK_PORT}")
+            logger.info(f"[WebServer] Ready! http://{ip}:{FLASK_PORT}")
             await status_broadcast()
 
     try:

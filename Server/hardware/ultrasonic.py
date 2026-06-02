@@ -2,6 +2,7 @@
 
 import threading, time
 from Server.config import ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
+from Server.logger import logger
 
 class UltrasonicSensor:
     def __init__(self):
@@ -18,9 +19,9 @@ class UltrasonicSensor:
             self._running = True
             self._thread = threading.Thread(target=self._loop, daemon=True)
             self._thread.start()
-            print("[Ultrasonic] OK")
+            logger.info("[Ultrasonic] OK")
         except Exception as e:
-            print(f"[Ultrasonic] Failed: {e}")
+            logger.error(f"[Ultrasonic] Failed: {e}")
 
     def _loop(self):
         while self._running:
@@ -35,4 +36,4 @@ class UltrasonicSensor:
 
     def shutdown(self):
         self._running = False
-        print("[Ultrasonic] Shutdown")
+        logger.info("[Ultrasonic] Shutdown")

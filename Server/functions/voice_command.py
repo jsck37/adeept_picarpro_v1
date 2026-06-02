@@ -10,6 +10,7 @@ import time
 import os
 import subprocess
 from Server.config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
+from Server.logger import logger
 
 
 class VoiceCommandController:
@@ -54,9 +55,9 @@ class VoiceCommandController:
             self._sherpa_binary = sherpa_binary
             self._initialized = True
             self._thread.start()
-            print("[Voice] Sherpa-NCNN initialized")
+            logger.info("[Voice] Sherpa-NCNN initialized")
         else:
-            print("[Voice] Sherpa-NCNN not found - voice control disabled")
+            logger.warning("[Voice] Sherpa-NCNN not found - voice control disabled")
 
     def start(self):
         if not self._initialized:
@@ -80,7 +81,7 @@ class VoiceCommandController:
                     stdout=f, stderr=subprocess.DEVNULL,
                 )
         except Exception as e:
-            print(f"[Voice] Failed to start Sherpa-NCNN: {e}")
+            logger.error(f"[Voice] Failed to start Sherpa-NCNN: {e}")
 
     def _stop_sherpa(self):
         if self._sherpa_process is not None:
@@ -122,7 +123,7 @@ class VoiceCommandController:
             pass
 
     def _execute_command(self, command):
-        print(f"[Voice] Command: {command}")
+        logger.info(f"[Voice] Command: {command}")
         # Servo 0 = steering, 1 = cam_pan, 2 = cam_tilt
         if command == 'lookLeft':
             self.servos.move_angle(0, -30)
@@ -143,4 +144,4 @@ class VoiceCommandController:
         self.stop()
         self._running = False
         self._flag.set()
-        print("[Voice] Shutdown")
+        logger.info("[Voice] Shutdown")

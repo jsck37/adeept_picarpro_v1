@@ -1106,8 +1106,9 @@ var CONSOLE_MAX_LINES = 3000;
 
 function classifyLogLine(text) {
   var lower = text.toLowerCase();
-  if (lower.indexOf('error') !== -1 || lower.indexOf('fail') !== -1 || lower.indexOf('traceback') !== -1 || lower.indexOf('exception') !== -1) return 'error';
-  if (lower.indexOf('warn') !== -1 || lower.indexOf('deprecated') !== -1) return 'warn';
+  if (lower.indexOf('[error]') !== -1 || lower.indexOf('error') !== -1 || lower.indexOf('fail') !== -1 || lower.indexOf('traceback') !== -1 || lower.indexOf('exception') !== -1) return 'error';
+  if (lower.indexOf('[warn]') !== -1 || lower.indexOf('warn') !== -1 || lower.indexOf('deprecated') !== -1) return 'warn';
+  if (lower.indexOf('[dbg]') !== -1) return 'debug';
   if (lower.indexOf('[webserver]') !== -1 || lower.indexOf('[ds4]') !== -1 || lower.indexOf('[mpu') !== -1 || lower.indexOf('[module]') !== -1) return 'info';
   return '';
 }

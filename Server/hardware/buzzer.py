@@ -2,6 +2,7 @@
 
 import threading, time
 from Server.config import BUZZER_PIN
+from Server.logger import logger
 
 try:
     from Server.config import BUZZER_PASSIVE
@@ -49,7 +50,7 @@ class BuzzerController:
             self._GPIO = GPIO
             self._driver = 'rpigpio'
             self._initialized = True
-            print(f"[Buzzer] RPi.GPIO {'PWM' if self._passive else 'on/off'} on GPIO {self._pin}")
+            logger.info(f"[Buzzer] RPi.GPIO {'PWM' if self._passive else 'on/off'} on GPIO {self._pin}")
         except Exception:
             pass
 
@@ -63,9 +64,9 @@ class BuzzerController:
                 self._buzzer_gz = Buzzer(self._pin)
             self._driver = 'gpiozero'
             self._initialized = True
-            print(f"[Buzzer] gpiozero on GPIO {self._pin}")
+            logger.info(f"[Buzzer] gpiozero on GPIO {self._pin}")
         except Exception:
-            print(f"[Buzzer] NOT available on GPIO {self._pin}")
+            logger.warning(f"[Buzzer] NOT available on GPIO {self._pin}")
 
     def play_melody(self, name="beep"):
         if not self._initialized:
@@ -158,4 +159,4 @@ class BuzzerController:
                 self._buzzer_gz.close()
             except Exception:
                 pass
-        print("[Buzzer] Shutdown")
+        logger.info("[Buzzer] Shutdown")

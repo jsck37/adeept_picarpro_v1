@@ -1,6 +1,7 @@
 """Headlight switch via gpiozero LED."""
 
 from Server.config import SWITCH_PINS
+from Server.logger import logger
 
 class SwitchController:
     def __init__(self):
@@ -14,9 +15,9 @@ class SwitchController:
                 led.off()
                 self._leds.append(led)
             self._initialized = True
-            print(f"[Switch] {len(self._leds)} switches OK")
+            logger.info(f"[Switch] {len(self._leds)} switches OK")
         except Exception as e:
-            print(f"[Switch] Failed: {e}")
+            logger.error(f"[Switch] Failed: {e}")
 
     def on(self, i):
         if 0 <= i < len(self._leds):
@@ -42,4 +43,4 @@ class SwitchController:
                 l.close()
             except Exception:
                 pass
-        print("[Switch] Shutdown")
+        logger.info("[Switch] Shutdown")

@@ -5,6 +5,7 @@ from Server.config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE, CRANE_ENABLED,
 )
+from Server.logger import logger
 
 class ServoController:
     def __init__(self):
@@ -35,11 +36,11 @@ class ServoController:
                     self._servos[i].angle = SERVO_INIT_ANGLE
                     time.sleep(0.05)
                 except Exception as e:
-                    print(f"[Servos] S{i} init failed: {e}")
+                    logger.warning(f"[Servos] S{i} init failed: {e}")
             self._pwm_initialized = True
-            print(f"[Servos] PCA9685 OK, {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
+            logger.info(f"[Servos] PCA9685 OK, {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
         except Exception as e:
-            print(f"[Servos] Failed: {e}")
+            logger.error(f"[Servos] Failed: {e}")
 
     def set_angle(self, sid, angle):
         if not self._pwm_initialized or sid >= SERVO_COUNT or self._servos[sid] is None:
@@ -128,4 +129,4 @@ class ServoController:
                 self._pca.deinit()
             except Exception:
                 pass
-        print("[Servos] Shutdown")
+        logger.info("[Servos] Shutdown")

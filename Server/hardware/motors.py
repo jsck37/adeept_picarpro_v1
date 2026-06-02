@@ -5,6 +5,7 @@ from Server.config import (
     MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2,
     DEFAULT_SPEED, TURN_RADIUS_MIN, TURN_RADIUS_MAX,
 )
+from Server.logger import logger
 
 class MotorController:
     def __init__(self):
@@ -18,9 +19,9 @@ class MotorController:
             self._motor_a = Motor(forward=MOTOR_A_IN1, backward=MOTOR_A_IN2, enable=MOTOR_A_EN, pwm=True)
             self._motor_b = Motor(forward=MOTOR_B_IN1, backward=MOTOR_B_IN2, enable=MOTOR_B_EN, pwm=True)
             self._initialized = True
-            print("[Motors] OK")
+            logger.info("[Motors] OK")
         except Exception as e:
-            print(f"[Motors] Failed: {e}")
+            logger.error(f"[Motors] Failed: {e}")
 
     def move(self, speed=None, direction='forward', turn='no', radius=0.5):
         if not self._initialized:
