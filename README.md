@@ -35,3 +35,7 @@ git clone https://github.com/jsck37/adeept_picarpro_v1
 # Запуск установки
 sudo python3 adeept_picarpro_v1/setup.py
 ```
+
+### 3. Просмотр веб-интерфейса
+
+http://localhost:5000
