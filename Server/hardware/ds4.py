@@ -397,9 +397,9 @@ class DS4Controller:
                 self._headlights_on = not self._headlights_on
                 (self._switches.on if self._headlights_on else self._switches.off)(0)
                 (self._switches.on if self._headlights_on else self._switches.off)(1)
-        elif code == ecodes.BTN_TR:                         # R1 - alarm
+        elif code == ecodes.BTN_TR:                         # R1 - beep
             if self._buzzer:
-                self._buzzer.play_alarm()
+                self._buzzer.beep()
         elif code == ecodes.BTN_MODE:                       # PS - home servos
             if self._servos:
                 self._servos.move_init()

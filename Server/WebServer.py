@@ -35,7 +35,7 @@ from Server.hardware.switch import SwitchController
 from Server.hardware.oled import OLEDDisplay
 from Server.hardware.buzzer import BuzzerController
 from Server.hardware.mpu6050 import MPU6050Controller
-from Server.camera.camera_opencv import Camera, CV_NONE, CV_COLOR, CV_LINE, CV_WATCH, CV_HAND
+from Server.camera.camera_opencv import Camera, CV_NONE, CV_LINE, CV_HAND
 from Server.functions.autonomous import AutonomousController
 from Server.utils.system_info import SystemInfo
 from Server.utils.log_buffer import log_buffer
@@ -244,7 +244,7 @@ def process_command(data):
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep': 'beep', 'alarm': 'alarm', 'birthday': 'happy_birthday'}.get(
+        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(
             p.get('melody', 'beep'))
         if key:
             state.buzzer.play_melody(key)
@@ -278,8 +278,8 @@ def process_command(data):
 
     elif cmd == 'cv_mode':
         mode_map = {
-            'none': CV_NONE, 'findColor': CV_COLOR,
-            'findlineCV': CV_LINE, 'watchDog': CV_WATCH,
+            'none': CV_NONE,
+            'findlineCV': CV_LINE,
             'trackHand': CV_HAND,
         }
         cv = mode_map.get(p.get('mode', 'none'))

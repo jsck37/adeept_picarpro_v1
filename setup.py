@@ -332,7 +332,7 @@ def stage_4_pip_packages(debian_ver):
         ("OLED/LED",
          f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets"),
+         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
          f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",

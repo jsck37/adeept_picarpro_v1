@@ -18,6 +18,7 @@ spidev
 flask
 flask_cors
 websockets
+loguru
 
 # Vision / Video
 numpy

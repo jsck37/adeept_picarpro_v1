@@ -148,7 +148,7 @@ def create_app(state):
 
     @app.route("/cmd/buzzer", methods=["POST"])
     def cmd_buzzer():
-        key = {'beep': 'beep', 'alarm': 'alarm', 'birthday': 'happy_birthday'}.get(
+        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(
             (request.get_json(silent=True) or {}).get("melody", "beep"))
         if key:
             state.buzzer.play_melody(key)
@@ -178,10 +178,10 @@ def create_app(state):
 
     @app.route("/cmd/cv_mode", methods=["POST"])
     def cmd_cv():
-        from Server.camera.camera_opencv import CV_NONE, CV_COLOR, CV_LINE, CV_WATCH, CV_HAND
+        from Server.camera.camera_opencv import CV_NONE, CV_LINE, CV_HAND
         mode_map = {
-            "none": CV_NONE, "findColor": CV_COLOR,
-            "findlineCV": CV_LINE, "watchDog": CV_WATCH,
+            "none": CV_NONE,
+            "findlineCV": CV_LINE,
             "trackHand": CV_HAND,
         }
         m = mode_map.get((request.get_json(silent=True) or {}).get("mode", "none"))

@@ -12,17 +12,12 @@ from Server.camera.base_camera import BaseCamera
 from Server.config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
-    CV_COLOR_LOWER_H, CV_COLOR_LOWER_S, CV_COLOR_LOWER_V,
-    CV_COLOR_UPPER_H, CV_COLOR_UPPER_S, CV_COLOR_UPPER_V,
     CV_LINE_POS_1, CV_LINE_POS_2, CV_LINE_THRESHOLD,
-    CV_WATCHDOG_THRESHOLD, CV_WATCHDOG_BLUR_SIZE,
 )
 from Server.utils.kalman import KalmanFilter
 
 CV_NONE = "none"
-CV_COLOR = "findColor"
 CV_LINE = "findlineCV"
-CV_WATCH = "watchDog"
 CV_HAND = "trackHand"
 
 
@@ -34,30 +29,21 @@ class CVThread(threading.Thread):
         self._frame = None
         self._processing = False
         self.cv_mode = CV_NONE
-        self.color_lower = np.array([CV_COLOR_LOWER_H, CV_COLOR_LOWER_S, CV_COLOR_LOWER_V])
-        self.color_upper = np.array([CV_COLOR_UPPER_H, CV_COLOR_UPPER_S, CV_COLOR_UPPER_V])
         self.line_pos_1 = CV_LINE_POS_1
         self.line_pos_2 = CV_LINE_POS_2
-        self.watchdog_threshold = CV_WATCHDOG_THRESHOLD
         self.kf_x = KalmanFilter()
         self.kf_y = KalmanFilter()
-        self._bg = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=self.watchdog_threshold, detectShadows=True)
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        self.color_pos = [0, 0]
         self.line_pos = [0, 0]
         self.line_angle = 0
-        self.motion_detected = False
         self.frame_size = list(CAMERA_RESOLUTION)
         self.line_threshold = CV_LINE_THRESHOLD
-        self.watchdog_blur_size = CV_WATCHDOG_BLUR_SIZE
-        self.on_color_found = None
         self.on_line_found = None
-        self.on_motion_detected = None
         # Hand tracking state
         self.hand_pos = [0, 0]       # (cx, cy) of hand centroid
         self.hand_detected = False
         self.hand_area = 0
-        self.on_hand_found = None    # callback(pos, area, shake_detected)
+        self.on_hand_found = None    # callback(pos, area)
 
     def run(self):
         while self._running:
@@ -89,35 +75,12 @@ class CVThread(threading.Thread):
         try:
             h, w = frame.shape[:2]
             self.frame_size = [w, h]
-            if self.cv_mode == CV_COLOR:
-                self._find_color(frame)
-            elif self.cv_mode == CV_LINE:
+            if self.cv_mode == CV_LINE:
                 self._find_line(frame)
-            elif self.cv_mode == CV_WATCH:
-                self._watchdog(frame)
             elif self.cv_mode == CV_HAND:
                 self._find_hand(frame)
         finally:
             self._processing = False
-
-    def _find_color(self, frame):
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.color_lower, self.color_upper)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel, iterations=2)
-        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
-        if contours:
-            c = max(contours, key=cv2.contourArea)
-            ((x, y), radius) = cv2.minEnclosingCircle(c)
-            M = cv2.moments(c)
-            if M["m00"] > 0 and radius > 5:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                self.kf_x.filter(cx / self.frame_size[0])
-                self.kf_y.filter(cy / self.frame_size[1])
-                self.color_pos = [int(self.kf_x.get() * self.frame_size[0]),
-                                  int(self.kf_y.get() * self.frame_size[1])]
-                if self.on_color_found:
-                    self.on_color_found(self.color_pos, radius)
 
     def _find_line(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -135,17 +98,6 @@ class CVThread(threading.Thread):
         self.line_angle = math.degrees(math.atan2(pos2 - pos1, self.line_pos_1 - self.line_pos_2)) if pos1 > 0 and pos2 > 0 else 0
         if self.on_line_found:
             self.on_line_found(self.line_pos, self.line_angle)
-
-    def _watchdog(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, self.watchdog_blur_size, 0)
-        fg = self._bg.apply(gray)
-        _, thresh = cv2.threshold(fg, 25, 255, cv2.THRESH_BINARY)
-        thresh = cv2.dilate(thresh, None, iterations=1)
-        contours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
-        self.motion_detected = any(cv2.contourArea(c) > 500 for c in contours)
-        if self.on_motion_detected:
-            self.on_motion_detected(self.motion_detected, contours)
 
     def _find_hand(self, frame):
         """Detect a hand using skin-colour segmentation in HSV.
@@ -207,10 +159,6 @@ class CVThread(threading.Thread):
         if self.on_hand_found:
             self.on_hand_found([0, 0], 0)
 
-    def set_color_range(self, lh, ls, lv, uh, us, uv):
-        self.color_lower = np.array([lh, ls, lv])
-        self.color_upper = np.array([uh, us, uv])
-
 
 class Camera(BaseCamera):
     def __init__(self):
@@ -262,12 +210,7 @@ class Camera(BaseCamera):
 
     def _draw_overlays(self, frame):
         mode = self.cv_thread.cv_mode
-        if mode == CV_COLOR:
-            x, y = self.cv_thread.color_pos
-            if x or y:
-                cv2.circle(frame, (x, y), 10, (0, 255, 0), 2)
-                cv2.putText(frame, f"({x},{y})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        elif mode == CV_LINE:
+        if mode == CV_LINE:
             p1, p2 = self.cv_thread.line_pos
             h, w = frame.shape[:2]
             cv2.line(frame, (0, self.cv_thread.line_pos_1), (w, self.cv_thread.line_pos_1), (0, 255, 0), 1)
@@ -276,8 +219,6 @@ class Camera(BaseCamera):
                 cv2.circle(frame, (p1, self.cv_thread.line_pos_1), 5, (0, 0, 255), -1)
             if p2 > 0:
                 cv2.circle(frame, (p2, self.cv_thread.line_pos_2), 5, (0, 0, 255), -1)
-        elif mode == CV_WATCH and self.cv_thread.motion_detected:
-            cv2.putText(frame, "MOTION", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         elif mode == CV_HAND and self.cv_thread.hand_detected:
             x, y = self.cv_thread.hand_pos
             cv2.circle(frame, (x, y), 15, (0, 255, 0), 2)
@@ -294,9 +235,6 @@ class Camera(BaseCamera):
 
     def set_cv_mode(self, mode):
         self.cv_thread.cv_mode = mode
-
-    def set_color_range(self, lh, ls, lv, uh, us, uv):
-        self.cv_thread.set_color_range(lh, ls, lv, uh, us, uv)
 
     def shutdown(self):
         self.cv_thread.stop()

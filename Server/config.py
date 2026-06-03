@@ -10,7 +10,7 @@ individually by their own ``*_ENABLED`` flags below.
 
 # ── Feature flags ──────────────────────────────────────────────────────
 ULTRASONIC_ENABLED  = False
-LINE_TRACKER_ENABLED = False
+LINE_TRACKER_ENABLED = True
 CRANE_ENABLED       = True
 DS4_ENABLED         = True
 
@@ -85,9 +85,8 @@ LED_BRIGHTNESS = 255
 # ── Headlight relay switches ──────────────────────────────────────────
 SWITCH_PINS = [6, 13]
 
-# ── Line-tracker IR sensors (disabled) ────────────────────────────────
+# ── Line-tracker IR sensors (2 sensors: left + right) ──────────────
 LINE_LEFT_PIN   = 20
-LINE_MIDDLE_PIN = 16
 LINE_RIGHT_PIN  = 19
 
 # ── Camera ─────────────────────────────────────────────────────────────
@@ -97,18 +96,10 @@ CAMERA_JPEG_QUALITY    = 80
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL   = False
 
-# ── OpenCV — colour tracking ──────────────────────────────────────────
-CV_COLOR_LOWER_H = 35
-CV_COLOR_LOWER_S = 43
-CV_COLOR_LOWER_V = 46
-CV_COLOR_UPPER_H = 77
-CV_COLOR_UPPER_S = 255
-CV_COLOR_UPPER_V = 255
+# ── OpenCV — line detection ────────────────────────────────────────
 CV_LINE_POS_1        = 440     # horizontal scan-line 1 (px from top)
 CV_LINE_POS_2        = 380     # horizontal scan-line 2
 CV_LINE_THRESHOLD    = 80
-CV_WATCHDOG_THRESHOLD = 25
-CV_WATCHDOG_BLUR_SIZE = (7, 7)
 
 # ── OpenCV — autonomous line following ─────────────────────────────────
 CV_LINE_FOLLOW_SPEED       = 35    # motor speed (0-100) while following

@@ -71,7 +71,7 @@ class BuzzerController:
     def play_melody(self, name="beep"):
         if not self._initialized:
             return
-        notes = {'happy_birthday': BIRTHDAY, 'alarm': [('A5',.2),('REST',.1)]*5,
+        notes = {'happy_birthday': BIRTHDAY,
                  'beep': [('A4',.15),('REST',.1)]}.get(name)
         if not notes:
             return
@@ -129,9 +129,6 @@ class BuzzerController:
                 self._buzzer_gz.off()
             except Exception:
                 pass
-
-    def play_alarm(self):
-        self.play_melody("alarm")
 
     def beep(self):
         self.play_melody("beep")
