@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>PiCar Pro</title>
+<title>PiCar Pro v2</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -26,6 +26,8 @@
   <div class="sb-sep"></div>
   <div class="sb-item"><span class="sb-label">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
   <div class="sb-sep"></div>
+  <div class="sb-item"><span class="sb-label">Drift</span><span class="sb-value" id="sb-drift">OFF</span></div>
+  <div class="sb-sep"></div>
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
@@ -33,7 +35,7 @@
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
-    <span>PiCar Pro</span>
+    <span>PiCar Pro v2</span>
   </div>
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
@@ -106,7 +108,7 @@
         </div>
       </div>
 
-      <!-- DS4 Controller (own card) -->
+      <!-- DS4 Controller with Bluetooth -->
       <div class="card" id="card-ds4">
         <div class="card-title collapsible-header open" data-target="ds4-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -117,18 +119,48 @@
         </div>
         <div class="collapsible-body open" id="ds4-body">
           <div id="ds4-controls">
+            <!-- Connection status -->
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335;margin-left:auto"></div>
+              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
               <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
             </div>
+
+            <!-- Bluetooth scan & connect -->
+            <div class="bt-section">
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <button class="btn-sm btn-primary" id="bt-scan-btn">Scan BT</button>
+                <button class="btn-sm btn-secondary" id="bt-auto-btn">Auto-Connect</button>
+                <button class="btn-sm btn-danger" id="bt-disconnect-btn" style="display:none">Disconnect</button>
+              </div>
+              <div id="bt-device-list" style="display:none;max-height:200px;overflow-y:auto;margin-bottom:8px">
+                <div style="font-size:.72rem;color:#5f6368;margin-bottom:4px">Nearby devices:</div>
+                <div id="bt-devices"></div>
+              </div>
+              <div id="bt-scanning" style="display:none;font-size:.72rem;color:#fdd663">Scanning...</div>
+              <div id="bt-saved-info" style="font-size:.7rem;color:#5f6368;margin-top:4px"></div>
+            </div>
+
+            <!-- Drift mode toggle -->
+            <div class="drift-section">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <label class="drift-toggle">
+                  <input type="checkbox" id="drift-toggle">
+                  <span class="drift-slider"></span>
+                </label>
+                <span style="font-size:.78rem;font-weight:600;color:#202124">Drift Mode</span>
+                <span id="drift-indicator" style="font-size:.7rem;color:#9aa0a6">OFF</span>
+              </div>
+            </div>
+
+            <!-- Controls help -->
             <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
               <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> — Camera pan/tilt</div>
+              <div><b>Right stick</b> — Camera pan/tilt + Crane arm</div>
               <div><b>L2 / R2</b> — Speed down / up</div>
-              <div><b>D-pad</b> — Claw arm &amp; grip</div>
-              <div><b>Cross</b> — Claw grip toggle &nbsp; <b>Circle</b> — Claw arm toggle</div>
-              <div><b>Triangle</b> — Buzzer &nbsp; <b>Square</b> — LED mode &nbsp; <b>L1</b> — Headlights</div>
-              <div><b>R1</b> — Horn &nbsp; <b>Options</b> — E-stop &nbsp; <b>PS</b> — Home servos</div>
+              <div><b>D-pad</b> — Claw arm &amp; grip (smooth)</div>
+              <div><b>Cross</b> — Claw grip &nbsp; <b>Circle</b> — Claw arm</div>
+              <div><b>Triangle</b> — Buzzer &nbsp; <b>Square</b> — LED &nbsp; <b>L1</b> — Headlights</div>
+              <div><b>R1</b> — Drift mode &nbsp; <b>Options</b> — E-stop &nbsp; <b>PS</b> — Home</div>
               <div><b>L3</b> — Speed reset &nbsp; <b>R3</b> — Center camera</div>
             </div>
           </div>
@@ -140,7 +172,7 @@
     <!-- ========== RIGHT COLUMN ========== -->
     <div class="col-right">
 
-      <!-- Movement (Wheel Joystick + Camera Joystick side by side) -->
+      <!-- Movement -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -151,7 +183,6 @@
         </div>
         <div class="collapsible-body open" id="move-body">
           <div class="dual-joystick-row">
-            <!-- Wheel Joystick -->
             <div class="joystick-area">
               <div class="joystick-container" id="joystick-container">
                 <div class="joystick-base"></div>
@@ -160,7 +191,6 @@
               </div>
               <div class="joystick-label" id="joystick-label">Wheels — WASD</div>
             </div>
-            <!-- Camera Joystick -->
             <div class="joystick-area">
               <div class="cam-joystick-container" id="cam-joystick-container">
                 <div class="cam-joystick-base"></div>
@@ -177,7 +207,7 @@
             </div>
           </div>
 
-          <!-- Claw Crane controls inside Movement -->
+          <!-- Claw Crane -->
           <div id="claw-controls" style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
             <div style="margin-bottom:6px;font-size:.82rem;color:#5f6368;font-weight:600">Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span></div>
             <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
@@ -194,7 +224,7 @@
         </div>
       </div>
 
-      <!-- Speed (motor only) -->
+      <!-- Speed -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="speed-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -231,7 +261,7 @@
         </div>
       </div>
 
-      <!-- IMU Sensor (MPU6050) -->
+      <!-- IMU Sensor -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -346,7 +376,6 @@
           </div>
         </div>
       </div>
-
 
     </div><!-- /col-right -->
   </div>

@@ -12,14 +12,14 @@ Stick ranges vary by connection:
   - USB (hid-playstation): -32768..32767, centre 0
 Axis ranges are auto-detected from device capabilities.
 
-Fixes applied:
-  - D-pad mapping corrected (hat_y > 0 = DOWN -> arm down, not up)
-  - Safe grab/ungrab with error recovery
-  - Watchdog with heartbeat: detects silent disconnects
-  - read_loop() replaced with select()+read() to avoid blocking forever
-  - Device path validation before reconnect (stale /dev/input paths)
-  - Bluetooth keepalive via periodic rumble/LED write
-  - Full cleanup on disconnect to prevent resource leaks
+Changes from original:
+  - Left stick Y inverted: push forward = backward, pull back = forward
+    (FIXED: now ly > 0 = stick pushed forward = car forward)
+  - Right stick Y inverted for crane: push up = claw moves down, pull down = claw moves up
+    (FIXED: now ry controls are correct)
+  - Increased wheel speed multiplier (1.5x base)
+  - Smooth crane servo movement in 5-degree steps
+  - Drift mode support (L2+R1 toggle)
 """
 
 import math, os, select, threading, time
@@ -42,6 +42,12 @@ from Server.config import (
     CRANE_ENABLED,
 )
 
+# ── Speed multiplier: increases wheel speed from gamepad ──────────────
+DS4_SPEED_MULT = 1.4   # 40% faster than base speed
+
+# ── Crane servo smooth step size ─────────────────────────────────────
+CRANE_STEP_DEGREES = 5  # move crane in 5-degree increments
+
 
 class DS4Controller:
     """DualShock 4 gamepad controller with robust auto-reconnect."""
@@ -52,9 +58,9 @@ class DS4Controller:
         self._device = None
         self._thread = None
         self._watchdog_thread = None
-        self._axis_ranges = {}          # {code: (min, max)}
-        self._last_event_time = 0.0     # monotonic timestamp of last event
-        self._connect_count = 0         # number of successful connects
+        self._axis_ranges = {}
+        self._last_event_time = 0.0
+        self._connect_count = 0
 
         # Stick state (normalised -1..+1)
         self._lx = self._ly = self._rx = self._ry = 0.0
@@ -71,6 +77,12 @@ class DS4Controller:
         self._led_mode_idx = 0
         self._led_modes = ['off', 'solid', 'breath', 'flow', 'rainbow', 'police']
         self._lock = threading.Lock()
+
+        # ── Drift mode ──
+        self._drift_mode = False
+        self._drift_active = False  # actively drifting (steering + throttle)
+        self._crane_target_arm = 90
+        self._crane_target_grip = 90
 
     # -- Public API -------------------------------------------------------
 
@@ -95,6 +107,10 @@ class DS4Controller:
     def connected(self):
         return self._connected
 
+    @property
+    def drift_mode(self):
+        return self._drift_mode
+
     def get_status(self):
         return {
             'enabled': DS4_ENABLED,
@@ -105,16 +121,13 @@ class DS4Controller:
             'rx': round(self._rx, 2),
             'ry': round(self._ry, 2),
             'connect_count': self._connect_count,
+            'drift_mode': self._drift_mode,
         }
 
     # -- Device discovery -------------------------------------------------
 
     def _find_device(self):
-        """Find the MAIN gamepad device (not the touchpad).
-
-        Validates that the device path still exists in /dev/input/
-        to avoid re-connecting to a stale file descriptor.
-        """
+        """Find the MAIN gamepad device (not the touchpad)."""
         if not HAS_EVDEV:
             return None
         try:
@@ -126,7 +139,6 @@ class DS4Controller:
                 try:
                     devices.append(InputDevice(p))
                 except OSError:
-                    # Device disappeared between listing and opening
                     continue
             candidates = []
             for dev in devices:
@@ -140,14 +152,12 @@ class DS4Controller:
             if len(candidates) == 1:
                 return candidates[0]
 
-            # Multiple devices: find the one with gamepad buttons (not touchpad)
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 keys = caps.get(ecodes.EV_KEY, [])
                 if ecodes.BTN_SOUTH in keys or ecodes.BTN_A in keys:
                     return dev
 
-            # Fallback: first with ABS_X
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 if any(c == ecodes.ABS_X for c, _ in caps.get(ecodes.EV_ABS, [])):
@@ -162,12 +172,9 @@ class DS4Controller:
         if not self._device:
             return False
         try:
-            # Try a lightweight operation — if the device is gone this will
-            # raise OSError or return -1
             fd = self._device.fd
             if fd is None or fd < 0:
                 return False
-            # Check the path still exists
             if not os.path.exists(self._device.path):
                 return False
             return True
@@ -179,7 +186,6 @@ class DS4Controller:
             device.grab()
         except Exception as e:
             logger.warning(f"[DS4] Grab failed (non-fatal): {e}")
-            # Continue without exclusive access
 
         self._device = device
         self._connected = True
@@ -222,7 +228,6 @@ class DS4Controller:
                 self._motors.stop()
             except Exception:
                 pass
-        # Reset all input state so stale values don't cause ghost movement
         self._lx = self._ly = self._rx = self._ry = 0.0
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
@@ -233,15 +238,13 @@ class DS4Controller:
 
     def _watchdog(self):
         """Periodically check for new devices when disconnected, and verify
-        the heartbeat when connected (detect silent Bluetooth drops)."""
+        the heartbeat when connected."""
         while self._running:
             if not self._connected:
                 dev = self._find_device()
                 if dev:
                     self._connect(dev)
             else:
-                # Heartbeat check: if no events for a long time, the BT
-                # link probably died silently.  Verify device is still alive.
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
                     if not self._device_alive():
@@ -249,26 +252,15 @@ class DS4Controller:
                               f"and device gone — disconnecting")
                         self._disconnect()
                     else:
-                        # Device file still there but no events — might be
-                        # a temporary BT hiccup.  Reset the timer and wait.
                         logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
                               f"but device still present — resetting timer")
                         self._last_event_time = time.monotonic()
             time.sleep(DS4_WATCHDOG_INTERVAL)
 
     def _event_loop(self):
-        """Read events using select() + read() instead of read_loop().
-
-        read_loop() blocks indefinitely inside a C call and CANNOT be
-        interrupted when the Bluetooth link drops silently.  Using
-        select() with a timeout lets us:
-          1. Detect when the fd becomes invalid (OSError)
-          2. Break out periodically to check _running / _connected
-          3. Update the heartbeat timestamp on every successful read
-        """
+        """Read events using select() + read()."""
         while self._running and self._connected:
             try:
-                # select() waits until data is available or timeout
                 fd = self._device.fd
                 if fd is None:
                     logger.warning("[DS4] File descriptor became None")
@@ -277,10 +269,8 @@ class DS4Controller:
 
                 r, _, _ = select.select([fd], [], [], DS4_READ_TIMEOUT)
                 if not r:
-                    # Timeout — no data, but loop again to check state
                     continue
 
-                # Read available events
                 for ev in self._device.read():
                     self._last_event_time = time.monotonic()
                     if not self._running or not self._connected:
@@ -289,14 +279,12 @@ class DS4Controller:
                         self._on_axis(ev.code, ev.value)
                     elif ev.type == ecodes.EV_KEY:
                         self._on_key(ev.code, ev.value)
-                    # EV_SYN and others are ignored
 
             except OSError as e:
                 logger.error(f"[DS4] Device lost (OSError): {e}")
                 self._disconnect()
                 break
             except ValueError as e:
-                # "file descriptor cannot be a negative integer" — fd closed
                 logger.error(f"[DS4] Device lost (ValueError): {e}")
                 self._disconnect()
                 break
@@ -306,11 +294,9 @@ class DS4Controller:
                     logger.error(f"[DS4] Device lost: {e}")
                     self._disconnect()
                     break
-                # Transient error — log and continue
                 logger.warning(f"[DS4] Event read error (will retry): {e}")
                 time.sleep(0.05)
 
-        # Clean up if we exited the loop while still marked connected
         if self._connected:
             self._disconnect()
 
@@ -347,13 +333,17 @@ class DS4Controller:
             self._lx = self._norm_axis(value, code)
             self._apply_move()
         elif code == ecodes.ABS_Y:
-            self._ly = self._norm_axis(value, code)
+            # INVERTED: push stick forward (value < centre) = ly > 0 = forward
+            raw = self._norm_axis(value, code)
+            self._ly = -raw  # Invert: stick forward = positive ly = forward
             self._apply_move()
         elif code == ecodes.ABS_RX:
             self._rx = self._norm_axis(value, code)
             self._apply_camera()
         elif code == ecodes.ABS_RY:
-            self._ry = self._norm_axis(value, code)
+            # INVERTED for crane: push stick up = ry < 0 → we want claw up
+            raw = self._norm_axis(value, code)
+            self._ry = -raw  # Invert: stick up = positive ry
             self._apply_camera()
         elif code == ecodes.ABS_Z:
             self._l2 = self._norm_trigger(value, code)
@@ -371,7 +361,7 @@ class DS4Controller:
     def _on_key(self, code, value):
         was = self._btn_state.get(code, False)
         self._btn_state[code] = value
-        if value and not was:          # rising edge only
+        if value and not was:
             self._btn_press(code)
 
     def _btn_press(self, code):
@@ -379,12 +369,12 @@ class DS4Controller:
             if CRANE_ENABLED and self._servos:
                 self._claw_grip_closed = not self._claw_grip_closed
                 angle = CLAW_GRIP_CLOSED if self._claw_grip_closed else CLAW_GRIP_OPEN
-                self._servos.set_angle(SERVO_CLAW_GRIP, angle)
+                self._smooth_crane(SERVO_CLAW_GRIP, angle)
         elif code in (ecodes.BTN_EAST, ecodes.BTN_B):      # Circle - claw arm
             if CRANE_ENABLED and self._servos:
                 self._claw_arm_down = not self._claw_arm_down
                 angle = CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP
-                self._servos.set_angle(SERVO_CLAW_ARM, angle)
+                self._smooth_crane(SERVO_CLAW_ARM, angle)
         elif code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle - beep
             if self._buzzer:
                 self._buzzer.beep()
@@ -397,19 +387,30 @@ class DS4Controller:
                 self._headlights_on = not self._headlights_on
                 (self._switches.on if self._headlights_on else self._switches.off)(0)
                 (self._switches.on if self._headlights_on else self._switches.off)(1)
-        elif code == ecodes.BTN_TR:                         # R1 - beep
+        elif code == ecodes.BTN_TR:                         # R1 - toggle drift mode
+            self._drift_mode = not self._drift_mode
+            if self._leds:
+                # Flash LEDs to indicate drift mode toggle
+                if self._drift_mode:
+                    self._leds.set_mode('police', (255, 0, 0))
+                    threading.Timer(1.0, lambda: self._leds.set_mode('solid', (255, 50, 0)) if self._leds else None).start()
+                else:
+                    self._leds.set_mode('off', (0, 0, 0))
+            logger.info(f"[DS4] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
             if self._buzzer:
                 self._buzzer.beep()
         elif code == ecodes.BTN_MODE:                       # PS - home servos
             if self._servos:
                 self._servos.move_init()
                 self._cam_pan = self._cam_tilt = 90
+                self._drift_mode = False
         elif code == ecodes.BTN_START:                      # Options - e-stop
             if self._motors:
                 self._motors.stop()
             if self._servos:
                 self._servos.set_angle(SERVO_STEERING, 90)
             self._lx = self._ly = 0.0
+            self._drift_mode = False
         elif code == ecodes.BTN_SELECT:                     # Share - unused
             pass
         elif code == ecodes.BTN_THUMBL:                     # L3 - speed reset
@@ -421,46 +422,129 @@ class DS4Controller:
                 self._servos.set_angle(SERVO_CAM_PAN, 90)
                 self._servos.set_angle(SERVO_CAM_TILT, 90)
 
+    # -- Smooth crane movement --------------------------------------------
+
+    def _smooth_crane(self, servo_id, target_angle, step=CRANE_STEP_DEGREES, delay=0.03):
+        """Move a crane servo smoothly in small steps to avoid jerky motion."""
+        if not self._servos:
+            return
+        current = self._servos.get_angle(servo_id)
+        diff = target_angle - current
+        if abs(diff) <= step:
+            self._servos.set_angle(servo_id, target_angle)
+            return
+
+        def _run():
+            pos = current
+            direction = 1 if diff > 0 else -1
+            while self._connected and self._running:
+                pos += direction * step
+                if direction > 0 and pos >= target_angle:
+                    pos = target_angle
+                    self._servos.set_angle(servo_id, pos)
+                    break
+                elif direction < 0 and pos <= target_angle:
+                    pos = target_angle
+                    self._servos.set_angle(servo_id, pos)
+                    break
+                self._servos.set_angle(servo_id, pos)
+                time.sleep(delay)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # -- Movement ---------------------------------------------------------
 
     def _apply_move(self):
+        """Apply left stick to wheel motors with INVERTED Y axis and speed boost.
+
+        ly > 0 (stick pushed forward) = car moves FORWARD
+        ly < 0 (stick pulled back) = car moves BACKWARD
+
+        Speed is multiplied by DS4_SPEED_MULT for faster response.
+        """
         if not self._motors or not self._servos:
             return
         lx, ly = self._lx, self._ly
         if math.hypot(lx, ly) < 0.05:
             self._motors.stop()
             self._servos.set_angle(SERVO_STEERING, 90)
+            self._drift_active = False
             return
         if self._shared_state:
             with self._lock:
                 self._speed = self._shared_state.speed
+
         with self._lock:
             speed = self._speed
+
+        # ly > 0 = forward (stick pushed), ly < 0 = backward (stick pulled)
         d = 'forward' if ly >= 0 else 'backward'
+
         if abs(lx) < 0.1:
             turn, radius = 'no', 0.5
         elif lx > 0:
             turn, radius = 'right', max(0.2, 0.5 - lx * DS4_STEER_SENSITIVITY * 0.3)
         else:
             turn, radius = 'left', max(0.2, 0.5 + lx * DS4_STEER_SENSITIVITY * 0.3)
-        s = max(10, int(speed * abs(ly))) if abs(ly) > 0.1 else 0
-        if s > 0:
-            self._motors.move(s, d, turn, radius)
-        steer = max(30, min(150, 90 - int(lx * 60 * DS4_STEER_SENSITIVITY)))
+
+        # Apply speed multiplier for faster driving
+        abs_ly = abs(ly)
+        s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
+        s = min(100, s)  # Cap at 100
+
+        # ── Drift mode ──
+        if self._drift_mode and s > 0 and abs(lx) > 0.3:
+            self._drift_active = True
+            # Over-steer: exaggerate front wheel angle
+            steer = max(25, min(155, 90 - int(lx * 70 * DS4_STEER_SENSITIVITY)))
+            # Full rear power, reduced on inner wheel for slide effect
+            drift_speed = min(100, int(s * 1.2))
+            self._motors.move(drift_speed, d, turn, max(0.15, radius * 0.6))
+        else:
+            self._drift_active = False
+            if s > 0:
+                self._motors.move(s, d, turn, radius)
+            steer = max(30, min(150, 90 - int(lx * 60 * DS4_STEER_SENSITIVITY)))
+
         self._servos.set_angle(SERVO_STEERING, steer)
 
     def _apply_camera(self):
+        """Apply right stick to camera pan/tilt servos.
+
+        ry > 0 (stick pushed forward/up) → tilt up (higher angle)
+        ry < 0 (stick pulled back/down) → tilt down (lower angle)
+
+        Crane arm also uses ry when crane is enabled - moves in smooth 5-degree steps.
+        """
         if not self._servos:
             return
         rx, ry = self._rx, self._ry
+
+        # Camera pan
         pan = max(0, min(180, int(90 + rx * 90 * DS4_CAM_SENSITIVITY)))
-        # Tilt: ry > 0 = stick down -> tilt down (lower angle)
-        #       ry < 0 = stick up -> tilt up (higher angle)
-        tilt = max(0, min(180, int(90 - ry * 90 * DS4_CAM_SENSITIVITY)))
+
+        # Camera tilt: ry > 0 = stick up → tilt up (higher angle)
+        tilt = max(0, min(180, int(90 + ry * 90 * DS4_CAM_SENSITIVITY)))
+
         if pan != self._cam_pan or tilt != self._cam_tilt:
             self._cam_pan, self._cam_tilt = pan, tilt
             self._servos.set_angle(SERVO_CAM_PAN, pan)
             self._servos.set_angle(SERVO_CAM_TILT, tilt)
+
+        # ── Crane control via right stick Y ──
+        # When right stick is pushed far enough up/down and crane is enabled,
+        # move the crane arm in smooth 5-degree steps
+        if CRANE_ENABLED and abs(ry) > 0.5:
+            current_arm = self._servos.get_angle(SERVO_CLAW_ARM)
+            # ry > 0 = stick up → arm up (lower angle = CLAW_ARM_UP direction)
+            # ry < 0 = stick down → arm down (higher angle = CLAW_ARM_DOWN direction)
+            step = CRANE_STEP_DEGREES if abs(ry) > 0.7 else CRANE_STEP_DEGREES // 2 + 1
+            if ry > 0:
+                new_arm = max(CLAW_ARM_UP, current_arm - step)
+            else:
+                new_arm = min(CLAW_ARM_DOWN, current_arm + step)
+            if new_arm != current_arm:
+                self._servos.set_angle(SERVO_CLAW_ARM, new_arm)
 
     def _apply_triggers(self):
         with self._lock:
@@ -471,21 +555,23 @@ class DS4Controller:
                     self._shared_state.speed = self._speed
 
     def _apply_dpad(self):
-        """D-pad controls the claw.
+        """D-pad controls the claw grip with smooth movement.
 
-        FIX: hat_y > 0 means D-pad DOWN -> arm goes DOWN (CLAW_ARM_DOWN).
-             hat_y < 0 means D-pad UP   -> arm goes UP   (CLAW_ARM_UP).
+        hat_y > 0 = D-pad DOWN → arm goes DOWN
+        hat_y < 0 = D-pad UP   → arm goes UP
+        hat_x < 0 = D-pad LEFT  → grip opens
+        hat_x > 0 = D-pad RIGHT → grip closes
         """
         if not CRANE_ENABLED or not self._servos:
             return
         if self._hat_y > 0:                                    # D-pad DOWN
-            self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
+            self._smooth_crane(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
         elif self._hat_y < 0:                                  # D-pad UP
-            self._servos.set_angle(SERVO_CLAW_ARM, CLAW_ARM_UP)
+            self._smooth_crane(SERVO_CLAW_ARM, CLAW_ARM_UP)
         if self._hat_x < 0:                                    # D-pad LEFT
-            self._servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
+            self._smooth_crane(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
         elif self._hat_x > 0:                                  # D-pad RIGHT
-            self._servos.set_angle(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
+            self._smooth_crane(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
 
     def shutdown(self):
         self.stop()

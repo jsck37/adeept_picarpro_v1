@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""PiCar Pro v1 — Flask (5000) + WebSocket (8888) server.
+"""PiCar Pro v2 — Flask (5000) + WebSocket (8888) server.
 
 Refactored:
   - Module system removed (no more dynamic script loading)
   - Lazy hardware init for fast systemd startup
   - OpenCV line-following added as autonomous mode
   - Log console fully integrated via WebSocket
+  - Drift mode support (RWD + front steering)
+  - Bluetooth gamepad management via web UI
+  - Stick inversion and speed boost for DS4
+  - Modular Flask blueprints
 """
 
 import asyncio, json, os, signal, socket, sys, threading, time
@@ -26,6 +30,7 @@ from Server.config import (
     SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
     SWITCH_PINS, ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED, DS4_ENABLED,
+    DRIFT_ENABLED, HOTSPOT_IP,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController
@@ -64,14 +69,38 @@ def save_servo_cal(angles):
 
 
 def get_ip():
+    """Get the best IP address for web UI access.
+
+    When connected to a WiFi hotspot, the hotspot gateway IP
+    (10.42.0.1) is the correct address for clients.
+    Otherwise, try to detect the LAN IP.
+    """
+    try:
+        # Check if we're running a hotspot (gateway IP)
+        import subprocess
+        result = subprocess.run(
+            ["ip", "addr", "show", "wlan0"],
+            capture_output=True, text=True, timeout=2
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                ip = line.split()[1].split("/")[0]
+                if ip.startswith("10.42."):
+                    return ip  # Hotspot gateway
+    except Exception:
+        pass
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-        return ip
+        if ip != "0.0.0.0":
+            return ip
     except Exception:
-        return "0.0.0.0"
+        pass
+    # Fallback to hotspot IP
+    return HOTSPOT_IP
 
 
 # ── Shared state ──────────────────────────────────────────────────────
@@ -331,6 +360,16 @@ def process_command(data):
         r = {'ok': True}
         r.update(state.ds4.get_status() if state.ds4 else {'enabled': False, 'connected': False})
 
+    elif cmd == 'drift':
+        enabled = p.get('enabled', False)
+        if DRIFT_ENABLED:
+            state.motors.set_drift_mode(enabled)
+            if state.ds4:
+                state.ds4._drift_mode = enabled
+            r = {'ok': True, 'drift_mode': enabled}
+        else:
+            r['error'] = 'Drift mode not enabled in config'
+
     elif cmd == 'get_log':
         after = p.get('after_ts', 0.0)
         lines = log_buffer.get_lines_since(after_ts=after, max_lines=500)
@@ -435,7 +474,7 @@ def main():
     # (no need for log_buffer.install() since we don't use print() anymore)
 
     logger.info("=" * 50)
-    logger.info("  PiCar Pro v1 (Flask + WebSocket)")
+    logger.info("  PiCar Pro v2 (Flask + WebSocket)")
     logger.info("=" * 50)
 
     if not HAS_WS:
@@ -522,6 +561,10 @@ def main():
     logger.info(f"  Buzzer:  {'ON' if state.buzzer._initialized else 'OFF'}")
     logger.info(f"  Crane:   {'ON' if CRANE_ENABLED else 'OFF'}")
     logger.info(f"  DS4:     {'ON' if state.ds4 else 'OFF'}")
+    logger.info(f"  Drift:   {'ON' if DRIFT_ENABLED else 'OFF'}")
+    logger.info("-" * 50)
+    logger.info(f"  Web UI:  http://{ip}:{FLASK_PORT}")
+    logger.info(f"  Hotspot: {HOTSPOT_IP}:{FLASK_PORT}")
     logger.info("-" * 50)
 
     async def run():

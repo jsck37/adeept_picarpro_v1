@@ -1,11 +1,14 @@
-"""PiCar Pro v1 — hardware configuration.
+"""PiCar Pro v2 — hardware configuration.
 
 Centralised constants for all subsystems.  Every module imports from
 here so that magic numbers live in exactly one place.
 
-NOTE: The old ``MODULES_ENABLED`` flag has been removed — the module /
-plugin system is no longer supported.  All features are now toggled
-individually by their own ``*_ENABLED`` flags below.
+Changes from v1:
+  - DS4 stick inversion config added
+  - Speed multiplier for gamepad
+  - Crane smooth step size config
+  - Drift mode config
+  - Hotspot IP for captive portal
 """
 
 # ── Feature flags ──────────────────────────────────────────────────────
@@ -57,13 +60,9 @@ SERVO_CLAW_GRIP  = 5
 # For the claw-arm servo a LOWER angle raises the arm, a HIGHER angle
 # lowers it.  For the grip servo a HIGHER angle closes the grip.
 #
-# *** D-PAD INVERSION BUG (ds4.py) ***
-# The DS4 D-pad handler currently maps:
-#   hat_y > 0  (D-pad DOWN)  → CLAW_ARM_UP   (arm goes UP — wrong!)
-#   hat_y < 0  (D-pad UP)    → CLAW_ARM_DOWN  (arm goes DOWN — wrong!)
-# The fix must be applied in ds4.py: swap which constant is used for
-# each hat_y direction.  The values below are correct; only the
-# mapping in ds4.py is inverted.
+# D-PAD mapping (FIXED in v2):
+#   hat_y > 0  (D-pad DOWN)  → CLAW_ARM_DOWN  (arm goes DOWN)
+#   hat_y < 0  (D-pad UP)    → CLAW_ARM_UP    (arm goes UP)
 CLAW_ARM_UP      = 30    # arm raised  (low angle = arm up)
 CLAW_ARM_DOWN    = 120   # arm lowered (high angle = arm down)
 CLAW_GRIP_OPEN   = 60    # grip opened (low angle = open)
@@ -120,6 +119,21 @@ DS4_HEARTBEAT_TIMEOUT = 10.0   # seconds without events -> consider disconnected
 DS4_WATCHDOG_INTERVAL = 3.0    # seconds between watchdog checks
 DS4_READ_TIMEOUT      = 2.0    # select() timeout for event reading
 
+# ── DS4 v2 settings ──────────────────────────────────────────────────
+DS4_INVERT_LY        = True    # Invert left stick Y (push forward = forward)
+DS4_INVERT_RY        = True    # Invert right stick Y (push up = tilt up / crane up)
+DS4_SPEED_MULT       = 1.4    # Speed multiplier for gamepad control (1.4 = 40% faster)
+DS4_CRANE_STEP       = 5       # Crane servo smooth step in degrees
+
+# ── Drift mode ───────────────────────────────────────────────────────
+# The robot is rear-wheel drive with front-wheel steering.
+# Drift mode over-steers the front wheels and applies aggressive
+# rear-wheel power to induce oversteer / drift.
+DRIFT_ENABLED        = True
+DRIFT_STEER_MULT     = 1.2    # Steering angle multiplier in drift mode
+DRIFT_POWER_MULT     = 1.2    # Motor power multiplier in drift mode
+DRIFT_INNER_BRAKE    = 0.6    # Reduce inner wheel to 60% to induce slide
+
 # ── Network ────────────────────────────────────────────────────────────
 WEBSOCKET_PORT = 8888
 FLASK_PORT     = 5000
@@ -127,8 +141,9 @@ FLASK_PORT     = 5000
 # ── WiFi hotspot ──────────────────────────────────────────────────────
 HOTSPOT_SSID     = "Adeept_Robot"
 HOTSPOT_PASSWORD = "12345678"
+HOTSPOT_IP       = "10.42.0.1"   # Gateway IP of the WiFi hotspot (for web UI access)
 
 # ── Motion defaults ────────────────────────────────────────────────────
 DEFAULT_SPEED    = 50
-TURN_RADIUS_MIN = 0.3
+TURN_RADIUS_MIN = 0.2      # Reduced from 0.3 for tighter turns
 TURN_RADIUS_MAX = 1.0

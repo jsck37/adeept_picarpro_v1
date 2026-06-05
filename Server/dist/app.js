@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-//  PiCar Pro — Front-end application
+//  PiCar Pro v2 — Front-end application
 // ═══════════════════════════════════════════════════════════════
 
 // ── Servo definitions (3 servos, crane disabled) ──
@@ -244,16 +244,28 @@ function updateStatus(d) {
       document.getElementById('sb-ds4').style.color = '#34a853';
       if (ds4Dot) ds4Dot.style.background = '#34a853';
       if (ds4Text) { ds4Text.textContent = 'Connected (speed ' + ds4.speed + '%)'; ds4Text.style.color = '#34a853'; }
+      document.getElementById('bt-disconnect-btn').style.display = '';
     } else if (ds4.enabled) {
       document.getElementById('sb-ds4').textContent = 'Searching';
       document.getElementById('sb-ds4').style.color = '#fdd663';
       if (ds4Dot) ds4Dot.style.background = '#fdd663';
       if (ds4Text) { ds4Text.textContent = 'Searching...'; ds4Text.style.color = '#fdd663'; }
+      document.getElementById('bt-disconnect-btn').style.display = 'none';
     } else {
       document.getElementById('sb-ds4').textContent = 'OFF';
       document.getElementById('sb-ds4').style.color = '#9aa0a6';
       if (ds4Dot) ds4Dot.style.background = '#9aa0a6';
       if (ds4Text) { ds4Text.textContent = 'Disabled'; ds4Text.style.color = '#9aa0a6'; }
+      document.getElementById('bt-disconnect-btn').style.display = 'none';
+    }
+    // Drift mode status
+    if (ds4.drift_mode !== undefined) {
+      document.getElementById('sb-drift').textContent = ds4.drift_mode ? 'ON' : 'OFF';
+      document.getElementById('sb-drift').style.color = ds4.drift_mode ? '#ea4335' : '#9aa0a6';
+      var driftToggle = document.getElementById('drift-toggle');
+      if (driftToggle) driftToggle.checked = ds4.drift_mode;
+      var driftInd = document.getElementById('drift-indicator');
+      if (driftInd) { driftInd.textContent = ds4.drift_mode ? 'ON' : 'OFF'; driftInd.style.color = ds4.drift_mode ? '#ea4335' : '#9aa0a6'; }
     }
   } else {
     document.getElementById('sb-ds4').textContent = 'OFF';
@@ -1151,3 +1163,133 @@ if (consoleClearBtn) {
     sendCommand('clear_log', {});
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  BLUETOOTH SCANNER & GAMEPAD PAIRING
+// ═══════════════════════════════════════════════════════════════
+
+// Load saved BT status on page load
+fetch('/api/bt/status').then(function(r) { return r.json(); }).then(function(d) {
+  if (d.saved_mac) {
+    var info = document.getElementById('bt-saved-info');
+    if (info) info.textContent = 'Saved: ' + (d.saved_name || d.saved_mac);
+  }
+}).catch(function() {});
+
+document.getElementById('bt-scan-btn').addEventListener('click', function() {
+  var scanBtn = document.getElementById('bt-scan-btn');
+  var scanIndicator = document.getElementById('bt-scanning');
+  var deviceList = document.getElementById('bt-device-list');
+  var devicesDiv = document.getElementById('bt-devices');
+  
+  scanBtn.disabled = true;
+  scanBtn.textContent = 'Scanning...';
+  scanIndicator.style.display = 'block';
+  deviceList.style.display = 'none';
+  devicesDiv.innerHTML = '';
+
+  fetch('/api/bt/scan').then(function(r) { return r.json(); }).then(function(d) {
+    scanBtn.disabled = false;
+    scanBtn.textContent = 'Scan BT';
+    scanIndicator.style.display = 'none';
+    
+    if (d.ok && d.devices && d.devices.length > 0) {
+      deviceList.style.display = 'block';
+      d.devices.forEach(function(dev) {
+        var item = document.createElement('div');
+        item.className = 'bt-device-item' + (dev.is_gamepad ? ' bt-gamepad' : '');
+        item.innerHTML = '<div class="bt-device-name">' + esc(dev.name) + (dev.is_gamepad ? ' <span style="color:#1a73e8;font-size:.68rem">[Gamepad]</span>' : '') + '</div>' +
+          '<div class="bt-device-mac" style="font-size:.68rem;color:#5f6368">' + esc(dev.mac) + '</div>' +
+          '<button class="btn-sm btn-primary bt-connect-btn" data-mac="' + esc(dev.mac) + '" data-name="' + esc(dev.name) + '">Connect</button>';
+        devicesDiv.appendChild(item);
+      });
+      
+      // Add connect handlers
+      devicesDiv.querySelectorAll('.bt-connect-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var mac = btn.dataset.mac;
+          var name = btn.dataset.name;
+          btn.disabled = true;
+          btn.textContent = 'Connecting...';
+          fetch('/api/bt/connect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mac: mac, name: name})
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
+              toast('Connected to ' + name, 'success');
+              btn.textContent = 'Connected';
+              btn.disabled = true;
+              var info = document.getElementById('bt-saved-info');
+              if (info) info.textContent = 'Saved: ' + name + ' (' + mac + ')';
+            } else {
+              toast('Connection failed: ' + (d.message || d.error || 'Unknown error'), 'error');
+              btn.disabled = false;
+              btn.textContent = 'Connect';
+            }
+          }).catch(function() {
+            toast('Connection request failed', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Connect';
+          });
+        });
+      });
+    } else {
+      toast('No Bluetooth devices found', 'info');
+    }
+  }).catch(function() {
+    scanBtn.disabled = false;
+    scanBtn.textContent = 'Scan BT';
+    scanIndicator.style.display = 'none';
+    toast('Bluetooth scan failed', 'error');
+  });
+});
+
+document.getElementById('bt-auto-btn').addEventListener('click', function() {
+  var btn = document.getElementById('bt-auto-btn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+  fetch('/api/bt/auto_connect', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
+    btn.disabled = false;
+    btn.textContent = 'Auto-Connect';
+    if (d.ok) {
+      toast('Auto-connected to gamepad!', 'success');
+    } else {
+      toast('Auto-connect failed: ' + (d.error || d.message || 'No saved gamepad'), 'error');
+    }
+  }).catch(function() {
+    btn.disabled = false;
+    btn.textContent = 'Auto-Connect';
+    toast('Auto-connect request failed', 'error');
+  });
+});
+
+document.getElementById('bt-disconnect-btn').addEventListener('click', function() {
+  fetch('/api/bt/disconnect', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      toast('Gamepad disconnected', 'info');
+      document.getElementById('bt-disconnect-btn').style.display = 'none';
+    }
+  }).catch(function() {});
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DRIFT MODE TOGGLE
+// ═══════════════════════════════════════════════════════════════
+
+document.getElementById('drift-toggle').addEventListener('change', function() {
+  var enabled = this.checked;
+  sendCommand('drift', {enabled: enabled});
+  var ind = document.getElementById('drift-indicator');
+  if (ind) {
+    ind.textContent = enabled ? 'ON' : 'OFF';
+    ind.style.color = enabled ? '#ea4335' : '#9aa0a6';
+  }
+  document.getElementById('sb-drift').textContent = enabled ? 'ON' : 'OFF';
+  document.getElementById('sb-drift').style.color = enabled ? '#ea4335' : '#9aa0a6';
+  if (enabled) {
+    toast('Drift mode ON — be careful!', 'error');
+  } else {
+    toast('Drift mode OFF', 'info');
+  }
+});
