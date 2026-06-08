@@ -188,9 +188,6 @@ class MPU6050Controller:
             return {'accel': dict(self._accel), 'gyro': dict(self._gyro),
                     'roll': self._roll, 'pitch': self._pitch}
 
-    def get_scan_results(self):
-        return self._scan_results
-
     def shutdown(self):
         self._running = False
         if self._bus:

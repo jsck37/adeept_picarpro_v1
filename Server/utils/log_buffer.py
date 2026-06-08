@@ -6,7 +6,6 @@ and a ring buffer.  The WebSocket handler can fetch recent lines
 and subscribe to new ones.
 """
 
-import io
 import sys
 import threading
 import time
@@ -23,23 +22,7 @@ class LogBuffer:
         self._orig_stdout = None
         self._orig_stderr = None
 
-    # ── capture control ────────────────────────────────────────────
-
-    def install(self):
-        """Replace sys.stdout/stderr with a Tee that feeds this buffer."""
-        self._orig_stdout = sys.stdout
-        self._orig_stderr = sys.stderr
-        sys.stdout = _Tee(self._orig_stdout, self)
-        sys.stderr = _Tee(self._orig_stderr, self)
-
-    def uninstall(self):
-        """Restore original stdout/stderr."""
-        if self._orig_stdout:
-            sys.stdout = self._orig_stdout
-        if self._orig_stderr:
-            sys.stderr = self._orig_stderr
-
-    # ── write (called from Tee) ────────────────────────────────────
+    # ── write (called from loguru sink) ───────────────────────────
 
     def write(self, text):
         if not text:
@@ -97,30 +80,5 @@ class LogBuffer:
                 pass
 
 
-class _Tee:
-    """Wraps a stream so writes go to both the original stream and LogBuffer."""
-
-    def __init__(self, original, log_buffer):
-        self._original = original
-        self._buffer = log_buffer
-
-    def write(self, text):
-        self._original.write(text)
-        self._original.flush()
-        self._buffer.write(text)
-
-    def flush(self):
-        self._original.flush()
-
-    def fileno(self):
-        return self._original.fileno()
-
-    def isatty(self):
-        return self._original.isatty()
-
-    def __getattr__(self, name):
-        return getattr(self._original, name)
-
-
-# ── Global singleton ───────────────────────────────────────────────
+    # ── Global singleton ───────────────────────────────────────────────
 log_buffer = LogBuffer()

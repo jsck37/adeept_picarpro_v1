@@ -3,7 +3,7 @@
 import threading, time
 from Server.config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
-    SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE, CRANE_ENABLED,
+    SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
 )
 from Server.logger import logger
 
@@ -56,25 +56,6 @@ class ServoController:
     def move_angle(self, sid, offset):
         if sid < SERVO_COUNT:
             self.set_angle(sid, self._init_angles[sid] + offset)
-
-    def single_servo(self, sid, direction=1, speed=3):
-        if not self._pwm_initialized or sid >= SERVO_COUNT:
-            return
-        self._stop_thread(sid)
-        flag = self._servo_flags[sid]
-        flag.set()
-        def _run():
-            cur = self._angles[sid]
-            while flag.is_set():
-                cur += direction * speed
-                if cur >= 180 or cur <= 0:
-                    cur = max(0, min(180, cur))
-                    flag.clear()
-                    break
-                self.set_angle(sid, cur)
-                time.sleep(0.05)
-        self._servo_threads[sid] = threading.Thread(target=_run, daemon=True)
-        self._servo_threads[sid].start()
 
     def smooth_move(self, sid, target, steps=10, delay=0.02):
         if not self._pwm_initialized or sid >= SERVO_COUNT:

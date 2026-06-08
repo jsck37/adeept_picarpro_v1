@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from Server.config import (
     DEFAULT_SPEED, SERVO_COUNT, CRANE_ENABLED,
     SERVO_CLAW_ARM, SERVO_CLAW_GRIP, CLAW_ARM_UP, CLAW_ARM_DOWN,
-    CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+    CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP,
 )
 
 
@@ -25,11 +25,6 @@ def create_command_blueprint(state):
     @bp.route("/move", methods=["POST"])
     def cmd_move():
         d = (request.get_json(silent=True) or {}).get("dir", "stop")
-        steer_map = {
-            'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
-            'forward_left': 120, 'forward_right': 60,
-            'backward_left': 120, 'backward_right': 60, 'stop': 90,
-        }
         if d in ("forward",):
             state.motors.move(state.speed, 'forward', 'no', 0.5)
         elif d in ("backward",):
@@ -42,7 +37,7 @@ def create_command_blueprint(state):
             state.motors.move(state.speed, 'backward', d.split("_")[1], 0.3)
         elif d == "stop":
             state.motors.stop()
-        state.servos.set_angle(0, steer_map.get(d, 90))  # SERVO_STEERING = 0
+        state.servos.set_angle(0, STEER_MAP.get(d, 90))  # SERVO_STEERING = 0
         return jsonify({"ok": True, "dir": d})
 
     @bp.route("/speed", methods=["POST"])

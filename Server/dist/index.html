@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>PiCar Pro v2</title>
+<title>PiCar Pro v1</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -35,7 +35,7 @@
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
-    <span>PiCar Pro v2</span>
+    <span>PiCar Pro v1</span>
   </div>
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
@@ -140,28 +140,15 @@
               <div id="bt-saved-info" style="font-size:.7rem;color:#5f6368;margin-top:4px"></div>
             </div>
 
-            <!-- Drift mode toggle -->
-            <div class="drift-section">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                <label class="drift-toggle">
-                  <input type="checkbox" id="drift-toggle">
-                  <span class="drift-slider"></span>
-                </label>
-                <span style="font-size:.78rem;font-weight:600;color:#202124">Drift Mode</span>
-                <span id="drift-indicator" style="font-size:.7rem;color:#9aa0a6">OFF</span>
-              </div>
-            </div>
-
             <!-- Controls help -->
             <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
               <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> — Camera pan/tilt + Crane arm</div>
-              <div><b>L2 / R2</b> — Speed down / up</div>
-              <div><b>D-pad</b> — Claw arm &amp; grip (smooth)</div>
+              <div><b>Right stick</b> — Crane pan/tilt (servos 1 &amp; 2)</div>
+              <div><b>L1</b> — Headlights &nbsp; <b>R1</b> — Buzzer beep</div>
+              <div><b>L2</b> — Left blinker &nbsp; <b>R2</b> — Right blinker</div>
               <div><b>Cross</b> — Claw grip &nbsp; <b>Circle</b> — Claw arm</div>
-              <div><b>Triangle</b> — Buzzer &nbsp; <b>Square</b> — LED &nbsp; <b>L1</b> — Headlights</div>
-              <div><b>R1</b> — Drift mode &nbsp; <b>Options</b> — E-stop &nbsp; <b>PS</b> — Home</div>
-              <div><b>L3</b> — Speed reset &nbsp; <b>R3</b> — Center camera</div>
+              <div><b>Triangle</b> — CV line follow &nbsp; <b>Square</b> — Hand track</div>
+              <div><b>Options</b> — Drift mode &nbsp; <b>PS</b> — Home all</div>
             </div>
           </div>
         </div>
@@ -207,37 +194,55 @@
             </div>
           </div>
 
-          <!-- Claw Crane -->
-          <div id="claw-controls" style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
-            <div style="margin-bottom:6px;font-size:.82rem;color:#5f6368;font-weight:600">Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span></div>
-            <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
-            <div class="btn-group" id="claw-arm-group">
-              <button class="gbtn" data-claw="arm_up" style="background:#1a73e8;color:#fff">Arm Up</button>
-              <button class="gbtn" data-claw="arm_down" style="background:#5f6368;color:#fff">Arm Down</button>
+          <!-- Claw Crane (collapsible sub-section) -->
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
+            <div class="card-title collapsible-header open" data-target="claw-body" style="margin-bottom:0">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
+                Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
+              </div>
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
-            <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip</div>
-            <div class="btn-group" id="claw-grip-group">
-              <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
-              <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
+            <div class="collapsible-body open" id="claw-body">
+              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
+              <div class="btn-group" id="claw-arm-group">
+                <button class="gbtn" data-claw="arm_up" style="background:#1a73e8;color:#fff">Arm Up</button>
+                <button class="gbtn" data-claw="arm_down" style="background:#5f6368;color:#fff">Arm Down</button>
+              </div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip</div>
+              <div class="btn-group" id="claw-grip-group">
+                <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
+                <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Speed -->
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="speed-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            Speed
+          <!-- Speed slider -->
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
+            <div class="card-title" style="margin-bottom:6px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Speed
+              </div>
+            </div>
+            <div class="slider-row">
+              <label>Motor</label>
+              <input type="range" id="speed-slider" min="0" max="100" value="50">
+              <span class="val" id="speed-val">50%</span>
+            </div>
           </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="speed-body">
-          <div class="slider-row">
-            <label>Motor</label>
-            <input type="range" id="speed-slider" min="0" max="100" value="50">
-            <span class="val" id="speed-val">50%</span>
+
+          <!-- Drift Mode -->
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:#ea4335;flex-shrink:0"><path d="M5 17h2l1-3h8l1 3h2"/><path d="M7 14l2-6h6l2 6"/><circle cx="9" cy="17" r="1.5"/><circle cx="15" cy="17" r="1.5"/><path d="M3 11l2-1M21 11l-2-1" stroke-dasharray="2 2"/></svg>
+              <label class="drift-toggle">
+                <input type="checkbox" id="drift-toggle">
+                <span class="drift-slider"></span>
+              </label>
+              <span style="font-size:.78rem;font-weight:600;color:#202124">Drift Mode</span>
+              <span id="drift-indicator" style="font-size:.7rem;color:#9aa0a6">OFF</span>
+            </div>
           </div>
         </div>
       </div>
@@ -371,6 +376,7 @@
             <div class="btn-group" id="buzzer-group">
               <button class="gbtn" data-buzzer="beep">Beep</button>
               <button class="gbtn" data-buzzer="birthday">Birthday</button>
+              <button class="gbtn" data-buzzer="police_siren">Siren</button>
               <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
           </div>

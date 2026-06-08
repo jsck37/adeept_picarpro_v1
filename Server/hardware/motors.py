@@ -101,14 +101,6 @@ class MotorController:
             self._motor_a.stop()
             self._motor_b.stop()
 
-    def video_tracking_move(self, offset, max_speed=50):
-        if not self._initialized:
-            return
-        n = max(-1.0, min(1.0, offset / 320))
-        s = max(0.1, max_speed / 100.0 * (1 - abs(n) * 0.5))
-        self._motor_a.forward(max(0, min(1, s * (1 - n * 0.5))))
-        self._motor_b.forward(max(0, min(1, s * (1 + n * 0.5))))
-
     @property
     def speed(self):
         return self._speed

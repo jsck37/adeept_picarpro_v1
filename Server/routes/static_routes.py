@@ -50,4 +50,12 @@ def create_static_blueprint(dist_dir, docs_dir):
     def docs_pinout():
         return send_from_directory(docs_dir, "pinout.json", mimetype="application/json")
 
+    @bp.route("/docs/components/<path:fn>")
+    def docs_component(fn):
+        comp_dir = os.path.join(docs_dir, "components")
+        fp = os.path.join(comp_dir, fn)
+        if os.path.isfile(fp):
+            return send_from_directory(comp_dir, fn, mimetype="application/json")
+        return "", 404
+
     return bp

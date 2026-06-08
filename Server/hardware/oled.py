@@ -1,11 +1,10 @@
 """OLED SSD1306 — 4 lines + scrolling text."""
 
 import threading, time
-from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT
+from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT, OLED_SCROLL_TEXT
 from Server.logger import logger
 
 class OLEDDisplay:
-    SCROLL_TEXT = "PiCar Pro v1 "
 
     def __init__(self):
         self._device = None
@@ -44,8 +43,8 @@ class OLEDDisplay:
                 draw = ImageDraw.Draw(img)
                 with self._lock:
                     lines = self._lines[:3]
-                scroll = self.SCROLL_TEXT * 3
-                pos = self._scroll_pos % len(self.SCROLL_TEXT)
+                scroll = OLED_SCROLL_TEXT * 3
+                pos = self._scroll_pos % len(OLED_SCROLL_TEXT)
                 for i, l in enumerate(lines):
                     draw.text((0, i * 16), l, fill=255, font=font)
                 draw.text((0, 48), scroll[pos:pos+21], fill=255, font=font)

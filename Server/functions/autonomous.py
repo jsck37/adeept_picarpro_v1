@@ -10,7 +10,6 @@ Modes:
 
 import threading
 import time
-import math
 from Server.config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
@@ -63,7 +62,6 @@ class AutonomousController:
         self._hand_tilt = 90
         self._hand_history = []       # list of (timestamp, x, y) for shake detection
         self._hand_shake_count = 0
-        self._hand_last_callback_time = 0
 
     def set_camera(self, camera):
         """Set camera reference for CV-based line following."""
@@ -165,7 +163,7 @@ class AutonomousController:
                 break
             self.servos.move_angle(scan_servo, angle_offset)
             time.sleep(0.1)
-            distance = self.ultrasonic.get_distance()
+            distance = self.ultrasonic.get_last_distance()
             self._radar_data.append({'angle': angle_offset, 'distance': distance})
 
         self.servos.move_angle(scan_servo, 0)
@@ -180,16 +178,16 @@ class AutonomousController:
         scan_servo = SERVO_STEERING
 
         while self._active:
-            distance = self.ultrasonic.get_distance()
+            distance = self.ultrasonic.get_last_distance()
             if distance < 15:
                 self.motors.stop()
                 time.sleep(0.2)
                 self.servos.move_angle(scan_servo, -45)
                 time.sleep(0.3)
-                dist_left = self.ultrasonic.get_distance()
+                dist_left = self.ultrasonic.get_last_distance()
                 self.servos.move_angle(scan_servo, 45)
                 time.sleep(0.3)
-                dist_right = self.ultrasonic.get_distance()
+                dist_right = self.ultrasonic.get_last_distance()
                 self.servos.move_angle(scan_servo, 0)
                 time.sleep(0.1)
                 if dist_left > dist_right:
@@ -391,7 +389,7 @@ class AutonomousController:
             return
         target = 20
         while self._active:
-            distance = self.ultrasonic.get_distance()
+            distance = self.ultrasonic.get_last_distance()
             if distance < target - 3:
                 self.motors.move(20, 'backward', 'no', 0.5)
             elif distance > target + 3:

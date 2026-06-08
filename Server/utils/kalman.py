@@ -3,8 +3,6 @@
 Used for smooth color tracking and ultrasonic distance readings.
 """
 
-import numpy as np
-
 
 class KalmanFilter:
     """

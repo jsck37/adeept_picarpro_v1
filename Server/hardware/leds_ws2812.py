@@ -134,18 +134,22 @@ class LEDController:
             time.sleep(0.02)
 
     def _anim_police(self):
-        half = LED_COUNT // 2
+        """Police strobe: odd LEDs red + even LEDs blue, then swap."""
         while self._flag.is_set() and self._mode == "police":
-            for i in range(half):
-                self._pixels[i] = (255, 0, 0)
-            for i in range(half, LED_COUNT):
-                self._pixels[i] = (0, 0, 255)
+            # State A: odd=red, even=blue
+            for i in range(LED_COUNT):
+                if i % 2 == 0:
+                    self._pixels[i] = (0, 0, 255)    # even = blue
+                else:
+                    self._pixels[i] = (255, 0, 0)    # odd = red
             self._show()
             time.sleep(0.15)
-            for i in range(half):
-                self._pixels[i] = (0, 0, 255)
-            for i in range(half, LED_COUNT):
-                self._pixels[i] = (255, 0, 0)
+            # State B: swap — odd=blue, even=red
+            for i in range(LED_COUNT):
+                if i % 2 == 0:
+                    self._pixels[i] = (255, 0, 0)    # even = red
+                else:
+                    self._pixels[i] = (0, 0, 255)    # odd = blue
             self._show()
             time.sleep(0.15)
 

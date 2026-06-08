@@ -1,4 +1,4 @@
-"""PiCar Pro v2 — hardware configuration.
+"""PiCar Pro v1 — hardware configuration.
 
 Centralised constants for all subsystems.  Every module imports from
 here so that magic numbers live in exactly one place.
@@ -10,6 +10,8 @@ Changes from v1:
   - Drift mode config
   - Hotspot IP for captive portal
 """
+
+import os
 
 # ── Feature flags ──────────────────────────────────────────────────────
 ULTRASONIC_ENABLED  = False
@@ -60,7 +62,7 @@ SERVO_CLAW_GRIP  = 5
 # For the claw-arm servo a LOWER angle raises the arm, a HIGHER angle
 # lowers it.  For the grip servo a HIGHER angle closes the grip.
 #
-# D-PAD mapping (FIXED in v2):
+# D-PAD mapping (FIXED in v1):
 #   hat_y > 0  (D-pad DOWN)  → CLAW_ARM_DOWN  (arm goes DOWN)
 #   hat_y < 0  (D-pad UP)    → CLAW_ARM_UP    (arm goes UP)
 CLAW_ARM_UP      = 30    # arm raised  (low angle = arm up)
@@ -119,11 +121,13 @@ DS4_HEARTBEAT_TIMEOUT = 10.0   # seconds without events -> consider disconnected
 DS4_WATCHDOG_INTERVAL = 3.0    # seconds between watchdog checks
 DS4_READ_TIMEOUT      = 2.0    # select() timeout for event reading
 
-# ── DS4 v2 settings ──────────────────────────────────────────────────
+# ── DS4 v1 settings ──────────────────────────────────────────────────
 DS4_INVERT_LY        = True    # Invert left stick Y (push forward = forward)
 DS4_INVERT_RY        = True    # Invert right stick Y (push up = tilt up / crane up)
 DS4_SPEED_MULT       = 1.4    # Speed multiplier for gamepad control (1.4 = 40% faster)
 DS4_CRANE_STEP       = 5       # Crane servo smooth step in degrees
+DS4_DRIFT_STEER_RANGE = 70     # Max steer angle range in drift mode (from centre)
+DS4_STEER_RANGE      = 60     # Max steer angle range in normal mode (from centre)
 
 # ── Drift mode ───────────────────────────────────────────────────────
 # The robot is rear-wheel drive with front-wheel steering.
@@ -142,6 +146,19 @@ FLASK_PORT     = 5000
 HOTSPOT_SSID     = "Adeept_Robot"
 HOTSPOT_PASSWORD = "12345678"
 HOTSPOT_IP       = "10.42.0.1"   # Gateway IP of the WiFi hotspot (for web UI access)
+
+# ── Flask ────────────────────────────────────────────────────────────
+SECRET_KEY = os.environ.get('PICARPRO_SECRET_KEY', 'picarpro')
+
+# ── Steering map (direction → servo angle) ────────────────────────────
+STEER_MAP = {
+    'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
+    'forward_left': 120, 'forward_right': 60,
+    'backward_left': 120, 'backward_right': 60, 'stop': 90,
+}
+
+# ── OLED scroll text ──────────────────────────────────────────────────
+OLED_SCROLL_TEXT = "PiCar Pro v1 "
 
 # ── Motion defaults ────────────────────────────────────────────────────
 DEFAULT_SPEED    = 50

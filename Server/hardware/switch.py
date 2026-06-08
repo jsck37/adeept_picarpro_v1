@@ -29,13 +29,6 @@ class SwitchController:
             self._leds[i].off()
             self._states[i] = False
 
-    def toggle(self, i):
-        if 0 <= i < len(self._leds):
-            (self.off if self._states[i] else self.on)(i)
-
-    def get_state(self, i):
-        return self._states[i] if 0 <= i < len(self._states) else False
-
     def shutdown(self):
         for l in self._leds:
             try:

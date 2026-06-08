@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-//  PiCar Pro v2 — Front-end application
+//  PiCar Pro v1 — Front-end application
 // ═══════════════════════════════════════════════════════════════
 
 // ── Servo definitions (3 servos, crane disabled) ──

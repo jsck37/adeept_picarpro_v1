@@ -14,7 +14,6 @@ from Server.config import (
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
     CV_LINE_POS_1, CV_LINE_POS_2, CV_LINE_THRESHOLD,
 )
-from Server.utils.kalman import KalmanFilter
 
 CV_NONE = "none"
 CV_LINE = "findlineCV"
@@ -31,9 +30,6 @@ class CVThread(threading.Thread):
         self.cv_mode = CV_NONE
         self.line_pos_1 = CV_LINE_POS_1
         self.line_pos_2 = CV_LINE_POS_2
-        self.kf_x = KalmanFilter()
-        self.kf_y = KalmanFilter()
-        self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         self.line_pos = [0, 0]
         self.line_angle = 0
         self.frame_size = list(CAMERA_RESOLUTION)

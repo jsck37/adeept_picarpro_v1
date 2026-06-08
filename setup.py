@@ -408,6 +408,13 @@ def stage_6_wifi_hotspot(debian_ver):
 
     default_ssid = "Adeept_Robot"
     default_pass = "12345678"
+    try:
+        sys.path.insert(0, thisPath)
+        from Server.config import HOTSPOT_SSID, HOTSPOT_PASSWORD
+        default_ssid = HOTSPOT_SSID
+        default_pass = HOTSPOT_PASSWORD
+    except Exception:
+        pass
     config_file = "/etc/picarpro/hotspot.conf"
     existing_ssid = default_ssid
     existing_pass = default_pass

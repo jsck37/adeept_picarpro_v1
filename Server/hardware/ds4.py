@@ -12,14 +12,20 @@ Stick ranges vary by connection:
   - USB (hid-playstation): -32768..32767, centre 0
 Axis ranges are auto-detected from device capabilities.
 
-Changes from original:
-  - Left stick Y inverted: push forward = backward, pull back = forward
-    (FIXED: now ly > 0 = stick pushed forward = car forward)
-  - Right stick Y inverted for crane: push up = claw moves down, pull down = claw moves up
-    (FIXED: now ry controls are correct)
-  - Increased wheel speed multiplier (1.5x base)
-  - Smooth crane servo movement in 5-degree steps
-  - Drift mode support (L2+R1 toggle)
+Button mapping (v1):
+  - Left stick: Drive wheels (LY inverted + speed mult)
+  - Right stick: Smooth crane pan/tilt control (servos 1 & 2)
+  - PS button: Home all servos
+  - L1: Toggle headlights on/off
+  - R1: Buzzer beep
+  - L2: Left headlight blinker toggle
+  - R2: Right headlight blinker toggle
+  - Options: Toggle drift mode (also sets LED police + siren beep)
+  - Cross (BTN_SOUTH): Claw grip toggle
+  - Circle (BTN_EAST): Claw arm toggle
+  - Triangle (BTN_NORTH): Start CV line following (trackLineCV)
+  - Square (BTN_WEST): Start hand tracking (trackHand)
+  - Triangle/Square auto modes: any subsequent button press stops auto mode first
 """
 
 import math, os, select, threading, time
@@ -40,13 +46,9 @@ from Server.config import (
     SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
     CRANE_ENABLED,
+    DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
+    DS4_DRIFT_STEER_RANGE, DS4_STEER_RANGE,
 )
-
-# ── Speed multiplier: increases wheel speed from gamepad ──────────────
-DS4_SPEED_MULT = 1.4   # 40% faster than base speed
-
-# ── Crane servo smooth step size ─────────────────────────────────────
-CRANE_STEP_DEGREES = 5  # move crane in 5-degree increments
 
 
 class DS4Controller:
@@ -71,29 +73,40 @@ class DS4Controller:
         # Hardware refs (set in start())
         self._motors = self._servos = self._leds = None
         self._buzzer = self._switches = self._shared_state = None
+        self._autonomous = None
         self._speed = DEFAULT_SPEED
         self._cam_pan = self._cam_tilt = 90
         self._headlights_on = self._claw_grip_closed = self._claw_arm_down = False
-        self._led_mode_idx = 0
-        self._led_modes = ['off', 'solid', 'breath', 'flow', 'rainbow', 'police']
         self._lock = threading.Lock()
 
         # ── Drift mode ──
         self._drift_mode = False
         self._drift_active = False  # actively drifting (steering + throttle)
-        self._crane_target_arm = 90
-        self._crane_target_grip = 90
+
+        # ── Blinker state ──
+        self._left_blinking = False
+        self._right_blinking = False
+        self._left_blink_thread = None
+        self._right_blink_thread = None
+
+        # ── Auto mode state ──
+        self._auto_mode_active = False
+
+        # ── Trigger blinker debounce ──
+        self._l2_pressed = False
+        self._r2_pressed = False
 
     # -- Public API -------------------------------------------------------
 
     def start(self, motors, servos, leds, buzzer, switches,
-              speed=DEFAULT_SPEED, shared_state=None):
+              speed=DEFAULT_SPEED, shared_state=None, autonomous=None):
         if not DS4_ENABLED or not HAS_EVDEV:
             logger.warning("[DS4] Disabled or evdev missing")
             return
         self._motors, self._servos, self._leds = motors, servos, leds
         self._buzzer, self._switches = buzzer, switches
         self._speed, self._shared_state = speed, shared_state
+        self._autonomous = autonomous
         self._running = True
         self._watchdog_thread = threading.Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
@@ -231,6 +244,9 @@ class DS4Controller:
         self._lx = self._ly = self._rx = self._ry = 0.0
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
+        # Stop blinkers
+        self._left_blinking = False
+        self._right_blinking = False
         if was_connected:
             logger.warning("[DS4] Disconnected — will auto-reconnect when available")
 
@@ -335,22 +351,32 @@ class DS4Controller:
         elif code == ecodes.ABS_Y:
             # INVERTED: push stick forward (value < centre) = ly > 0 = forward
             raw = self._norm_axis(value, code)
-            self._ly = -raw  # Invert: stick forward = positive ly = forward
+            self._ly = -raw if DS4_INVERT_LY else raw
             self._apply_move()
         elif code == ecodes.ABS_RX:
             self._rx = self._norm_axis(value, code)
-            self._apply_camera()
+            self._apply_crane_pan_tilt()
         elif code == ecodes.ABS_RY:
-            # INVERTED for crane: push stick up = ry < 0 → we want claw up
+            # INVERTED for crane: push stick up = ry < 0 → we want tilt up
             raw = self._norm_axis(value, code)
-            self._ry = -raw  # Invert: stick up = positive ry
-            self._apply_camera()
+            self._ry = -raw if DS4_INVERT_RY else raw
+            self._apply_crane_pan_tilt()
         elif code == ecodes.ABS_Z:
             self._l2 = self._norm_trigger(value, code)
-            self._apply_triggers()
+            # L2 trigger: toggle left blinker on press (not hold)
+            if self._l2 > 0.5 and not self._l2_pressed:
+                self._l2_pressed = True
+                self._start_left_blinker()
+            elif self._l2 < 0.3:
+                self._l2_pressed = False
         elif code == ecodes.ABS_RZ:
             self._r2 = self._norm_trigger(value, code)
-            self._apply_triggers()
+            # R2 trigger: toggle right blinker on press (not hold)
+            if self._r2 > 0.5 and not self._r2_pressed:
+                self._r2_pressed = True
+                self._start_right_blinker()
+            elif self._r2 < 0.3:
+                self._r2_pressed = False
         elif code == ecodes.ABS_HAT0X:
             self._hat_x = value
             self._apply_dpad()
@@ -364,7 +390,48 @@ class DS4Controller:
         if value and not was:
             self._btn_press(code)
 
+    def _stop_auto_mode_if_active(self):
+        """Stop any running auto mode if one is active."""
+        if self._auto_mode_active and self._autonomous:
+            try:
+                self._autonomous.stop()
+                logger.info("[DS4] Auto mode stopped by gamepad button")
+            except Exception as e:
+                logger.warning(f"[DS4] Error stopping auto mode: {e}")
+            self._auto_mode_active = False
+
     def _btn_press(self, code):
+        # ── Auto-mode buttons: Triangle (trackLineCV) and Square (trackHand) ──
+        if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle - CV line follow
+            if self._autonomous and self._shared_state:
+                # Ensure camera is available
+                if hasattr(self._shared_state, 'camera') and self._shared_state.camera:
+                    self._autonomous._camera = self._shared_state.camera
+                elif hasattr(self._shared_state, 'init_camera'):
+                    self._shared_state.init_camera()
+                    if self._shared_state.camera:
+                        self._autonomous._camera = self._shared_state.camera
+                self._autonomous.start('trackLineCV')
+                self._auto_mode_active = True
+                logger.info("[DS4] Started CV line following mode")
+            return
+
+        if code in (ecodes.BTN_WEST, ecodes.BTN_X):      # Square - hand tracking
+            if self._autonomous and self._shared_state:
+                if hasattr(self._shared_state, 'camera') and self._shared_state.camera:
+                    self._autonomous._camera = self._shared_state.camera
+                elif hasattr(self._shared_state, 'init_camera'):
+                    self._shared_state.init_camera()
+                    if self._shared_state.camera:
+                        self._autonomous._camera = self._shared_state.camera
+                self._autonomous.start('trackHand')
+                self._auto_mode_active = True
+                logger.info("[DS4] Started hand tracking mode")
+            return
+
+        # ── All other buttons: stop auto mode first if active ──
+        self._stop_auto_mode_if_active()
+
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):       # Cross - claw grip
             if CRANE_ENABLED and self._servos:
                 self._claw_grip_closed = not self._claw_grip_closed
@@ -375,56 +442,44 @@ class DS4Controller:
                 self._claw_arm_down = not self._claw_arm_down
                 angle = CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP
                 self._smooth_crane(SERVO_CLAW_ARM, angle)
-        elif code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle - beep
-            if self._buzzer:
-                self._buzzer.beep()
-        elif code in (ecodes.BTN_WEST, ecodes.BTN_X):      # Square - LED cycle
-            if self._leds:
-                self._led_mode_idx = (self._led_mode_idx + 1) % len(self._led_modes)
-                self._leds.set_mode(self._led_modes[self._led_mode_idx], (255, 0, 0))
-        elif code == ecodes.BTN_TL:                         # L1 - headlights
+        elif code == ecodes.BTN_TL:                         # L1 - headlights toggle
             if self._switches and self._switches._initialized:
                 self._headlights_on = not self._headlights_on
                 (self._switches.on if self._headlights_on else self._switches.off)(0)
                 (self._switches.on if self._headlights_on else self._switches.off)(1)
-        elif code == ecodes.BTN_TR:                         # R1 - toggle drift mode
-            self._drift_mode = not self._drift_mode
-            if self._leds:
-                # Flash LEDs to indicate drift mode toggle
-                if self._drift_mode:
-                    self._leds.set_mode('police', (255, 0, 0))
-                    threading.Timer(1.0, lambda: self._leds.set_mode('solid', (255, 50, 0)) if self._leds else None).start()
-                else:
-                    self._leds.set_mode('off', (0, 0, 0))
-            logger.info(f"[DS4] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
+        elif code == ecodes.BTN_TR:                         # R1 - buzzer beep
             if self._buzzer:
-                self._buzzer.beep()
+                if self._drift_mode:
+                    self._buzzer.play_melody('police_siren')
+                else:
+                    self._buzzer.beep()
         elif code == ecodes.BTN_MODE:                       # PS - home servos
             if self._servos:
                 self._servos.move_init()
                 self._cam_pan = self._cam_tilt = 90
-                self._drift_mode = False
-        elif code == ecodes.BTN_START:                      # Options - e-stop
-            if self._motors:
-                self._motors.stop()
-            if self._servos:
-                self._servos.set_angle(SERVO_STEERING, 90)
-            self._lx = self._ly = 0.0
-            self._drift_mode = False
+        elif code == ecodes.BTN_START:                      # Options - toggle drift mode
+            self._drift_mode = not self._drift_mode
+            if self._leds:
+                if self._drift_mode:
+                    self._leds.set_mode('police', (255, 0, 0))
+                else:
+                    self._leds.set_mode('off', (0, 0, 0))
+            logger.info(f"[DS4] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
+            if self._buzzer:
+                if self._drift_mode:
+                    self._buzzer.play_melody('police_siren')
+                else:
+                    self._buzzer.beep()
         elif code == ecodes.BTN_SELECT:                     # Share - unused
             pass
-        elif code == ecodes.BTN_THUMBL:                     # L3 - speed reset
-            with self._lock:
-                self._speed = DEFAULT_SPEED
-        elif code == ecodes.BTN_THUMBR:                     # R3 - centre camera
-            if self._servos:
-                self._cam_pan = self._cam_tilt = 90
-                self._servos.set_angle(SERVO_CAM_PAN, 90)
-                self._servos.set_angle(SERVO_CAM_TILT, 90)
+        elif code == ecodes.BTN_THUMBL:                     # L3 - unused
+            pass
+        elif code == ecodes.BTN_THUMBR:                     # R3 - unused
+            pass
 
     # -- Smooth crane movement --------------------------------------------
 
-    def _smooth_crane(self, servo_id, target_angle, step=CRANE_STEP_DEGREES, delay=0.03):
+    def _smooth_crane(self, servo_id, target_angle, step=DS4_CRANE_STEP, delay=0.03):
         """Move a crane servo smoothly in small steps to avoid jerky motion."""
         if not self._servos:
             return
@@ -496,7 +551,7 @@ class DS4Controller:
         if self._drift_mode and s > 0 and abs(lx) > 0.3:
             self._drift_active = True
             # Over-steer: exaggerate front wheel angle
-            steer = max(25, min(155, 90 - int(lx * 70 * DS4_STEER_SENSITIVITY)))
+            steer = max(25, min(155, 90 - int(lx * DS4_DRIFT_STEER_RANGE * DS4_STEER_SENSITIVITY)))
             # Full rear power, reduced on inner wheel for slide effect
             drift_speed = min(100, int(s * 1.2))
             self._motors.move(drift_speed, d, turn, max(0.15, radius * 0.6))
@@ -504,55 +559,50 @@ class DS4Controller:
             self._drift_active = False
             if s > 0:
                 self._motors.move(s, d, turn, radius)
-            steer = max(30, min(150, 90 - int(lx * 60 * DS4_STEER_SENSITIVITY)))
+            steer = max(30, min(150, 90 - int(lx * DS4_STEER_RANGE * DS4_STEER_SENSITIVITY)))
 
         self._servos.set_angle(SERVO_STEERING, steer)
 
-    def _apply_camera(self):
-        """Apply right stick to camera pan/tilt servos.
+    def _apply_crane_pan_tilt(self):
+        """Apply right stick to camera/crane pan/tilt servos (1 & 2).
 
-        ry > 0 (stick pushed forward/up) → tilt up (higher angle)
-        ry < 0 (stick pulled back/down) → tilt down (lower angle)
-
-        Crane arm also uses ry when crane is enabled - moves in smooth 5-degree steps.
+        Right stick X → cam pan servo (1)
+        Right stick Y → cam tilt servo (2)
+        Both move in smooth steps like the crane arm control.
         """
         if not self._servos:
             return
         rx, ry = self._rx, self._ry
 
-        # Camera pan
-        pan = max(0, min(180, int(90 + rx * 90 * DS4_CAM_SENSITIVITY)))
+        # Only move if stick is deflected enough
+        if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
+            return
 
-        # Camera tilt: ry > 0 = stick up → tilt up (higher angle)
-        tilt = max(0, min(180, int(90 + ry * 90 * DS4_CAM_SENSITIVITY)))
+        step = DS4_CRANE_STEP
 
-        if pan != self._cam_pan or tilt != self._cam_tilt:
-            self._cam_pan, self._cam_tilt = pan, tilt
-            self._servos.set_angle(SERVO_CAM_PAN, pan)
-            self._servos.set_angle(SERVO_CAM_TILT, tilt)
-
-        # ── Crane control via right stick Y ──
-        # When right stick is pushed far enough up/down and crane is enabled,
-        # move the crane arm in smooth 5-degree steps
-        if CRANE_ENABLED and abs(ry) > 0.5:
-            current_arm = self._servos.get_angle(SERVO_CLAW_ARM)
-            # ry > 0 = stick up → arm up (lower angle = CLAW_ARM_UP direction)
-            # ry < 0 = stick down → arm down (higher angle = CLAW_ARM_DOWN direction)
-            step = CRANE_STEP_DEGREES if abs(ry) > 0.7 else CRANE_STEP_DEGREES // 2 + 1
-            if ry > 0:
-                new_arm = max(CLAW_ARM_UP, current_arm - step)
+        # Pan (servo 1): rx > 0 → increase angle (pan right), rx < 0 → decrease (pan left)
+        if abs(rx) >= DS4_DEADZONE:
+            current_pan = self._servos.get_angle(SERVO_CAM_PAN)
+            pan_step = step if abs(rx) > 0.7 else max(1, step // 2)
+            if rx > 0:
+                new_pan = min(180, current_pan + pan_step)
             else:
-                new_arm = min(CLAW_ARM_DOWN, current_arm + step)
-            if new_arm != current_arm:
-                self._servos.set_angle(SERVO_CLAW_ARM, new_arm)
+                new_pan = max(0, current_pan - pan_step)
+            if new_pan != current_pan:
+                self._servos.set_angle(SERVO_CAM_PAN, new_pan)
+                self._cam_pan = new_pan
 
-    def _apply_triggers(self):
-        with self._lock:
-            delta = int(self._r2 * 3) - int(self._l2 * 3)
-            if delta:
-                self._speed = max(0, min(100, self._speed + delta))
-                if self._shared_state:
-                    self._shared_state.speed = self._speed
+        # Tilt (servo 2): ry > 0 (stick up) → increase angle (tilt up)
+        if abs(ry) >= DS4_DEADZONE:
+            current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
+            tilt_step = step if abs(ry) > 0.7 else max(1, step // 2)
+            if ry > 0:
+                new_tilt = min(180, current_tilt + tilt_step)
+            else:
+                new_tilt = max(0, current_tilt - tilt_step)
+            if new_tilt != current_tilt:
+                self._servos.set_angle(SERVO_CAM_TILT, new_tilt)
+                self._cam_tilt = new_tilt
 
     def _apply_dpad(self):
         """D-pad controls the claw grip with smooth movement.
@@ -573,5 +623,59 @@ class DS4Controller:
         elif self._hat_x > 0:                                  # D-pad RIGHT
             self._smooth_crane(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
 
+    # -- Blinker methods --------------------------------------------------
+
+    def _start_left_blinker(self):
+        """Toggle left headlight blinker on/off."""
+        if self._left_blinking:
+            self._left_blinking = False
+            # Make sure left light is off when stopping blinker
+            if self._switches and self._switches._initialized:
+                self._switches.off(0)
+            return
+        self._left_blinking = True
+
+        def _blink():
+            while self._left_blinking and self._connected and self._running:
+                if self._switches and self._switches._initialized:
+                    self._switches.on(0)
+                time.sleep(0.3)
+                if not self._left_blinking:
+                    break
+                if self._switches and self._switches._initialized:
+                    self._switches.off(0)
+                time.sleep(0.3)
+
+        self._left_blink_thread = threading.Thread(target=_blink, daemon=True)
+        self._left_blink_thread.start()
+        logger.info("[DS4] Left blinker ON")
+
+    def _start_right_blinker(self):
+        """Toggle right headlight blinker on/off."""
+        if self._right_blinking:
+            self._right_blinking = False
+            # Make sure right light is off when stopping blinker
+            if self._switches and self._switches._initialized:
+                self._switches.off(1)
+            return
+        self._right_blinking = True
+
+        def _blink():
+            while self._right_blinking and self._connected and self._running:
+                if self._switches and self._switches._initialized:
+                    self._switches.on(1)
+                time.sleep(0.3)
+                if not self._right_blinking:
+                    break
+                if self._switches and self._switches._initialized:
+                    self._switches.off(1)
+                time.sleep(0.3)
+
+        self._right_blink_thread = threading.Thread(target=_blink, daemon=True)
+        self._right_blink_thread.start()
+        logger.info("[DS4] Right blinker ON")
+
     def shutdown(self):
+        self._left_blinking = False
+        self._right_blinking = False
         self.stop()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PiCar Pro v2 — Flask (5000) + WebSocket (8888) server.
+"""PiCar Pro v1 — Flask (5000) + WebSocket (8888) server.
 
 Refactored:
   - Module system removed (no more dynamic script loading)
@@ -30,7 +30,7 @@ from Server.config import (
     SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
     SWITCH_PINS, ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED, DS4_ENABLED,
-    DRIFT_ENABLED, HOTSPOT_IP,
+    DRIFT_ENABLED, HOTSPOT_IP, STEER_MAP,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController
@@ -214,11 +214,6 @@ def process_command(data):
 
     if cmd == 'move':
         d = p.get('dir', 'stop')
-        steer_map = {
-            'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
-            'forward_left': 120, 'forward_right': 60,
-            'backward_left': 120, 'backward_right': 60, 'stop': 90,
-        }
         if d in ('forward',):
             state.motors.move(state.speed, 'forward', 'no', 0.5)
         elif d in ('backward',):
@@ -231,8 +226,8 @@ def process_command(data):
             state.motors.move(state.speed, 'backward', d.split('_')[1], 0.3)
         elif d == 'stop':
             state.motors.stop()
-        state.servos.set_angle(SERVO_STEERING, steer_map.get(d, 90))
-        r = {'ok': True, 'cmd': cmd, 'dir': d, 'steer': steer_map.get(d, 90)}
+        state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
+        r = {'ok': True, 'cmd': cmd, 'dir': d, 'steer': STEER_MAP.get(d, 90)}
 
     elif cmd == 'speed':
         try:
@@ -273,7 +268,8 @@ def process_command(data):
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(
+        key = {'beep': 'beep', 'birthday': 'happy_birthday',
+               'police_siren': 'police_siren'}.get(
             p.get('melody', 'beep'))
         if key:
             state.buzzer.play_melody(key)
@@ -338,12 +334,12 @@ def process_command(data):
             if func == 'trackLineCV':
                 state.init_camera()
                 if state.camera:
-                    state.autonomous._camera = state.camera
+                    state.autonomous.set_camera(state.camera)
             # For hand tracking, ensure camera is available
             if func == 'trackHand':
                 state.init_camera()
                 if state.camera:
-                    state.autonomous._camera = state.camera
+                    state.autonomous.set_camera(state.camera)
             if func == 'stop':
                 state.autonomous.stop()
             else:
@@ -379,6 +375,20 @@ def process_command(data):
         with log_buffer._lock:
             log_buffer._lines.clear()
         r = {'ok': True}
+
+    elif cmd == 'voice':
+        action = p.get('action', 'stop')
+        if state.voice:
+            if action == 'start':
+                state.voice.start()
+                r = {'ok': True, 'action': 'start'}
+            elif action == 'stop':
+                state.voice.stop()
+                r = {'ok': True, 'action': 'stop'}
+            else:
+                r['error'] = f'Unknown voice action: {action}'
+        else:
+            r['error'] = 'Voice control not available'
 
     return r
 
@@ -474,7 +484,7 @@ def main():
     # (no need for log_buffer.install() since we don't use print() anymore)
 
     logger.info("=" * 50)
-    logger.info("  PiCar Pro v2 (Flask + WebSocket)")
+    logger.info("  PiCar Pro v1 (Flask + WebSocket)")
     logger.info("=" * 50)
 
     if not HAS_WS:
@@ -508,7 +518,6 @@ def main():
 
     state.autonomous = AutonomousController(state.motors, state.servos, state.ultrasonic)
     # Camera ref for CV line following — set lazily when camera is initialised
-    state.autonomous.set_camera = lambda: setattr(state.autonomous, '_camera', state.camera) if state.camera else None
 
     try:
         from Server.functions.voice_command import VoiceCommandController
@@ -554,6 +563,7 @@ def main():
             motors=state.motors, servos=state.servos, leds=state.leds,
             buzzer=state.buzzer, switches=state.switches,
             speed=state.speed, shared_state=state,
+            autonomous=state.autonomous,
         )
 
     logger.info("-" * 50)
