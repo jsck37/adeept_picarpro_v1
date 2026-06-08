@@ -1,70 +1,62 @@
 {
   "id": "camera",
-  "name": "Raspberry Pi Camera Module v2",
-  "name_ru": "Модуль камеры Raspberry Pi v2",
-  "description": "8-megapixel camera module using the Sony IMX219 sensor, connected via the MIPI CSI-2 interface. Used in PiCar Pro for real-time video streaming, object detection, line tracking (visual), and remote monitoring.",
-  "description_ru": "8-мегапиксельный модуль камеры на базе сенсора Sony IMX219, подключаемый через интерфейс MIPI CSI-2. Используется в PiCar Pro для потокового видео в реальном времени, обнаружения объектов, визуального отслеживания линии и удалённого мониторинга.",
+  "name": "Модуль камеры Raspberry Pi v2",
+  "description": "8-мегапиксельный модуль камеры на базе сенсора Sony IMX219, подключаемый через интерфейс MIPI CSI-2. Используется в PiCar Pro для потокового видео в реальном времени, обнаружения объектов, визуального отслеживания линии и удалённого мониторинга.",
   "chip": "IMX219PQ (Sony Exmor R)",
   "manufacturer": "Raspberry Pi Foundation / Sony",
   "datasheet_url": "https://www.raspberrypi.com/documentation/accessories/camera.html",
   "specs": {
-    "sensor": "Sony IMX219PQ Exmor R back-illuminated",
-    "resolution": "3280 × 2464 pixels (8 MP)",
-    "interface": "MIPI CSI-2 (2 data lanes)",
-    "connector": "15-pin FPC ribbon cable (CSI port on Raspberry Pi)",
-    "pixel_size": "1.12 µm × 1.12 µm",
-    "color_filter": "Bayer RGB",
-    "lens_fov": "62.2° diagonal (horizontal: 53.5°, vertical: 41.4°)",
-    "video_modes": {
-      "1080p30": "1920 × 1080 @ 30 fps",
-      "720p60": "1280 × 720 @ 60 fps",
-      "640x480_90": "640 × 480 @ 90 fps (VGA mode)",
-      "full_resolution_15": "3280 × 2464 @ 15 fps (still)"
+    "Сенсор": "Sony IMX219PQ Exmor R с обратной засветкой",
+    "Разрешение": "3280 × 2464 пикселей (8 МП)",
+    "Интерфейс": "MIPI CSI-2 (2 линии данных)",
+    "Разъём": "15-контактный шлейфовый кабель FPC (порт CSI на Raspberry Pi)",
+    "Размер пикселя": "1,12 мкм × 1,12 мкм",
+    "Цветовой фильтр": "Байеровский RGB",
+    "Угол обзора объектива": "62,2° по диагонали (горизонтальный: 53,5°, вертикальный: 41,4°)",
+    "Видеорежимы": {
+      "1080p30": "1920 × 1080 при 30 к/с",
+      "720p60": "1280 × 720 при 60 к/с",
+      "640x480_90": "640 × 480 при 90 к/с (режим VGA)",
+      "full_resolution_15": "3280 × 2464 при 15 к/с (фото)"
     },
-    "still_capture": "3280 × 2464 @ 15 fps burst",
-    "dynamic_range": "Approximately 65 dB",
-    "sensitivity": "Approximately 560 mV (green channel)",
-    "operating_temp": "-30°C to +70°C",
-    "dimensions": "25mm × 24mm × 9mm (board only)",
-    "weight": "3g (board only)",
-    "power_consumption": "~250 mW typical"
+    "Фотосъёмка": "3280 × 2464 при 15 к/с, серийная съёмка",
+    "Динамический диапазон": "Приблизительно 65 дБ",
+    "Чувствительность": "Приблизительно 560 мВ (зелёный канал)",
+    "Рабочая температура": "от −30 °C до +70 °C",
+    "Размеры": "25 мм × 24 мм × 9 мм (только плата)",
+    "Вес": "3 г (только плата)",
+    "Потребляемая мощность": "~250 мВт (типичное значение)"
   },
   "pins": [
     {
-      "pin_name": "CSI Connector Pin 1",
-      "connected_to": "3.3V power (via Raspberry Pi CSI port)",
-      "function": "Camera module power supply",
-      "function_ru": "Питание модуля камеры"
+      "pin_name": "Контакт 1 разъёма CSI",
+      "connected_to": "Питание 3,3 В (через порт CSI Raspberry Pi)",
+      "function": "Питание модуля камеры"
     },
     {
-      "pin_name": "CSI Connector Pin 2-3",
-      "connected_to": "RPi MIPI CSI-2 Data Lane 0 (SIOC/SIOD I2C for camera control)",
-      "function": "I2C control bus (SCL/SDA) for sensor configuration",
-      "function_ru": "Шина управления I2C (SCL/SDA) для настройки сенсора"
+      "pin_name": "Контакты 2–3 разъёма CSI",
+      "connected_to": "Линия данных 0 MIPI CSI-2 RPi (шина I2C SIOC/SIOD для управления камерой)",
+      "function": "Шина управления I2C (SCL/SDA) для настройки сенсора"
     },
     {
-      "pin_name": "CSI Connector Pin 4-5",
-      "connected_to": "RPi MIPI CSI-2 Data Lane 1 (clock/data)",
-      "function": "MIPI CSI-2 high-speed differential data lanes",
-      "function_ru": "Высокоскоростные дифференциальные линии MIPI CSI-2"
+      "pin_name": "Контакты 4–5 разъёма CSI",
+      "connected_to": "Линия данных 1 MIPI CSI-2 RPi (такты/данные)",
+      "function": "Высокоскоростные дифференциальные линии данных MIPI CSI-2"
     },
     {
-      "pin_name": "CSI Connector Pin 6-7",
-      "connected_to": "RPi MIPI CSI-2 Clock Lane",
-      "function": "MIPI CSI-2 differential clock pair",
-      "function_ru": "Дифференциальная пара тактового сигнала MIPI CSI-2"
+      "pin_name": "Контакты 6–7 разъёма CSI",
+      "connected_to": "Линия тактирования MIPI CSI-2 RPi",
+      "function": "Дифференциальная пара тактового сигнала MIPI CSI-2"
     },
     {
-      "pin_name": "CSI Connector GND",
-      "connected_to": "Raspberry Pi GND (via CSI connector)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "pin_name": "GND разъёма CSI",
+      "connected_to": "Общая земля Raspberry Pi (через разъём CSI)",
+      "function": "Общая земля"
     },
     {
       "pin_name": "CAM_GPIO",
-      "connected_to": "Not directly used by PiCar Pro (camera enable pin on some models)",
-      "function": "Camera shutdown/standby control (optional)",
-      "function_ru": "Управление выключением/ожиданием камеры (опционально)"
+      "connected_to": "Не используется напрямую в PiCar Pro (контакт включения камеры на некоторых моделях)",
+      "function": "Управление выключением/ожиданием камеры (опционально)"
     }
   ],
   "i2c_address": null,
@@ -73,16 +65,6 @@
     "camera"
   ],
   "tips": [
-    "Enable the camera interface with: sudo raspi-config → Interface Options → Camera → Enable, or add 'camera_auto_detect=1' to /boot/config.txt.",
-    "For PiCar Pro, use the picamera2 library (libcamera-based) on Raspberry Pi OS Bullseye and later. The legacy picamera library is deprecated.",
-    "The flat ribbon cable must be inserted with the contacts facing AWAY from the Ethernet/USB ports on the Raspberry Pi 3B+.",
-    "For object detection, reduce resolution to 320×240 or 640×480 to increase frame rate and reduce processing time.",
-    "The camera's 62° field of view is relatively narrow. For wider coverage, consider a wide-angle lens adapter.",
-    "Night vision requires an IR-cut filter removal and IR illumination — the standard v2 module has a built-in IR-cut filter.",
-    "The MIPI CSI connector on Raspberry Pi 3B+ is located between the HDMI and audio ports.",
-    "For streaming, use MJPEG at 640×480@30fps for a good balance of quality and bandwidth, or H.264 at 1080p for high-quality recording."
-  ],
-  "tips_ru": [
     "Включите интерфейс камеры: sudo raspi-config → Interface Options → Camera → Enable, или добавьте 'camera_auto_detect=1' в /boot/config.txt.",
     "Для PiCar Pro используйте библиотеку picamera2 (на базе libcamera) на Raspberry Pi OS Bullseye и новее. Устаревшая библиотека picamera не поддерживается.",
     "Шлейф должен вставляться контактами ОТ платы Ethernet/USB на Raspberry Pi 3B+.",
@@ -92,21 +74,10 @@
     "Разъём MIPI CSI на Raspberry Pi 3B+ расположен между портами HDMI и аудио.",
     "Для потоковой передачи используйте MJPEG 640×480@30fps для баланса качества и пропускной способности, или H.264 1080p для качественной записи."
   ],
-  "specs_ru": {
-    "sensor": "Сенсор",
-    "resolution": "Разрешение",
-    "interface": "Интерфейс",
-    "connector": "Разъём",
-    "pixel_size": "Размер пикселя",
-    "color_filter": "Цветовой фильтр",
-    "lens_fov": "Угол обзора объектива",
-    "video_modes": "Видеорежимы",
-    "still_capture": "Фотосъёмка",
-    "dynamic_range": "Динамический диапазон",
-    "sensitivity": "Чувствительность",
-    "operating_temp": "Рабочая температура",
-    "dimensions": "Размеры",
-    "weight": "Вес",
-    "power_consumption": "Потребляемая мощность"
-  }
+  "notes": [
+    "Режим findlineCV: обнаружение линии с использованием OpenCV. Камера захватывает кадры, которые обрабатываются конвейером OpenCV (преобразование в градации серого, размытие по Гауссу, пороговая бинаризация, поиск контуров) для определения положения линии на изображении и вычисления угла поворота для управления двигателем.",
+    "Режим trackHand: отслеживание руки с использованием сегментации кожи в цветовом пространстве HSV. Камера захватывает кадр, который конвертируется из BGR в HSV, затем применяется диапазон цвета кожи для создания маски, определяются контуры и вычисляется центр тяжести крупнейшего контура как координата отслеживаемой руки.",
+    "Ленивая инициализация: объект камеры создаётся при первом обращении и повторно используется во всех последующих вызовах. Это предотвращает многократное открытие камеры и снижает нагрузку на систему. Камера автоматически освобождается при завершении программы.",
+    "Библиотека Picamera2: используется как основной интерфейс для работы с камерой на Raspberry Pi OS Bullseye и новее. Picamera2 построена на базе libcamera и заменяет устаревшую библиотеку picamera. Обеспечивает современный API для захвата кадров, настройки параметров сенсора и потоковой передачи видео."
+  ]
 }

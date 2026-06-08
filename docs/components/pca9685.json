@@ -1,85 +1,88 @@
 {
   "id": "pca9685",
-  "name": "PCA9685 16-Channel PWM Servo Controller",
-  "name_ru": "PCA9685 16-канальный ШИМ-контроллер сервоприводов",
-  "description": "16-channel, 12-bit PWM/servo driver with I2C interface. Used to drive up to 16 servo motors or PWM-controlled devices with minimal GPIO usage. In PiCar Pro it controls 3 channels: steering (channel 0), camera pan (channel 1), and camera tilt (channel 2). The crane/manipulator is disabled.",
-  "description_ru": "16-канальный 12-битный ШИМ/серво-драйвер с интерфейсом I2C. Используется для управления до 16 сервоприводами или ШИМ-устройствами с минимальным использованием GPIO. В PiCar Pro управляет 3 каналами: рулевое управление (канал 0), панорама камеры (канал 1) и наклон камеры (канал 2). Кран/манипулятор отключён.",
+  "name": "PCA9685 16-канальный ШИМ-контроллер сервоприводов",
+  "description": "16-канальный 12-битный ШИМ/серво-драйвер с интерфейсом I2C. Используется для управления до 16 сервоприводами или ШИМ-устройствами с минимальным использованием GPIO. В PiCar Pro кран/манипулятор включён (CRANE_ENABLED=True в config.py) и настроено 6 сервоканалов: канал 0 — рулевое управление (steering), канал 1 — панорама камеры (cam_pan), канал 2 — наклон камеры (cam_tilt), канал 3 — не используется, канал 4 — плечо клешни (claw_arm), канал 5 — захват клешни (claw_grip).",
   "chip": "PCA9685",
   "manufacturer": "NXP Semiconductors",
   "datasheet_url": "https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf",
   "specs": {
-    "voltage_supply": "2.3V – 5.5V",
-    "voltage_logic": "2.3V – 5.5V",
-    "voltage_output": "VDD (same as supply)",
-    "interface": "I2C",
-    "i2c_speed": "1 MHz (Fast-mode Plus)",
-    "resolution": "12-bit (4096 steps)",
-    "channels": 16,
-    "pwm_frequency": "24 Hz – 1526 Hz (typical 50 Hz for servos)",
-    "current_per_output": "25 mA sink, 10 mA source",
-    "operating_temp": "-40°C to +85°C",
-    "package": "TSSOP-28 / HVQFN-28"
+    "voltage_supply": "Напряжение питания: 2.3В – 5.5В",
+    "voltage_logic": "Напряжение логики: 2.3В – 5.5В",
+    "voltage_output": "Выходное напряжение: VDD (равно напряжению питания)",
+    "interface": "Интерфейс: I2C",
+    "i2c_speed": "Скорость I2C: 1 МГц (Fast-mode Plus)",
+    "resolution": "Разрешение: 12 бит (4096 шагов)",
+    "channels": "Каналы: 16",
+    "pwm_frequency": "Частота ШИМ: 24 Гц – 1526 Гц (типично 50 Гц для сервоприводов)",
+    "current_per_output": "Ток на выход: 25 мА приём, 10 мА отдача",
+    "operating_temp": "Рабочая температура: -40°C … +85°C",
+    "package": "Корпус: TSSOP-28 / HVQFN-28"
   },
   "pins": [
     {
       "pin_name": "VCC",
-      "connected_to": "Raspberry Pi 3.3V (Pin 1) or 5V (Pin 2/4)",
-      "function": "Logic power supply",
-      "function_ru": "Питание логики"
+      "connected_to": "Raspberry Pi 3.3В (контакт 1) или 5В (контакт 2/4)",
+      "function": "Питание логики"
     },
     {
       "pin_name": "V+",
-      "connected_to": "5V Servo Power Rail (external supply recommended)",
-      "function": "Servo motor power supply (separate from logic)",
-      "function_ru": "Питание сервоприводов (отдельно от логики)"
+      "connected_to": "Шина питания сервоприводов 5В (рекомендуется внешний источник)",
+      "function": "Питание сервоприводов (отдельно от логики)"
     },
     {
       "pin_name": "GND",
-      "connected_to": "Raspberry Pi GND (Pin 6/9/14/20/25/30/34/39)",
-      "function": "Common ground",
-      "function_ru": "Общая земля"
+      "connected_to": "Raspberry Pi GND (контакт 6/9/14/20/25/30/34/39)",
+      "function": "Общая земля"
     },
     {
       "pin_name": "SDA",
-      "connected_to": "Raspberry Pi GPIO 2 / SDA1 (Pin 3)",
-      "function": "I2C data line",
-      "function_ru": "Линия данных I2C"
+      "connected_to": "Raspberry Pi GPIO 2 / SDA1 (контакт 3)",
+      "function": "Линия данных I2C"
     },
     {
       "pin_name": "SCL",
-      "connected_to": "Raspberry Pi GPIO 3 / SCL1 (Pin 5)",
-      "function": "I2C clock line",
-      "function_ru": "Линия тактирования I2C"
+      "connected_to": "Raspberry Pi GPIO 3 / SCL1 (контакт 5)",
+      "function": "Линия тактирования I2C"
     },
     {
       "pin_name": "OE",
-      "connected_to": "Active LOW — tied to GND (always enabled) or GPIO for enable/disable",
-      "function": "Output enable (active low)",
-      "function_ru": "Разрешение выхода (активный низкий)"
+      "connected_to": "Активный низкий — подключён к GND (всегда включён) или к GPIO для управления",
+      "function": "Разрешение выхода (активный низкий)"
     },
     {
       "pin_name": "A0-A5",
-      "connected_to": "Address select jumpers — all LOW for 0x40",
-      "function": "I2C address configuration (6-bit programmable)",
-      "function_ru": "Конфигурация адреса I2C (6 бит)"
+      "connected_to": "Джамперы выбора адреса — все LOW для адреса 0x40",
+      "function": "Конфигурация адреса I2C (6 бит)"
     },
     {
       "pin_name": "PWM0",
-      "connected_to": "Steering servo",
-      "function": "Front wheel steering (30=right, 90=center, 150=left)",
-      "function_ru": "Рулевое управление (30=право, 90=центр, 150=лево)"
+      "connected_to": "Сервопривод рулевого управления",
+      "function": "Рулевое управление (30=право, 90=центр, 150=лево)"
     },
     {
       "pin_name": "PWM1",
-      "connected_to": "Camera pan servo",
-      "function": "Camera horizontal pan",
-      "function_ru": "Горизонтальное панорамирование камеры"
+      "connected_to": "Сервопривод панорамы камеры",
+      "function": "Горизонтальное панорамирование камеры"
     },
     {
       "pin_name": "PWM2",
-      "connected_to": "Camera tilt servo",
-      "function": "Camera vertical tilt",
-      "function_ru": "Вертикальный наклон камеры"
+      "connected_to": "Сервопривод наклона камеры",
+      "function": "Вертикальный наклон камеры"
+    },
+    {
+      "pin_name": "PWM3",
+      "connected_to": "Не подключён",
+      "function": "Не используется (свободный канал)"
+    },
+    {
+      "pin_name": "PWM4",
+      "connected_to": "Сервопривод плеча клешни",
+      "function": "Плечо клешни — подъём/опускание манипулятора (claw_arm)"
+    },
+    {
+      "pin_name": "PWM5",
+      "connected_to": "Сервопривод захвата клешни",
+      "function": "Захват клешни — открытие/закрытие клешни (claw_grip)"
     }
   ],
   "i2c_address": "0x40",
@@ -151,35 +154,15 @@
   "related_modules": [
     "servo",
     "camera",
-    "steering"
+    "steering",
+    "claw"
   ],
   "tips": [
-    "Always use an external 5V power supply for servos — do not power them from the Raspberry Pi's 5V pin to avoid brownouts.",
-    "The default I2C address 0x40 is set with all address jumpers (A0-A5) open/LOW. Solder jumpers to change the address.",
-    "Set PWM frequency to 50 Hz for standard hobby servos (pulse width 1–2 ms).",
-    "The OE (Output Enable) pin is active LOW. Tie to GND to enable all outputs, or connect to a GPIO for software control.",
-    "Each PWM channel has independent ON and OFF time registers, allowing phase-shifted outputs to reduce current spikes.",
-    "The 12-bit resolution at 50 Hz gives ~0.6 µs per step — more than sufficient for servo positioning."
-  ],
-  "tips_ru": [
     "Всегда используйте внешний источник питания 5В для сервоприводов — не питайте их от 5В Raspberry Pi во избежание просадок напряжения.",
     "Адрес I2C по умолчанию 0x40 устанавливается при всех разомкнутых джамперах A0-A5. Замкните джамперы для изменения адреса.",
     "Установите частоту ШИМ 50 Гц для стандартных сервоприводов (ширина импульса 1–2 мс).",
     "Вывод OE (разрешение выхода) активен низким уровнем. Подключите к GND для включения всех выходов или к GPIO для программного управления.",
     "Каждый ШИМ-канал имеет независимые регистры ON и OFF, что позволяет сдвигать фазы для снижения пиковых токов.",
     "12-битное разрешение при 50 Гц даёт ~0.6 мкс на шаг — более чем достаточно для позиционирования сервоприводов."
-  ],
-  "specs_ru": {
-    "voltage_supply": "Напряжение питания",
-    "voltage_logic": "Напряжение логики",
-    "voltage_output": "Выходное напряжение",
-    "interface": "Интерфейс",
-    "i2c_speed": "Скорость I2C",
-    "resolution": "Разрешение",
-    "channels": "Каналы",
-    "pwm_frequency": "Частота ШИМ",
-    "current_per_output": "Ток на выход",
-    "operating_temp": "Рабочая температура",
-    "package": "Корпус"
-  }
+  ]
 }

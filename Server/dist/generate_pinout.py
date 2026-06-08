@@ -43,9 +43,9 @@ right_pins = [
 
 picar_pro = {
     3:"I2C: PCA9685/MPU6050/OLED", 5:"I2C: PCA9685/MPU6050/OLED",
-    7:"Motor EN_A", 29:"Buzzer", 31:"Left Headlight",
-    19:"WS2812 LED", 23:"Ultrasonic TRIG", 24:"Ultrasonic ECHO",
-    33:"Right Headlight", 36:"Line Tracker Ctr", 11:"Motor EN_B",
+    7:"Motor EN_A", 18:"Buzzer (GPIO24)", 31:"Left Headlight",
+    32:"WS2812 LED (GPIO12)", 23:"Ultrasonic TRIG", 24:"Ultrasonic ECHO",
+    33:"Right Headlight", 11:"Motor EN_B",
     12:"Motor IN2_B", 35:"Line Tracker Right", 38:"Line Tracker Left",
     40:"Motor IN2_A", 37:"Motor IN1_A", 13:"Motor IN1_B",
 }
