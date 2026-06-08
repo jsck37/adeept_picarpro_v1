@@ -158,7 +158,7 @@ STEER_MAP = {
 }
 
 # ── OLED scroll text ──────────────────────────────────────────────────
-OLED_SCROLL_TEXT = "PiCar Pro v1 "
+OLED_SCROLL_TEXT = "modded by turik <3 from 8241117 "
 
 # ── Motion defaults ────────────────────────────────────────────────────
 DEFAULT_SPEED    = 50
