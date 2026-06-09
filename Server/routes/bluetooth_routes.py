@@ -3,9 +3,13 @@
 
 All routes are registered under the ``/api/bt`` url prefix.
 
-Uses individual ``bluetoothctl`` subprocess calls with strict timeouts
-for each operation.  This is more reliable than an interactive session
-because each command starts fresh and cannot get stuck in a bad state.
+Uses an INTERACTIVE bluetoothctl session (persistent agent) for reliable
+pairing and connection.  This is critical because without a running agent,
+bluetoothctl connect may fail silently — this is why the gamepad only
+worked when the desktop Bluetooth UI (which runs its own agent) was open.
+
+The interactive session keeps a bluetoothctl process running with
+'agent on' + 'default-agent' active, so all pairing handshakes work.
 
 After a successful BT connection, the ``hid-sony`` kernel module is
 loaded (if not already present) so that the DS4 gamepad creates a
@@ -23,6 +27,177 @@ from Server.logger import logger
 BT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bt_config.json")
 
 # ---------------------------------------------------------------------------
+# Interactive bluetoothctl session — keeps agent alive for pairing
+# ---------------------------------------------------------------------------
+
+class BluetoothctlSession:
+    """Persistent interactive bluetoothctl session.
+
+    WHY: Without a running Bluetooth agent, `bluetoothctl connect` fails
+    silently because no agent is available to handle the pairing handshake.
+    The desktop Bluetooth UI (blueman, GNOME Bluetooth, etc.) runs its own
+    agent — that's why connecting only worked when the UI was open.
+
+    This class keeps a bluetoothctl process running with 'agent on' and
+    'default-agent' so that pairing always works, even headless.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._proc = None
+        self._ensure_running()
+
+    def _ensure_running(self):
+        """Start the interactive session if not running."""
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                return  # Already running
+            try:
+                self._proc = subprocess.Popen(
+                    ['bluetoothctl'],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,  # Line buffered
+                )
+                time.sleep(0.5)
+                # Register agent for pairing
+                self._send('power on')
+                self._send('agent on')
+                self._send('default-agent')
+                time.sleep(0.3)
+                logger.info("[BT] Interactive bluetoothctl session started")
+            except Exception as e:
+                logger.error(f"[BT] Failed to start interactive session: {e}")
+                self._proc = None
+
+    def _send(self, command, wait=0.3):
+        """Send a command to the interactive bluetoothctl session."""
+        self._ensure_running()
+        if not self._proc or self._proc.poll() is not None:
+            return ""
+        try:
+            self._proc.stdin.write(command + '\n')
+            self._proc.stdin.flush()
+            if wait > 0:
+                time.sleep(wait)
+            return ""
+        except Exception as e:
+            logger.warning(f"[BT] Send error for '{command}': {e}")
+            self._restart()
+            return ""
+
+    def _restart(self):
+        """Kill and restart the session."""
+        with self._lock:
+            if self._proc:
+                try:
+                    self._proc.terminate()
+                    self._proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        self._proc.kill()
+                    except Exception:
+                        pass
+                self._proc = None
+        self._ensure_running()
+
+    def send_and_read(self, command, timeout=10):
+        """Send a command and read the output until a prompt or timeout.
+
+        Returns the output text.
+        """
+        self._ensure_running()
+        if not self._proc or self._proc.poll() is not None:
+            return ""
+
+        try:
+            # Drain any pending output first
+            import select as sel
+            while True:
+                r, _, _ = sel.select([self._proc.stdout], [], [], 0.1)
+                if not r:
+                    break
+                try:
+                    self._proc.stdout.readline()
+                except Exception:
+                    break
+
+            # Send command
+            self._proc.stdin.write(command + '\n')
+            self._proc.stdin.flush()
+
+            # Read output until timeout
+            output_lines = []
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    import select as sel
+                    r, _, _ = sel.select([self._proc.stdout], [], [], min(0.5, remaining))
+                    if r:
+                        line = self._proc.stdout.readline()
+                        if line:
+                            output_lines.append(line.strip())
+                            # Check for terminal indicators
+                            line_lower = line.lower()
+                            if ('successful' in line_lower
+                                    or 'failed' in line_lower
+                                    or 'not available' in line_lower
+                                    or 'error' in line_lower
+                                    or 'yes/no' in line_lower
+                                    or '[bluetooth]' in line
+                                    or '[NEW]' in line
+                                    or '[DEL]' in line):
+                                # Give a small window for more output
+                                time.sleep(0.5)
+                                while True:
+                                    r2, _, _ = sel.select([self._proc.stdout], [], [], 0.3)
+                                    if r2:
+                                        l2 = self._proc.stdout.readline()
+                                        if l2:
+                                            output_lines.append(l2.strip())
+                                        else:
+                                            break
+                                    else:
+                                        break
+                                break
+                except Exception:
+                    break
+
+            return '\n'.join(output_lines)
+        except Exception as e:
+            logger.warning(f"[BT] send_and_read error for '{command}': {e}")
+            return ""
+
+    def shutdown(self):
+        if self._proc:
+            try:
+                self._proc.stdin.write('quit\n')
+                self._proc.stdin.flush()
+                self._proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
+
+
+# Global session
+_bt_session = None
+
+def _get_session():
+    global _bt_session
+    if _bt_session is None:
+        _bt_session = BluetoothctlSession()
+    return _bt_session
+
+
+# ---------------------------------------------------------------------------
 # Kernel module helpers
 # ---------------------------------------------------------------------------
 
@@ -34,11 +209,9 @@ def _load_hid_sony():
     This is the #1 reason why a DS4 "connects" but keys don't respond.
     """
     try:
-        # Check if already loaded
         with open('/proc/modules', 'r') as f:
             for line in f:
                 if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
-                    logger.info("[BT] hid-sony already loaded")
                     return True
     except Exception:
         pass
@@ -75,7 +248,7 @@ def _load_hid_sony():
     return False
 
 
-def _wait_for_evdev_device(timeout=8):
+def _wait_for_evdev_device(timeout=10):
     """Wait for a new DS4-compatible evdev device to appear.
 
     After bluetoothctl connects the DS4, there is a delay (1-5 seconds)
@@ -101,7 +274,6 @@ def _wait_for_evdev_device(timeout=8):
                     dev = evdev.InputDevice(path)
                     name_lower = dev.name.lower()
                     if any(kw in name_lower for kw in ds4_keywords):
-                        # Verify it has gamepad buttons (not just the touchpad)
                         caps = dev.capabilities()
                         keys = caps.get(evdev.ecodes.EV_KEY, [])
                         if evdev.ecodes.BTN_SOUTH in keys:
@@ -118,14 +290,11 @@ def _wait_for_evdev_device(timeout=8):
 
 
 # ---------------------------------------------------------------------------
-# bluetoothctl helpers — one subprocess per command (reliable)
+# bluetoothctl helpers
 # ---------------------------------------------------------------------------
 
-def _btctl(*args, timeout=10):
-    """Run a single bluetoothctl command with a strict timeout.
-
-    Returns the combined stdout+stderr as a string.
-    """
+def _btctl_simple(*args, timeout=10):
+    """Run a single bluetoothctl command (for non-critical operations like scan)."""
     cmd = ['bluetoothctl'] + list(args)
     try:
         result = subprocess.run(
@@ -135,52 +304,35 @@ def _btctl(*args, timeout=10):
             timeout=timeout,
             stdin=subprocess.DEVNULL,
         )
-        output = result.stdout + result.stderr
-        return output
+        return result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        logger.warning(f"[BT] Command timed out: {cmd}")
         return ""
-    except Exception as e:
-        logger.error(f"[BT] Command error: {e}")
+    except Exception:
         return ""
 
 
 def _scan_devices(scan_time=3):
     """Scan for nearby Bluetooth devices.
 
-    Starts a background scan, waits, then reads the device list.
     Returns a list of dicts: [{"name": "...", "mac": "XX:XX:XX:XX:XX:XX"}, ...]
     """
     # Ensure hid-sony is loaded before scanning
     _load_hid_sony()
 
-    # Power on and start scan in background
-    _btctl('power', 'on', timeout=5)
-    time.sleep(0.2)
+    session = _get_session()
+    session._send('power on', wait=0.3)
 
-    # Start scan (fire and forget — runs in bluetoothctl's own process)
-    scan_proc = subprocess.Popen(
-        ['bluetoothctl', 'scan', 'on'],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # Start scan
+    session._send('scan on', wait=0)
 
     # Wait for devices to appear
     time.sleep(scan_time)
 
     # Stop scan
-    try:
-        scan_proc.terminate()
-        scan_proc.wait(timeout=2)
-    except Exception:
-        try:
-            scan_proc.kill()
-        except Exception:
-            pass
+    session._send('scan off', wait=0.5)
 
-    # Read device list
-    output = _btctl('devices', timeout=5)
+    # Read device list using the interactive session
+    output = session.send_and_read('devices', timeout=5)
 
     devices = []
     seen = set()
@@ -210,9 +362,13 @@ def _is_gamepad(name):
 def _pair_and_connect(mac, ds4_controller=None):
     """Pair, trust and connect to a Bluetooth device by MAC address.
 
+    Uses the INTERACTIVE bluetoothctl session which keeps a pairing agent
+    alive — this is essential for headless operation without a desktop
+    Bluetooth UI.
+
     Strategy:
       1. Load hid-sony kernel module
-      2. Try direct connect first (device may already be paired/trusted)
+      2. Try direct connect (device may already be paired/trusted)
       3. If that fails, do remove -> pair -> trust -> connect
       4. Wait for evdev device to appear
       5. Trigger DS4 controller rescan
@@ -224,69 +380,72 @@ def _pair_and_connect(mac, ds4_controller=None):
     # Step 0: Ensure hid-sony is loaded
     _load_hid_sony()
 
-    _btctl('power', 'on', timeout=5)
-    _btctl('agent', 'on', timeout=5)
-    _btctl('default-agent', timeout=5)
-    time.sleep(0.3)
+    session = _get_session()
 
-    # -- Step 1: Try direct connect (device may already be paired) --
+    # Step 1: Try direct connect (device may already be paired)
     logger.info(f"[BT] Attempting direct connect to {mac}...")
-    out = _btctl('connect', mac, timeout=10)
+    out = session.send_and_read(f'connect {mac}', timeout=15)
     if 'successful' in out.lower():
-        # Already paired — ensure trusted
-        _btctl('trust', mac, timeout=5)
+        session._send(f'trust {mac}', wait=1)
         logger.info(f"[BT] Direct connect succeeded for {mac}")
-        # Wait for evdev device and trigger rescan
         _post_connect(mac, ds4_controller)
         return True, f"Connected to {mac}"
 
-    # -- Step 2: Full pair sequence --
+    # Step 2: Full pair sequence
     logger.info(f"[BT] Direct connect failed, full pairing for {mac}...")
 
     # Remove any existing pairing
-    _btctl('remove', mac, timeout=5)
+    session._send(f'remove {mac}', wait=1)
     time.sleep(0.5)
 
     # Start scan so device is discoverable
-    scan_proc = subprocess.Popen(
-        ['bluetoothctl', 'scan', 'on'],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(2.0)
-    try:
-        scan_proc.terminate()
-        scan_proc.wait(timeout=2)
-    except Exception:
-        try:
-            scan_proc.kill()
-        except Exception:
-            pass
+    session._send('scan on', wait=0)
+    time.sleep(3.0)
+    session._send('scan off', wait=0.5)
     time.sleep(0.3)
 
-    # Pair
+    # Pair — the interactive session has agent on, so pairing works
     logger.info(f"[BT] Pairing with {mac}...")
-    pair_out = _btctl('pair', mac, timeout=15)
-    if 'successful' not in pair_out.lower() and 'Failed' in pair_out:
-        # Some bluetoothctl versions report pairing differently
-        # Check if device appears in paired list
-        info_out = _btctl('info', mac, timeout=5)
-        if 'Paired: yes' not in info_out:
-            return False, f"Pairing failed for {mac}"
+    pair_out = session.send_and_read(f'pair {mac}', timeout=20)
+
+    # Check if pairing succeeded
+    pair_ok = 'successful' in pair_out.lower()
+    if not pair_ok:
+        # Some versions report differently
+        info_out = session.send_and_read(f'info {mac}', timeout=5)
+        if 'Paired: yes' in info_out:
+            pair_ok = True
+
+    if not pair_ok:
+        # Try again with scan
+        session._send('scan on', wait=0)
+        time.sleep(2.0)
+        session._send('scan off', wait=0.5)
+        pair_out2 = session.send_and_read(f'pair {mac}', timeout=20)
+        if 'successful' not in pair_out2.lower():
+            info_out2 = session.send_and_read(f'info {mac}', timeout=5)
+            if 'Paired: yes' not in info_out2:
+                return False, f"Pairing failed for {mac}"
 
     time.sleep(0.5)
 
     # Trust
-    _btctl('trust', mac, timeout=5)
+    session._send(f'trust {mac}', wait=1)
     time.sleep(0.3)
 
     # Connect
     logger.info(f"[BT] Connecting to {mac}...")
-    conn_out = _btctl('connect', mac, timeout=10)
+    conn_out = session.send_and_read(f'connect {mac}', timeout=15)
     if 'successful' in conn_out.lower():
         logger.info(f"[BT] Pair + connect succeeded for {mac}")
-        # Wait for evdev device and trigger rescan
+        _post_connect(mac, ds4_controller)
+        return True, f"Paired and connected to {mac}"
+
+    # One more try
+    time.sleep(1.0)
+    conn_out2 = session.send_and_read(f'connect {mac}', timeout=15)
+    if 'successful' in conn_out2.lower():
+        logger.info(f"[BT] Second connect attempt succeeded for {mac}")
         _post_connect(mac, ds4_controller)
         return True, f"Paired and connected to {mac}"
 
@@ -296,12 +455,8 @@ def _pair_and_connect(mac, ds4_controller=None):
 def _post_connect(mac, ds4_controller=None):
     """After a successful BT connection, wait for evdev device and
     trigger the DS4 controller to rescan for input devices.
-
-    This is critical — without this step, the DS4 connects at the
-    Bluetooth level but the robot never receives gamepad input.
     """
-    # Wait for the evdev device to appear
-    evdev_path = _wait_for_evdev_device(timeout=8)
+    evdev_path = _wait_for_evdev_device(timeout=10)
 
     if evdev_path:
         logger.info(f"[BT] DS4 input device ready: {evdev_path}")
@@ -309,7 +464,6 @@ def _post_connect(mac, ds4_controller=None):
         logger.warning("[BT] DS4 input device NOT found — keys may not respond")
         logger.warning("[BT] Check: lsmod | grep hid_sony ; ls /dev/input/")
 
-    # Trigger DS4 controller rescan if available
     if ds4_controller is not None:
         try:
             ds4_controller.trigger_rescan()
@@ -320,9 +474,9 @@ def _post_connect(mac, ds4_controller=None):
 
 def _disconnect_device(mac):
     """Disconnect and remove a Bluetooth device."""
-    _btctl('disconnect', mac, timeout=5)
-    time.sleep(0.3)
-    _btctl('remove', mac, timeout=5)
+    session = _get_session()
+    session._send(f'disconnect {mac}', wait=2)
+    session._send(f'remove {mac}', wait=1)
     return True
 
 
@@ -331,7 +485,6 @@ def _disconnect_device(mac):
 # ---------------------------------------------------------------------------
 
 def _load_bt_config():
-    """Load saved Bluetooth config."""
     try:
         if os.path.isfile(BT_CONFIG_FILE):
             with open(BT_CONFIG_FILE) as f:
@@ -342,7 +495,6 @@ def _load_bt_config():
 
 
 def _save_bt_config(config):
-    """Save Bluetooth config."""
     try:
         with open(BT_CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
@@ -355,12 +507,7 @@ def _save_bt_config(config):
 # ---------------------------------------------------------------------------
 
 def auto_connect_on_boot(ds4_controller=None):
-    """Attempt to auto-connect to the last known gamepad on startup.
-
-    This runs in a background thread after a short delay.  If the
-    bluetoothctl connect succeeds, the DS4 watchdog will detect the
-    new evdev device and pick it up automatically.
-    """
+    """Attempt to auto-connect to the last known gamepad on startup."""
     cfg = _load_bt_config()
     mac = cfg.get("last_gamepad_mac")
     if not mac:
@@ -385,22 +532,10 @@ def auto_connect_on_boot(ds4_controller=None):
 # ---------------------------------------------------------------------------
 
 def create_bluetooth_blueprint(state):
-    """Return a Blueprint that provides Bluetooth management endpoints.
-
-    Parameters
-    ----------
-    state : SharedState
-        The shared robot state object.
-    """
     bp = Blueprint("bt", __name__, url_prefix="/api/bt")
 
     @bp.route("/scan", methods=["GET"])
     def bt_scan():
-        """Scan for nearby Bluetooth devices.
-
-        Returns a list of found devices sorted by whether they look like
-        gamepads (gamepads first).
-        """
         try:
             devices = _scan_devices(scan_time=3)
             for d in devices:
@@ -414,10 +549,6 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/connect", methods=["POST"])
     def bt_connect():
-        """Connect to a Bluetooth device by MAC address.
-
-        Expects JSON: {"mac": "XX:XX:XX:XX:XX:XX"}
-        """
         data = request.get_json(silent=True) or {}
         mac = data.get("mac", "").strip()
         if not mac:
@@ -446,7 +577,6 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/disconnect", methods=["POST"])
     def bt_disconnect():
-        """Disconnect from the currently connected Bluetooth gamepad."""
         data = request.get_json(silent=True) or {}
         mac = data.get("mac", "").strip()
         cfg = _load_bt_config()
@@ -461,10 +591,8 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/status", methods=["GET"])
     def bt_status():
-        """Return the current Bluetooth connection status and saved config."""
         cfg = _load_bt_config()
         ds4_connected = state.ds4.connected if state.ds4 else False
-        # Also check if hid-sony is loaded
         hid_sony_loaded = False
         try:
             with open('/proc/modules', 'r') as f:
@@ -484,7 +612,6 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/auto_connect", methods=["POST"])
     def bt_auto_connect():
-        """Attempt to auto-connect to the last known gamepad."""
         cfg = _load_bt_config()
         mac = cfg.get("last_gamepad_mac")
         if not mac:
@@ -508,11 +635,6 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/load_hid_sony", methods=["POST"])
     def bt_load_hid_sony():
-        """Manually trigger loading the hid-sony kernel module.
-
-        This endpoint is useful for debugging — if the DS4 connects
-        but keys don't respond, calling this endpoint may fix it.
-        """
         ok = _load_hid_sony()
         return jsonify({"ok": ok, "message": "hid-sony loaded" if ok else "Failed to load hid-sony"})
 

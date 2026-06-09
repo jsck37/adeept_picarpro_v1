@@ -1,8 +1,8 @@
 /* ========== RESET & BASE ========== */
-@font-face{font-family:'Noto Color Emoji';src:url('/fonts/NotoColorEmoji.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap}
+/* NotoColorEmoji font removed — using system emoji fonts instead */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:16px;-webkit-text-size-adjust:100%}
-body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji';background:#f0f2f5;color:#202124;line-height:1.5;min-height:100vh;overflow-x:hidden}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,'Apple Color Emoji','Segoe UI Emoji';background:#f0f2f5;color:#202124;line-height:1.5;min-height:100vh;overflow-x:hidden}
 button{font-family:inherit;cursor:pointer;border:none;outline:none}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;height:18px;width:18px;border-radius:50%;background:#1a73e8;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2);margin-top:-7px}
@@ -155,7 +155,7 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .module-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .module-card.running{border-color:#34a853;background:#f0faf3}
 .module-header{display:flex;align-items:center;gap:10px}
-.module-icon{width:38px;height:38px;border-radius:8px;background:#e8f0fe;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;font-family:'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif}
+.module-icon{width:38px;height:38px;border-radius:8px;background:#e8f0fe;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;font-family:'Apple Color Emoji','Segoe UI Emoji',sans-serif}
 .module-info h3{font-size:.88rem;font-weight:600;color:#202124}
 .module-info p{font-size:.75rem;color:#5f6368;margin-top:1px}
 .module-tags{display:flex;flex-wrap:wrap;gap:3px}
