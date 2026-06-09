@@ -257,17 +257,12 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .console-output::-webkit-scrollbar-track{background:#1a1a2e}
 .console-output::-webkit-scrollbar-thumb{background:#0f3460;border-radius:3px}
 .console-output::-webkit-scrollbar-thumb:hover{background:#1a73e8}
-.log-line{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.02)}
+.log-line{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.02);color:#ccd6f6;white-space:pre-wrap;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:.8rem}
 .log-line:hover{background:rgba(255,255,255,.03)}
-.log-ts{color:#5f6368;font-size:.65rem;margin-right:8px;user-select:none}
-.log-tag-error{color:#ea4335}
-.log-tag-warn{color:#fbbc04}
-.log-tag-info{color:#8ab4f8}
-.log-text{color:#ccd6f6}
-.log-text-error{color:#f28b82}
-.log-text-warn{color:#fdd663}
-.log-text-debug{color:#808080}
-.log-text-info{color:#8ab4f8}
+.log-error{color:#f28b82}
+.log-warn{color:#fdd663}
+.log-debug{color:#808080}
+.log-info{color:#8ab4f8}
 
 /* ========== TOAST ========== */
 .toast-container{position:fixed;bottom:20px;right:20px;z-index:999;display:flex;flex-direction:column;gap:6px}

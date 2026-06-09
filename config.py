@@ -113,7 +113,7 @@ STEER_MAP = {
     'backward_left': 120, 'backward_right': 60, 'stop': 90,
 }
 
-OLED_SCROLL_TEXT = "PiCar Pro v2 modded "
+OLED_SCROLL_TEXT = "modded by turik with <3 from 8241117 "
 
 DEFAULT_SPEED    = 50
 TURN_RADIUS_MIN = 0.2

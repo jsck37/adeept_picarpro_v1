@@ -36,13 +36,11 @@ def _logbuffer_sink(message):
         record = message.record
         level_name = record['level'].name
         text = record['message']
-        if level_name == 'ERROR':
-            tag = '[ERROR] '
-        elif level_name == 'WARNING':
-            tag = '[WARN] '
-        else:
-            tag = ''
-        log_buffer.write(tag + text)
+        ts = record['time']
+        ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') + f'.{ts.microsecond // 1000:03d}'
+        line = record['line']
+        fname = record['file'].name
+        log_buffer.write(f'{ts_str} | {level_name: <8} | {line}:{fname} {text}')
     except Exception:
         pass
 

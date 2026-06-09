@@ -1125,31 +1125,19 @@ var consoleLineTotal = 0;
 var CONSOLE_MAX_LINES = 3000;
 
 function classifyLogLine(text) {
-  var lower = text.toLowerCase();
-  if (lower.indexOf('[error]') !== -1 || lower.indexOf('error') !== -1 || lower.indexOf('fail') !== -1 || lower.indexOf('traceback') !== -1 || lower.indexOf('exception') !== -1) return 'error';
-  if (lower.indexOf('[warn]') !== -1 || lower.indexOf('warn') !== -1 || lower.indexOf('deprecated') !== -1) return 'warn';
-  if (lower.indexOf('[dbg]') !== -1) return 'debug';
-  if (lower.indexOf('[webserver]') !== -1 || lower.indexOf('[ds4]') !== -1 || lower.indexOf('[mpu') !== -1 || lower.indexOf('[module]') !== -1) return 'info';
+  if (text.indexOf('| ERROR') !== -1 || text.indexOf('Traceback') !== -1 || text.indexOf('Exception') !== -1) return 'error';
+  if (text.indexOf('| WARNING') !== -1) return 'warn';
+  if (text.indexOf('| DEBUG') !== -1) return 'debug';
+  if (text.indexOf('| INFO') !== -1) return 'info';
   return '';
 }
 
-function formatTimestamp(ts) {
-  if (!ts) return '';
-  var d = new Date(ts * 1000);
-  var h = d.getHours().toString().padStart(2, '0');
-  var m = d.getMinutes().toString().padStart(2, '0');
-  var s = d.getSeconds().toString().padStart(2, '0');
-  return h + ':' + m + ':' + s;
-}
-
-function appendConsoleLine(text, ts) {
+function appendConsoleLine(text, _ts) {
   if (!consoleOutput) return;
   var div = document.createElement('div');
-  div.className = 'log-line';
   var cls = classifyLogLine(text);
-  var tsStr = formatTimestamp(ts);
-  div.innerHTML = '<span class="log-ts">' + esc(tsStr) + '</span>' +
-    '<span class="log-text' + (cls ? ' log-text-' + cls : '') + '">' + esc(text) + '</span>';
+  div.className = 'log-line' + (cls ? ' log-' + cls : '');
+  div.textContent = text;
   consoleOutput.appendChild(div);
   consoleLineTotal++;
   // Trim old lines
