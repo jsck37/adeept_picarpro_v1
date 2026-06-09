@@ -1,5 +1,5 @@
 import threading
-from Server.config import (
+from config import (
     MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
     MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2,
     DEFAULT_SPEED, TURN_RADIUS_MIN, TURN_RADIUS_MAX,

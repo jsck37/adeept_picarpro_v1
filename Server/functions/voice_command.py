@@ -2,7 +2,7 @@ import threading
 import time
 import os
 import subprocess
-from Server.config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
+from config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
 from Server.logger import logger
 
 

@@ -1,5 +1,5 @@
 import json, os
-from Server.config import (
+from config import (
     DEFAULT_SPEED, SERVO_COUNT, SERVO_INIT_ANGLE,
     CRANE_ENABLED, ULTRASONIC_ENABLED,
     LINE_TRACKER_ENABLED,

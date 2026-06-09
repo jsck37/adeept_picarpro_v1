@@ -1,5 +1,5 @@
 import time, threading
-from Server.config import LED_COUNT, LED_BRIGHTNESS
+from config import LED_COUNT, LED_BRIGHTNESS
 from Server.logger import logger
 
 class LEDController:

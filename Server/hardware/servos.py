@@ -1,5 +1,5 @@
 import threading, time
-from Server.config import (
+from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
     SERVO_INIT_ANGLES, CLAW_ARM_UP, CLAW_GRIP_OPEN,

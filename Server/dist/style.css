@@ -315,18 +315,4 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .bt-device-name { flex: 1; font-size: .78rem; font-weight: 500; }
 .bt-connect-btn { flex-shrink: 0; }
 
-/* ========== DRIFT TOGGLE ========== */
-.drift-toggle {
-  position: relative; display: inline-block; width: 36px; height: 20px;
-}
-.drift-toggle input { opacity: 0; width: 0; height: 0; }
-.drift-slider {
-  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #dadce0; border-radius: 10px; transition: .3s;
-}
-.drift-slider::before {
-  position: absolute; content: ""; height: 14px; width: 14px;
-  left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s;
-}
-.drift-toggle input:checked + .drift-slider { background-color: #ea4335; }
-.drift-toggle input:checked + .drift-slider::before { transform: translateX(16px); }
+

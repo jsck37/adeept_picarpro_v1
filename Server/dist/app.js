@@ -7,7 +7,7 @@ var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
-  { id: 4, name: 'Claw Arm', min: 0,  max: 180, init: 90 },
+  { id: 6, name: 'Claw Arm', min: 0,  max: 180, init: 90 },
   { id: 5, name: 'Claw Grip', min: 0, max: 180, init: 90 },
 ];
 
@@ -157,7 +157,6 @@ function sendCommand(cmd, params) {
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'claw': '/cmd/claw',
-      'color_format': '/cmd/color_format',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -258,15 +257,7 @@ function updateStatus(d) {
       if (ds4Text) { ds4Text.textContent = 'Disabled'; ds4Text.style.color = '#9aa0a6'; }
       document.getElementById('bt-disconnect-btn').style.display = 'none';
     }
-    // Drift mode status
-    if (ds4.drift_mode !== undefined) {
-      document.getElementById('sb-drift').textContent = ds4.drift_mode ? 'ON' : 'OFF';
-      document.getElementById('sb-drift').style.color = ds4.drift_mode ? '#ea4335' : '#9aa0a6';
-      var driftToggle = document.getElementById('drift-toggle');
-      if (driftToggle) driftToggle.checked = ds4.drift_mode;
-      var driftInd = document.getElementById('drift-indicator');
-      if (driftInd) { driftInd.textContent = ds4.drift_mode ? 'ON' : 'OFF'; driftInd.style.color = ds4.drift_mode ? '#ea4335' : '#9aa0a6'; }
-    }
+
   } else {
     document.getElementById('sb-ds4').textContent = 'OFF';
     document.getElementById('sb-ds4').style.color = '#9aa0a6';
@@ -283,6 +274,18 @@ setTimeout(startSSE, 500);
 // ═══════════════════════════════════════════════════════════════
 //  TAB SWITCHING
 // ═══════════════════════════════════════════════════════════════
+var consoleHistoryLoaded = false;
+
+function fetchConsoleHistory() {
+  if (consoleHistoryLoaded) return;
+  consoleHistoryLoaded = true;
+  fetch('/api/logs').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok && d.lines && d.lines.length) {
+      d.lines.forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+    }
+  }).catch(function() {});
+}
+
 document.querySelectorAll('.tab-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -290,6 +293,7 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
     btn.classList.add('active');
     document.getElementById('content-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'info') loadDocs();
+    if (btn.dataset.tab === 'console') fetchConsoleHistory();
   });
 });
 
@@ -434,7 +438,6 @@ document.addEventListener('pointercancel', function() {
 
 // ── WASD keyboard control — wheels only (using e.code for layout independence) ──
 var keysDown = {};
-var wasdTimer = null;
 
 function wasdGetDirection() {
   var w = keysDown['w'];
@@ -985,6 +988,11 @@ function renderPinout() {
   html += '<div class="info-subtitle">' + esc(d.board) + ' | SoC: ' + esc(d.soc) + ' | Rev ' + esc(d.revision) + '</div>';
 
   html += '<div class="info-section">';
+  html += '<div class="info-section-title">Raspberry Pi Pinout Diagram</div>';
+  html += '<img src="/rpi_pinout.png" style="width:100%;border-radius:8px;border:1px solid #e0e0e0" alt="Raspberry Pi Pinout">';
+  html += '</div>';
+
+  html += '<div class="info-section">';
   html += '<div class="info-section-title">GPIO Pinout</div>';
   html += '<table class="pin-table"><thead><tr><th>Pin</th><th>GPIO</th><th>Function</th><th>Name</th><th>Module</th></tr></thead><tbody>';
   (d.pins || []).forEach(function(p) {
@@ -1140,8 +1148,8 @@ function appendConsoleLine(text, ts) {
   div.className = 'log-line';
   var cls = classifyLogLine(text);
   var tsStr = formatTimestamp(ts);
-  div.innerHTML = '<span class="log-ts">' + escapeHtml(tsStr) + '</span>' +
-    '<span class="log-text' + (cls ? ' log-text-' + cls : '') + '">' + escapeHtml(text) + '</span>';
+  div.innerHTML = '<span class="log-ts">' + esc(tsStr) + '</span>' +
+    '<span class="log-text' + (cls ? ' log-text-' + cls : '') + '">' + esc(text) + '</span>';
   consoleOutput.appendChild(div);
   consoleLineTotal++;
   // Trim old lines
@@ -1273,23 +1281,4 @@ document.getElementById('bt-disconnect-btn').addEventListener('click', function(
   }).catch(function() {});
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  DRIFT MODE TOGGLE
-// ═══════════════════════════════════════════════════════════════
 
-document.getElementById('drift-toggle').addEventListener('change', function() {
-  var enabled = this.checked;
-  sendCommand('drift', {enabled: enabled});
-  var ind = document.getElementById('drift-indicator');
-  if (ind) {
-    ind.textContent = enabled ? 'ON' : 'OFF';
-    ind.style.color = enabled ? '#ea4335' : '#9aa0a6';
-  }
-  document.getElementById('sb-drift').textContent = enabled ? 'ON' : 'OFF';
-  document.getElementById('sb-drift').style.color = enabled ? '#ea4335' : '#9aa0a6';
-  if (enabled) {
-    toast('Drift mode ON — be careful!', 'error');
-  } else {
-    toast('Drift mode OFF', 'info');
-  }
-});

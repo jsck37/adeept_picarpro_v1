@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from Server.config import SERVO_COUNT, SERVO_INIT_ANGLE, SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT
+from config import SERVO_COUNT, SERVO_INIT_ANGLE, SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT
 from Server.logger import logger
 
 

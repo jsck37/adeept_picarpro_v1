@@ -1,5 +1,5 @@
 import socket, subprocess, threading, time
-from Server.config import FLASK_PORT, HOTSPOT_IP
+from config import FLASK_PORT, HOTSPOT_IP
 from Server.logger import logger
 
 

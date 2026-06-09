@@ -1,5 +1,5 @@
 import threading, time
-from Server.config import BUZZER_PIN, BUZZER_PASSIVE
+from config import BUZZER_PIN, BUZZER_PASSIVE
 from Server.logger import logger
 
 NOTES = {

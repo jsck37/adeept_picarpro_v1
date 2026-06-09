@@ -1,5 +1,5 @@
 import math, threading, time
-from Server.config import MPU6050_ADDR, I2C_BUS
+from config import MPU6050_ADDR, I2C_BUS
 from Server.logger import logger
 
 REG_PWR_MGMT_1 = 0x6B

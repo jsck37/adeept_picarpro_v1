@@ -8,7 +8,7 @@ try:
 except ImportError:
     HAS_EVDEV = False
 
-from Server.config import (
+from config import (
     DS4_ENABLED, DS4_DEVICE_NAME, DS4_DEADZONE,
     DS4_STEER_SENSITIVITY, DS4_CAM_SENSITIVITY,
     DS4_HEARTBEAT_TIMEOUT, DS4_WATCHDOG_INTERVAL, DS4_READ_TIMEOUT,

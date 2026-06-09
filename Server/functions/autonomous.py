@@ -1,6 +1,6 @@
 import threading
 import time
-from Server.config import (
+from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
     LINE_LEFT_PIN, LINE_RIGHT_PIN,

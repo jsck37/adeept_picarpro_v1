@@ -4,7 +4,7 @@ from loguru import logger
 
 def _get_log_file():
     try:
-        from Server.config import log_file as lf
+        from config import log_file as lf
         return lf
     except Exception:
         return False

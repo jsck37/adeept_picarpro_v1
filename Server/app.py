@@ -1,7 +1,7 @@
 import os
 from flask import Flask
 
-from Server.config import SECRET_KEY
+from config import SECRET_KEY
 from Server.routes.static_routes import create_static_blueprint
 from Server.routes.video_routes import create_video_blueprint
 from Server.routes.command_routes import create_command_blueprint

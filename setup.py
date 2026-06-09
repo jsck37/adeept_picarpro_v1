@@ -406,7 +406,7 @@ def stage_6_wifi_hotspot(debian_ver):
     default_pass = "12345678"
     try:
         sys.path.insert(0, thisPath)
-        from Server.config import HOTSPOT_SSID, HOTSPOT_PASSWORD
+        from config import HOTSPOT_SSID, HOTSPOT_PASSWORD
         default_ssid = HOTSPOT_SSID
         default_pass = HOTSPOT_PASSWORD
     except Exception:

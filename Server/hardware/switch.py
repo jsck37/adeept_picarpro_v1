@@ -1,4 +1,4 @@
-from Server.config import SWITCH_PINS
+from config import SWITCH_PINS
 from Server.logger import logger
 
 class SwitchController:

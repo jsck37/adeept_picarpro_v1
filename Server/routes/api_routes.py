@@ -1,5 +1,6 @@
 import json, time
 from flask import Blueprint, Response, jsonify
+from Server.utils.log_buffer import log_buffer
 
 
 def create_api_blueprint(state):
@@ -31,5 +32,10 @@ def create_api_blueprint(state):
             "devices": [f'0x{a:02X}' for a in devs],
             "mpu6050_found": addr is not None,
         })
+
+    @bp.route("/logs")
+    def api_logs():
+        lines = log_buffer.get_lines(last_n=200)
+        return jsonify({"ok": True, "lines": [[ts, txt] for ts, txt in lines]})
 
     return bp

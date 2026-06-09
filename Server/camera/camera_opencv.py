@@ -7,7 +7,7 @@ except ImportError:
     Picamera2 = None
 
 from Server.camera.base_camera import BaseCamera
-from Server.config import (
+from config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
     CV_LINE_POS_1, CV_LINE_POS_2, CV_LINE_THRESHOLD,

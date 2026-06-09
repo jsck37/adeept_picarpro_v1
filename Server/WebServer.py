@@ -12,7 +12,7 @@ try:
 except ImportError:
     HAS_WS = False
 
-from Server.config import (
+from config import (
     FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
     SERVO_COUNT, SERVO_INIT_ANGLE, CRANE_ENABLED,
     DS4_ENABLED, HOTSPOT_IP, CAMERA_FPS,

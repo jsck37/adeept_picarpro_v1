@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from Server.config import (
+from config import (
     DEFAULT_SPEED, SERVO_COUNT, CRANE_ENABLED,
     SERVO_CLAW_ARM, SERVO_CLAW_GRIP, CLAW_ARM_UP, CLAW_ARM_DOWN,
     CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP, SERVO_STEERING,
