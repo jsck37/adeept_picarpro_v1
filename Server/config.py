@@ -58,6 +58,18 @@ SERVO_CAM_TILT   = 2
 SERVO_CLAW_ARM   = 4
 SERVO_CLAW_GRIP  = 5
 
+# ── Per-servo init angles ─────────────────────────────────────────────
+# Override the default 90° init angle for specific servos.
+# The arm servo MUST start at CLAW_ARM_UP to avoid buzzing under load.
+SERVO_INIT_ANGLES = {
+    0: 90,   # Steering — centre
+    1: 90,   # Cam Pan — centre
+    2: 90,   # Cam Tilt — centre
+    3: 90,   # Unused channel
+    4: None,  # Claw Arm — set dynamically from CLAW_ARM_UP
+    5: None,  # Claw Grip — set dynamically from CLAW_GRIP_OPEN
+}
+
 # ── Claw angle limits ─────────────────────────────────────────────────
 # For the claw-arm servo a LOWER angle raises the arm, a HIGHER angle
 # lowers it.  For the grip servo a HIGHER angle closes the grip.
@@ -65,10 +77,10 @@ SERVO_CLAW_GRIP  = 5
 # D-PAD mapping (FIXED in v1):
 #   hat_y > 0  (D-pad DOWN)  → CLAW_ARM_DOWN  (arm goes DOWN)
 #   hat_y < 0  (D-pad UP)    → CLAW_ARM_UP    (arm goes UP)
-CLAW_ARM_UP      = 30    # arm raised  (low angle = arm up)
+CLAW_ARM_UP      = 10    # arm raised  (low angle = arm up, less load)
 CLAW_ARM_DOWN    = 120   # arm lowered (high angle = arm down)
-CLAW_GRIP_OPEN   = 60    # grip opened (low angle = open)
-CLAW_GRIP_CLOSED = 130   # grip closed (high angle = closed)
+CLAW_GRIP_OPEN   = 80    # grip opened (moderate angle = less drop)
+CLAW_GRIP_CLOSED = 150   # grip closed (higher angle = stronger grip)
 
 # ── Buzzer ─────────────────────────────────────────────────────────────
 BUZZER_PIN      = 24

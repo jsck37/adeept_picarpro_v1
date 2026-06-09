@@ -4,6 +4,7 @@ import threading, time
 from Server.config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
+    SERVO_INIT_ANGLES, CLAW_ARM_UP, CLAW_GRIP_OPEN,
 )
 from Server.logger import logger
 
@@ -33,12 +34,25 @@ class ServoController:
                     self._servos[i] = adafruit_servo.Servo(
                         self._pca.channels[i], min_pulse=SERVO_MIN_PULSE,
                         max_pulse=SERVO_MAX_PULSE, actuation_range=180)
-                    self._servos[i].angle = SERVO_INIT_ANGLE
+                    # Use per-servo init angle if defined, otherwise default
+                    init_angle = SERVO_INIT_ANGLES.get(i)
+                    if init_angle is None:
+                        # Dynamic defaults for crane servos
+                        if i == 4:   # Claw Arm
+                            init_angle = CLAW_ARM_UP
+                        elif i == 5: # Claw Grip
+                            init_angle = CLAW_GRIP_OPEN
+                        else:
+                            init_angle = SERVO_INIT_ANGLE
+                    self._servos[i].angle = init_angle
+                    self._angles[i] = init_angle
+                    self._init_angles[i] = init_angle
                     time.sleep(0.05)
                 except Exception as e:
                     logger.warning(f"[Servos] S{i} init failed: {e}")
             self._pwm_initialized = True
             logger.info(f"[Servos] PCA9685 OK, {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
+            logger.info(f"[Servos] Init angles: {self._init_angles}")
         except Exception as e:
             logger.error(f"[Servos] Failed: {e}")
 

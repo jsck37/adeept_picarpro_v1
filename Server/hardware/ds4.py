@@ -20,7 +20,7 @@ Button mapping (v1):
   - R1: Buzzer beep
   - L2: Left headlight blinker toggle
   - R2: Right headlight blinker toggle
-  - Options: Toggle drift mode (also sets LED police + siren beep)
+  - Options: Toggle drift mode (also sets LED police light, no sound)
   - Cross (BTN_SOUTH): Claw grip toggle
   - Circle (BTN_EAST): Claw arm toggle
   - Triangle (BTN_NORTH): Start CV line following (trackLineCV)
@@ -467,8 +467,6 @@ class DS4Controller:
                 else:
                     self._leds.set_mode('off', (0, 0, 0))
             logger.info(f"[DS4] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
-            if self._buzzer:
-                self._buzzer.beep()
         elif code == ecodes.BTN_SELECT:                     # Share - unused
             pass
         elif code == ecodes.BTN_THUMBL:                     # L3 - unused
