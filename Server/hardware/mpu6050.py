@@ -1,5 +1,3 @@
-"""MPU6050 IMU — smbus driver with I2C scan and background retry."""
-
 import math, threading, time
 from Server.config import MPU6050_ADDR, I2C_BUS
 from Server.logger import logger
@@ -18,7 +16,6 @@ POSSIBLE_ADDRS = [0x68, 0x69]
 
 
 def i2c_scan(bus_number=None):
-    """Scan I2C bus, return list of responding addresses."""
     bus_number = bus_number or I2C_BUS
     found = []
     try:
@@ -37,7 +34,6 @@ def i2c_scan(bus_number=None):
 
 
 def find_mpu6050_on_bus(bus_number=None):
-    """Find MPU6050 by WHO_AM_I register. Returns (addr, who_am_i) or (None, None)."""
     bus_number = bus_number or I2C_BUS
     try:
         import smbus
@@ -69,21 +65,14 @@ class MPU6050Controller:
         self._accel = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self._gyro = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self._roll = self._pitch = 0.0
-        self._scan_results = []
         self._init_sensor()
 
     def _init_sensor(self):
-        """Try standard addresses, then full bus scan, then background retry."""
         for addr in POSSIBLE_ADDRS:
             if self._try_smbus(addr):
                 return
         logger.warning("[MPU6050] Standard addresses failed, scanning bus...")
         found_addr, _ = find_mpu6050_on_bus()
-        self._scan_results = i2c_scan()
-        if self._scan_results:
-            logger.info(f"[MPU6050] I2C devices: {', '.join(f'0x{a:02X}' for a in self._scan_results)}")
-        else:
-            logger.warning("[MPU6050] No I2C devices found!")
         if found_addr and self._try_smbus(found_addr):
             return
         logger.warning("[MPU6050] Not found — will retry in background")
@@ -92,25 +81,20 @@ class MPU6050Controller:
         self._thread.start()
 
     def _try_smbus(self, addr):
-        """Init MPU6050 at addr via raw smbus with proper wake-up."""
         try:
             import smbus
             bus = smbus.SMBus(I2C_BUS)
-            # Read WHO_AM_I
             who = bus.read_byte_data(addr, REG_WHO_AM_I)
             if who not in WHO_AM_I_VALUES:
                 logger.warning(f"[MPU6050] WHO_AM_I=0x{who:02X} at 0x{addr:02X} — unexpected")
                 bus.close()
                 return False
-            # Wake up: clear SLEEP bit
             bus.write_byte_data(addr, REG_PWR_MGMT_1, 0x00)
             time.sleep(0.1)
-            # Configure
-            bus.write_byte_data(addr, REG_SMPLRT_DIV, 0x07)   # 125Hz
-            bus.write_byte_data(addr, REG_CONFIG, 0x03)       # DLPF ~44Hz
-            bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)  # ±250°/s
-            bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00) # ±2g
-            # Test read
+            bus.write_byte_data(addr, REG_SMPLRT_DIV, 0x07)
+            bus.write_byte_data(addr, REG_CONFIG, 0x03)
+            bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)
+            bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00)
             self._read_word(bus, addr, 0x3B)
             self._addr = addr
             self._bus = bus
@@ -165,7 +149,6 @@ class MPU6050Controller:
                     return
             if retry % 3 == 0:
                 found, _ = find_mpu6050_on_bus()
-                self._scan_results = i2c_scan()
                 if found and self._try_smbus(found):
                     return
 

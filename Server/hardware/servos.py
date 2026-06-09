@@ -1,5 +1,3 @@
-"""Servo control — PCA9685, 6 channels, smooth movement."""
-
 import threading, time
 from Server.config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
@@ -34,13 +32,11 @@ class ServoController:
                     self._servos[i] = adafruit_servo.Servo(
                         self._pca.channels[i], min_pulse=SERVO_MIN_PULSE,
                         max_pulse=SERVO_MAX_PULSE, actuation_range=180)
-                    # Use per-servo init angle if defined, otherwise default
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
-                        # Dynamic defaults for crane servos
-                        if i == 6:   # Claw Arm (moved from ch4 to ch6)
+                        if i == 6:
                             init_angle = CLAW_ARM_UP
-                        elif i == 5: # Claw Grip
+                        elif i == 5:
                             init_angle = CLAW_GRIP_OPEN
                         else:
                             init_angle = SERVO_INIT_ANGLE

@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-Initialize all servos to their default (90°) position.
-Only initializes the 3 active servos (steering, camera pan/tilt).
-Crane/manipulator is disabled — not physically connected.
-Run this after first setup or when servos need calibration.
-"""
 
 import sys
 import os
@@ -16,7 +10,6 @@ from Server.logger import logger
 
 
 def main():
-    """Set all servos to their init angle."""
     logger.info("Initializing servo positions...")
     logger.info(f"  Active servos: {SERVO_COUNT}")
     logger.info(f"    Channel {SERVO_STEERING}: Steering (front wheels)")
@@ -32,7 +25,7 @@ def main():
         servos.move_init()
 
         import time
-        time.sleep(2)  # Wait for servos to reach position
+        time.sleep(2)
 
         servos.shutdown()
         logger.info("Servo initialization complete!")

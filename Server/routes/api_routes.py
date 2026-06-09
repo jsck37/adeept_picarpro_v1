@@ -1,21 +1,8 @@
-#!/usr/bin/env python3
-"""API blueprint — status, SSE stream, and hardware scan.
-
-All routes are registered under the ``/api`` url prefix.
-"""
-
 import json, time
 from flask import Blueprint, Response, jsonify
 
 
 def create_api_blueprint(state):
-    """Return a Blueprint that provides status and info endpoints.
-
-    Parameters
-    ----------
-    state : SharedState
-        The shared robot state object.
-    """
     bp = Blueprint("api", __name__, url_prefix="/api")
 
     @bp.route("/status")

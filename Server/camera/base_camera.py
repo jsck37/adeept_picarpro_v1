@@ -1,6 +1,3 @@
-"""Base camera — background capture thread with FPS control and auto-restart.
-"""
-
 import threading, time
 from Server.logger import logger
 
@@ -12,7 +9,7 @@ class BaseCamera:
     _running = False
     _target_fps = 30
     _frame_interval = 1.0 / 30
-    _camera_instance = None  # Reference to the Camera instance for restart
+    _camera_instance = None
 
     def __init__(self, target_fps=30):
         self._target_fps = target_fps
@@ -21,15 +18,13 @@ class BaseCamera:
         self._start_thread()
 
     def _start_thread(self):
-        """Start the capture thread if not already running."""
         if BaseCamera.thread is not None and BaseCamera.thread.is_alive():
-            return  # Thread already running
+            return
         BaseCamera.last_access = time.time()
         BaseCamera._running = True
         BaseCamera.event.clear()
         BaseCamera.thread = threading.Thread(target=self._capture_thread, daemon=True)
         BaseCamera.thread.start()
-        # Wait for first frame with shorter timeout
         deadline = time.time() + 5
         while not self.event.wait(0.5):
             if not BaseCamera._running:
@@ -52,7 +47,6 @@ class BaseCamera:
                     if sleep > 0:
                         time.sleep(sleep)
                 last_time = time.time()
-                # Auto-stop after 120s inactivity to free camera resource
                 if time.time() - BaseCamera.last_access > 120:
                     logger.info("[Camera] 120s inactivity — stopping capture thread")
                     frames_gen.close()
@@ -66,7 +60,6 @@ class BaseCamera:
     @staticmethod
     def get_frame():
         BaseCamera.last_access = time.time()
-        # Auto-restart capture thread if it died
         if BaseCamera.thread is None or not BaseCamera.thread.is_alive():
             logger.info("[Camera] Thread not running — restarting...")
             if BaseCamera._camera_instance is not None:
@@ -77,7 +70,6 @@ class BaseCamera:
                     return None
             else:
                 return None
-        # Wait for next frame with shorter timeout for less latency
         BaseCamera.event.wait(timeout=2)
         return BaseCamera.frame
 

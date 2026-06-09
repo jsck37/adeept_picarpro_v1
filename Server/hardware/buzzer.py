@@ -1,13 +1,6 @@
-"""Buzzer — passive PWM tones / active on-off."""
-
 import threading, time
-from Server.config import BUZZER_PIN
+from Server.config import BUZZER_PIN, BUZZER_PASSIVE
 from Server.logger import logger
-
-try:
-    from Server.config import BUZZER_PASSIVE
-except ImportError:
-    BUZZER_PASSIVE = True
 
 NOTES = {
     'C3':131,'D3':147,'E3':165,'F3':175,'G3':196,'A3':220,'B3':247,
@@ -19,8 +12,6 @@ BIRTHDAY = [('C4',.3),('C4',.1),('D4',.4),('C4',.4),('F4',.4),('E4',.8),
             ('C4',.3),('C4',.1),('D4',.4),('C4',.4),('G4',.4),('F4',.8),
             ('C4',.3),('C4',.1),('C5',.4),('A4',.4),('F4',.4),('E4',.4),('D4',.8),
             ('B4',.3),('B4',.1),('A4',.4),('F4',.4),('G4',.4),('F4',.8)]
-
-# Police siren removed — only beep and happy_birthday available
 
 class BuzzerController:
     def __init__(self):
@@ -89,7 +80,6 @@ class BuzzerController:
             for n, d in notes:
                 if not self._flag.is_set():
                     break
-                # Support raw frequency (int) or note name (str)
                 if isinstance(n, int):
                     freq = n
                 elif n == 'REST' or n not in NOTES:

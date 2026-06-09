@@ -1,33 +1,20 @@
-#!/usr/bin/env python3
-"""Command blueprint — REST API for robot control.
-
-All routes are registered under the ``/cmd`` url prefix.
-"""
-
 from flask import Blueprint, jsonify, request
 from Server.config import (
     DEFAULT_SPEED, SERVO_COUNT, CRANE_ENABLED,
     SERVO_CLAW_ARM, SERVO_CLAW_GRIP, CLAW_ARM_UP, CLAW_ARM_DOWN,
-    CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP,
+    CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP, SERVO_STEERING,
 )
 
 
 def create_command_blueprint(state):
-    """Return a Blueprint that handles robot command endpoints.
-
-    Parameters
-    ----------
-    state : SharedState
-        The shared robot state object.
-    """
     bp = Blueprint("cmd", __name__, url_prefix="/cmd")
 
     @bp.route("/move", methods=["POST"])
     def cmd_move():
         d = (request.get_json(silent=True) or {}).get("dir", "stop")
-        if d in ("forward",):
+        if d == "forward":
             state.motors.move(state.speed, 'forward', 'no', 0.5)
-        elif d in ("backward",):
+        elif d == "backward":
             state.motors.move(state.speed, 'backward', 'no', 0.5)
         elif d in ("left", "right"):
             state.motors.move(state.speed, 'forward', d, 0.3)
@@ -37,7 +24,7 @@ def create_command_blueprint(state):
             state.motors.move(state.speed, 'backward', d.split("_")[1], 0.3)
         elif d == "stop":
             state.motors.stop()
-        state.servos.set_angle(0, STEER_MAP.get(d, 90))  # SERVO_STEERING = 0
+        state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
         return jsonify({"ok": True, "dir": d})
 
     @bp.route("/speed", methods=["POST"])

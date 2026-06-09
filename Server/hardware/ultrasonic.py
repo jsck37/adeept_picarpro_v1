@@ -1,5 +1,3 @@
-"""Ultrasonic HC-SR04 — disabled by default."""
-
 import threading, time
 from Server.config import ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
 from Server.logger import logger

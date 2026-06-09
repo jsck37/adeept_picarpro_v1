@@ -1,10 +1,3 @@
-"""Motor control — L298N GPIO via gpiozero.
-
-Supports:
-  - Normal driving (forward/backward/turn)
-  - Forward-biased turning: inner wheel slows but never stops during turns
-"""
-
 import threading
 from Server.config import (
     MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
@@ -31,23 +24,6 @@ class MotorController:
             logger.error(f"[Motors] Failed: {e}")
 
     def move(self, speed=None, direction='forward', turn='no', radius=0.5):
-        """Move the robot.
-
-        Parameters
-        ----------
-        speed : int, optional
-            Motor speed 0-100. Defaults to stored speed.
-        direction : str
-            'forward' or 'backward'
-        turn : str
-            'no', 'left', or 'right'
-        radius : float
-            Turn radius factor (0.0 = pivot, 1.0 = gentle curve)
-
-        During turns, the inner wheel is slowed down but never goes below
-        30% of the outer wheel speed. This ensures the car keeps moving
-        forward during turns instead of stopping.
-        """
         if not self._initialized:
             return
         speed = speed if speed is not None else self._speed
@@ -56,16 +32,14 @@ class MotorController:
         radius = max(TURN_RADIUS_MIN, min(TURN_RADIUS_MAX, radius))
         s = speed / 100.0
 
-        # ── Normal mode with forward-biased turning ──
         if turn == 'no':
             left = s
             right = s
         elif turn == 'left':
-            # Inner wheel (left) slows but keeps at least 30% speed
             inner_min = 0.3
             left = max(s * inner_min, s * (1 - radius))
             right = s
-        else:  # right
+        else:
             inner_min = 0.3
             left = s
             right = max(s * inner_min, s * (1 - radius))

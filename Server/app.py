@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-""" Flask app — HTTP + MJPEG + REST API.
-
-Routes are organised into Blueprint modules under Server/routes/ for
-readability and maintainability.
-"""
-
 import os
 from flask import Flask
 
@@ -24,14 +17,10 @@ def create_app(state):
     app = Flask(__name__, template_folder=dist_dir, static_folder=None)
     app.config['SECRET_KEY'] = SECRET_KEY
 
-    # ── CORS ──────────────────────────────────────────────────────────
-
     @app.after_request
     def cors(r):
         r.headers["Access-Control-Allow-Origin"] = "*"
         return r
-
-    # ── Register blueprints ───────────────────────────────────────────
 
     app.register_blueprint(create_static_blueprint(dist_dir, docs_dir))
     app.register_blueprint(create_video_blueprint(state))

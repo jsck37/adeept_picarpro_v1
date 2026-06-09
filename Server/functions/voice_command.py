@@ -1,10 +1,3 @@
-"""Voice command module — Sherpa-NCNN offline speech recognition.
-
-Fixed: removed references to servo channels 3/4/6 which don't exist
-on PiCar Pro v1 (only has 3 servos: 0=steering, 1=cam_pan, 2=cam_tilt).
-Now uses only the available servos for voice commands.
-"""
-
 import threading
 import time
 import os
@@ -15,8 +8,6 @@ from Server.logger import logger
 
 class VoiceCommandController:
 
-    # Map voice phrases to robot actions.
-    # v1 only has 3 servos: 0=steering, 1=cam_pan, 2=cam_tilt
     COMMAND_MAP = {
         'look left': 'lookLeft',
         'look right': 'lookRight',
@@ -124,15 +115,14 @@ class VoiceCommandController:
 
     def _execute_command(self, command):
         logger.info(f"[Voice] Command: {command}")
-        # Servo 0 = steering, 1 = cam_pan, 2 = cam_tilt
         if command == 'lookLeft':
             self.servos.move_angle(0, -30)
         elif command == 'lookRight':
             self.servos.move_angle(0, 30)
         elif command == 'camUp':
-            self.servos.move_angle(2, 15)    # cam_tilt up
+            self.servos.move_angle(2, 15)
         elif command == 'camDown':
-            self.servos.move_angle(2, -15)   # cam_tilt down
+            self.servos.move_angle(2, -15)
         elif command == 'forward':
             self.motors.move(40, 'forward', 'no', 0.5)
         elif command == 'backward':

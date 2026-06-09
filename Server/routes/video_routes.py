@@ -1,19 +1,9 @@
-#!/usr/bin/env python3
-"""Video stream blueprint — MJPEG feed."""
-
 import time
 from flask import Blueprint, Response
 from Server.camera.camera_opencv import Camera
 
 
 def create_video_blueprint(state):
-    """Return a Blueprint that provides the MJPEG video feed.
-
-    Parameters
-    ----------
-    state : SharedState
-        The shared robot state object.
-    """
     bp = Blueprint("video", __name__)
 
     @bp.route("/video_feed")

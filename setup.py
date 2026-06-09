@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Automated setup for PiCar Pro (Flask + WebSocket) on Raspberry Pi 3B+."""
 
 import os
 import sys
@@ -13,7 +12,7 @@ if not username:
     username = os.popen('whoami').readline().strip()
 if not username:
     username = "pi"
-user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f 6').readline().strip()
+user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f6').readline().strip()
 if not user_home:
     user_home = f"/home/{username}"
 curpath = os.path.realpath(__file__)
@@ -215,7 +214,6 @@ def stage_2_swap():
 
     print(f"  {DIM}[i]{RST} Creating 2GB swap file...")
 
-    # Stop all existing swap services first
     run_cmd("systemctl stop dphys-swapfile 2>/dev/null || true", critical=False)
     run_cmd("systemctl disable dphys-swapfile 2>/dev/null || true", critical=False)
     run_cmd("swapoff /var/swap 2>/dev/null || true", critical=False)
@@ -353,7 +351,6 @@ def stage_5_hardware_config():
     run_cmd("raspi-config nonint do_spi 0", critical=False)
     run_cmd("raspi-config nonint do_camera 0", critical=False)
 
-    # Mask all failing rpi/zram/swap services to prevent boot errors
     services_to_mask = [
         "rpi-setup-resize.service",
         "rpi-resize-swap-file.service",
@@ -365,7 +362,6 @@ def stage_5_hardware_config():
         "dev-zram0.swap",
     ]
 
-    # Stop first, then disable+mask (order matters)
     for svc in services_to_mask:
         run_cmd(f"systemctl stop {svc} 2>/dev/null || true", critical=False)
     for svc in swap_units_to_mask:
@@ -591,7 +587,6 @@ def main():
     except Exception:
         current_ip = "(error)"
 
-    # Gather system info
     cpu_info = "Unknown"
     try:
         with open('/proc/cpuinfo', 'r') as f:
