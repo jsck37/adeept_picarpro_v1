@@ -268,8 +268,7 @@ def process_command(data):
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep': 'beep', 'birthday': 'happy_birthday',
-               'police_siren': 'police_siren'}.get(
+        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(
             p.get('melody', 'beep'))
         if key:
             state.buzzer.play_melody(key)
@@ -565,6 +564,12 @@ def main():
             speed=state.speed, shared_state=state,
             autonomous=state.autonomous,
         )
+        # Auto-connect to last known gamepad via bluetoothctl
+        try:
+            from Server.routes.bluetooth_routes import auto_connect_on_boot
+            auto_connect_on_boot(state.ds4)
+        except Exception as e:
+            logger.warning(f"[WebServer] BT auto-connect setup failed: {e}")
 
     logger.info("-" * 50)
     logger.info(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")

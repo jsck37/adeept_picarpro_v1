@@ -20,16 +20,7 @@ BIRTHDAY = [('C4',.3),('C4',.1),('D4',.4),('C4',.4),('F4',.4),('E4',.8),
             ('C4',.3),('C4',.1),('C5',.4),('A4',.4),('F4',.4),('E4',.4),('D4',.8),
             ('B4',.3),('B4',.1),('A4',.4),('F4',.4),('G4',.4),('F4',.8)]
 
-# Police siren: rapidly sweep up (600→900Hz) then down, warbling effect
-# Uses raw frequency tuples (freq_hz, duration_s) instead of note names
-POLICE_SIREN = []
-for _ in range(12):
-    # Sweep up: 600 → 900 Hz in steps of ~30Hz
-    for freq in range(600, 901, 30):
-        POLICE_SIREN.append((freq, 0.05))
-    # Sweep down: 900 → 600 Hz in steps of ~30Hz
-    for freq in range(900, 599, -30):
-        POLICE_SIREN.append((freq, 0.05))
+# Police siren removed — only beep and happy_birthday available
 
 class BuzzerController:
     def __init__(self):
@@ -83,7 +74,6 @@ class BuzzerController:
         if not self._initialized:
             return
         notes = {'happy_birthday': BIRTHDAY,
-                 'police_siren': POLICE_SIREN,
                  'beep': [('A4',.15),('REST',.1)]}.get(name)
         if not notes:
             return

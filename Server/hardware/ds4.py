@@ -254,12 +254,17 @@ class DS4Controller:
 
     def _watchdog(self):
         """Periodically check for new devices when disconnected, and verify
-        the heartbeat when connected."""
+        the heartbeat when connected.
+
+        Uses shorter intervals when disconnected for faster reconnection.
+        """
         while self._running:
             if not self._connected:
                 dev = self._find_device()
                 if dev:
                     self._connect(dev)
+                # Poll faster when searching for controller (1s vs 3s)
+                time.sleep(1.0)
             else:
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
@@ -271,7 +276,7 @@ class DS4Controller:
                         logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
                               f"but device still present — resetting timer")
                         self._last_event_time = time.monotonic()
-            time.sleep(DS4_WATCHDOG_INTERVAL)
+                time.sleep(DS4_WATCHDOG_INTERVAL)
 
     def _event_loop(self):
         """Read events using select() + read()."""
@@ -449,10 +454,7 @@ class DS4Controller:
                 (self._switches.on if self._headlights_on else self._switches.off)(1)
         elif code == ecodes.BTN_TR:                         # R1 - buzzer beep
             if self._buzzer:
-                if self._drift_mode:
-                    self._buzzer.play_melody('police_siren')
-                else:
-                    self._buzzer.beep()
+                self._buzzer.beep()
         elif code == ecodes.BTN_MODE:                       # PS - home servos
             if self._servos:
                 self._servos.move_init()
@@ -466,10 +468,7 @@ class DS4Controller:
                     self._leds.set_mode('off', (0, 0, 0))
             logger.info(f"[DS4] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
             if self._buzzer:
-                if self._drift_mode:
-                    self._buzzer.play_melody('police_siren')
-                else:
-                    self._buzzer.beep()
+                self._buzzer.beep()
         elif code == ecodes.BTN_SELECT:                     # Share - unused
             pass
         elif code == ecodes.BTN_THUMBL:                     # L3 - unused
@@ -564,11 +563,13 @@ class DS4Controller:
         self._servos.set_angle(SERVO_STEERING, steer)
 
     def _apply_crane_pan_tilt(self):
-        """Apply right stick to camera/crane pan/tilt servos (1 & 2).
+        """Apply right stick to camera pan/tilt servos (1 & 2).
 
         Right stick X → cam pan servo (1)
         Right stick Y → cam tilt servo (2)
-        Both move in smooth steps like the crane arm control.
+
+        Uses proportional control: stick deflection determines step size,
+        making small movements precise and large movements fast.
         """
         if not self._servos:
             return
@@ -578,12 +579,11 @@ class DS4Controller:
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
 
-        step = DS4_CRANE_STEP
-
         # Pan (servo 1): rx > 0 → increase angle (pan right), rx < 0 → decrease (pan left)
         if abs(rx) >= DS4_DEADZONE:
             current_pan = self._servos.get_angle(SERVO_CAM_PAN)
-            pan_step = step if abs(rx) > 0.7 else max(1, step // 2)
+            # Proportional step: 1° at small deflection, up to 10° at full deflection
+            pan_step = max(1, int(abs(rx) * DS4_CAM_SENSITIVITY * 10))
             if rx > 0:
                 new_pan = min(180, current_pan + pan_step)
             else:
@@ -595,7 +595,8 @@ class DS4Controller:
         # Tilt (servo 2): ry > 0 (stick up) → increase angle (tilt up)
         if abs(ry) >= DS4_DEADZONE:
             current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
-            tilt_step = step if abs(ry) > 0.7 else max(1, step // 2)
+            # Proportional step: 1° at small deflection, up to 10° at full deflection
+            tilt_step = max(1, int(abs(ry) * DS4_CAM_SENSITIVITY * 10))
             if ry > 0:
                 new_tilt = min(180, current_tilt + tilt_step)
             else:

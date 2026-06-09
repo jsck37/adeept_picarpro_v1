@@ -3,67 +3,175 @@
 
 All routes are registered under the ``/api/bt`` url prefix.
 
-Uses ``bluetoothctl`` (via subprocess) for scanning and pairing because
-it works reliably on Raspberry Pi OS with BlueZ.  For trusting and
-connecting we also use ``bluetoothctl`` commands.
+Uses ``bluetoothctl`` via an interactive session (instead of spawning a new
+subprocess for every command) for fast and reliable operation.
 
 A small JSON config file (``bt_config.json``) stores the MAC address of
 the last successfully connected gamepad so that auto-connect can work on
 boot without user interaction.
 """
 
-import json, os, subprocess, threading, time
+import json, os, re, subprocess, threading, time
 from flask import Blueprint, jsonify, request
 from Server.logger import logger
 
-BT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bt_config.json")
+BT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bt_config.json")
+
+# ---------------------------------------------------------------------------
+# Interactive bluetoothctl session (fast — no subprocess spawn per command)
+# ---------------------------------------------------------------------------
+
+class BluetoothctlSession:
+    """Persistent bluetoothctl session for low-latency commands.
+
+    Instead of spawning a new ``bluetoothctl`` subprocess for every single
+    command (which takes 1-2 seconds each time due to D-Bus setup), we keep
+    an interactive session open and write commands to its stdin.  This makes
+    scanning and pairing much faster.
+    """
+
+    def __init__(self):
+        self._proc = None
+        self._lock = threading.Lock()
+        self._ensure_running()
+
+    def _ensure_running(self):
+        """Start bluetoothctl if not already running."""
+        if self._proc and self._proc.poll() is None:
+            return
+        try:
+            self._proc = subprocess.Popen(
+                ['bluetoothctl'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            # Give it a moment to initialize
+            time.sleep(0.3)
+            # Power on adapter
+            self._write_cmd('power on')
+            time.sleep(0.2)
+            self._write_cmd('agent on')
+            self._write_cmd('default-agent')
+            time.sleep(0.1)
+            logger.info("[BT] bluetoothctl session started")
+        except Exception as e:
+            logger.error(f"[BT] Failed to start bluetoothctl: {e}")
+            self._proc = None
+
+    def _write_cmd(self, cmd):
+        """Write a command to bluetoothctl stdin."""
+        if not self._proc or self._proc.poll() is not None:
+            self._ensure_running()
+        if self._proc and self._proc.stdin:
+            try:
+                self._proc.stdin.write(cmd + '\n')
+                self._proc.stdin.flush()
+            except Exception:
+                self._proc = None
+
+    def _read_output(self, timeout=5.0, until=None):
+        """Read output from bluetoothctl until timeout or a pattern is matched.
+
+        Returns list of output lines.
+        """
+        lines = []
+        if not self._proc or self._proc.poll() is not None:
+            return lines
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    lines.append(line)
+                    if until and until.search(line):
+                        break
+        except Exception:
+            pass
+        return lines
+
+    def send_and_read(self, cmd, timeout=5.0, until=None):
+        """Send a command and read the response."""
+        with self._lock:
+            self._ensure_running()
+            # Consume any stale output first
+            try:
+                while self._proc and self._proc.stdout:
+                    import select as sel
+                    if sel.select([self._proc.stdout], [], [], 0.05)[0]:
+                        self._proc.stdout.readline()
+                    else:
+                        break
+            except Exception:
+                pass
+            self._write_cmd(cmd)
+            return self._read_output(timeout=timeout, until=until)
+
+    def shutdown(self):
+        if self._proc:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
+
+
+# Global session (shared across all requests)
+_bt_session = None
+_bt_session_lock = threading.Lock()
+
+
+def _get_bt_session():
+    global _bt_session
+    with _bt_session_lock:
+        if _bt_session is None:
+            _bt_session = BluetoothctlSession()
+        return _bt_session
+
 
 # ---------------------------------------------------------------------------
 # bluetoothctl helpers
 # ---------------------------------------------------------------------------
 
-def _btctl_cmd(*args, timeout=10):
-    """Run a bluetoothctl command and return its output."""
-    cmd = ["bluetoothctl"] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
-        return result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
-        return ""
-    except Exception as e:
-        logger.error(f"[BT] bluetoothctl error: {e}")
-        return ""
-
-
-def _scan_devices(scan_time=5):
-    """Scan for nearby Bluetooth devices using bluetoothctl.
+def _scan_devices(scan_time=3):
+    """Scan for nearby Bluetooth devices using interactive bluetoothctl.
 
     Returns a list of dicts: [{"name": "...", "mac": "XX:XX:XX:XX:XX:XX"}, ...]
     """
+    bt = _get_bt_session()
+
     # Start scan
-    _btctl_cmd("power", "on")
-    time.sleep(0.3)
-    _btctl_cmd("scan", "on")
+    bt.send_and_read('scan on', timeout=1.0)
     time.sleep(scan_time)
 
-    # Get devices
-    output = _btctl_cmd("devices")
-    _btctl_cmd("scan", "off")
+    # Read device list
+    lines = bt.send_and_read('devices', timeout=3.0,
+                             until=re.compile(r'Device\s', re.IGNORECASE))
+
+    # Stop scan (don't wait for output)
+    bt._write_cmd('scan off')
+    time.sleep(0.2)
 
     devices = []
     seen = set()
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("Device "):
-            parts = line.split(None, 2)
-            if len(parts) >= 3:
-                mac = parts[1]
-                name = parts[2] if len(parts) > 2 else "Unknown"
-                if mac not in seen:
-                    seen.add(mac)
-                    devices.append({"name": name, "mac": mac})
+    for line in lines:
+        # Parse "Device AA:BB:CC:DD:EE:FF Device Name"
+        m = re.match(r'Device\s+([0-9A-Fa-f:]{17})\s+(.*)', line)
+        if m:
+            mac = m.group(1).upper()
+            name = m.group(2).strip()
+            if mac not in seen:
+                seen.add(mac)
+                devices.append({"name": name, "mac": mac})
     return devices
 
 
@@ -81,50 +189,76 @@ def _is_gamepad(name):
 def _pair_and_connect(mac):
     """Pair, trust and connect to a Bluetooth device by MAC address.
 
+    Uses the interactive bluetoothctl session for faster operation.
+    Does NOT remove existing pairing first — this avoids the common
+    problem where ``remove`` + ``pair`` fails because the controller
+    needs time to reset.
+
     Returns (success: bool, message: str).
     """
-    _btctl_cmd("power", "on")
-    time.sleep(0.2)
+    bt = _get_bt_session()
+    mac = mac.upper()
 
-    # Remove any old pairing first
-    _btctl_cmd("remove", mac)
+    # First, try to connect directly (device may already be paired/trusted)
+    logger.info(f"[BT] Attempting direct connect to {mac}...")
+    lines = bt.send_and_read(f'connect {mac}', timeout=10.0,
+                             until=re.compile(r'(Connection successful|Failed to connect)', re.IGNORECASE))
+    for line in lines:
+        if 'successful' in line.lower():
+            # Already paired — just needed connect
+            bt.send_and_read(f'trust {mac}', timeout=3.0)
+            return True, f"Connected to {mac}"
+
+    # Direct connect failed — try full pair sequence
+    logger.info(f"[BT] Direct connect failed, pairing {mac}...")
+
+    # Remove old pairing (only if direct connect failed)
+    bt.send_and_read(f'remove {mac}', timeout=5.0)
+    time.sleep(0.5)
+
+    # Scan briefly to rediscover
+    bt._write_cmd('scan on')
+    time.sleep(2.0)
+    bt._write_cmd('scan off')
     time.sleep(0.3)
 
     # Pair
-    logger.info(f"[BT] Pairing with {mac}...")
-    pair_out = _btctl_cmd("pair", mac, timeout=15)
-    if "Failed" in pair_out and "successful" not in pair_out.lower():
-        return False, f"Pairing failed: {pair_out.strip()}"
+    lines = bt.send_and_read(f'pair {mac}', timeout=15.0,
+                             until=re.compile(r'(Pairing successful|Failed to pair)', re.IGNORECASE))
+    paired = any('successful' in l.lower() for l in lines)
+    if not paired:
+        return False, f"Pairing failed for {mac}"
 
     time.sleep(0.3)
 
     # Trust
-    _btctl_cmd("trust", mac)
+    bt.send_and_read(f'trust {mac}', timeout=3.0)
     time.sleep(0.2)
 
     # Connect
-    logger.info(f"[BT] Connecting to {mac}...")
-    conn_out = _btctl_cmd("connect", mac, timeout=10)
-    if "Failed" in conn_out:
-        return False, f"Connection failed: {conn_out.strip()}"
+    lines = bt.send_and_read(f'connect {mac}', timeout=10.0,
+                             until=re.compile(r'(Connection successful|Failed to connect)', re.IGNORECASE))
+    for line in lines:
+        if 'successful' in line.lower():
+            return True, f"Paired and connected to {mac}"
 
-    return True, f"Connected to {mac}"
+    return False, f"Pairing succeeded but connection failed for {mac}"
 
 
 def _disconnect_device(mac):
     """Disconnect and remove a Bluetooth device."""
-    _btctl_cmd("disconnect", mac)
-    time.sleep(0.2)
-    _btctl_cmd("remove", mac)
+    bt = _get_bt_session()
+    bt.send_and_read(f'disconnect {mac}', timeout=5.0)
+    time.sleep(0.3)
+    bt.send_and_read(f'remove {mac}', timeout=5.0)
     return True
 
 
 def _get_connected_devices():
     """Get list of currently connected Bluetooth devices."""
-    output = _btctl_cmd("info")
-    # Also check via "devices Connected" if available
-    output2 = _btctl_cmd("devices", "Connected")
-    return output2
+    bt = _get_bt_session()
+    lines = bt.send_and_read('devices Connected', timeout=5.0)
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +286,39 @@ def _save_bt_config(config):
 
 
 # ---------------------------------------------------------------------------
+# Auto-connect on startup
+# ---------------------------------------------------------------------------
+
+def auto_connect_on_boot(ds4_controller=None):
+    """Attempt to auto-connect to the last known gamepad on startup.
+
+    This is called after the DS4 controller is started, so that if a
+    previously paired gamepad is powered on, it will be connected
+    automatically via bluetoothctl (which triggers the evdev device to
+    appear, and then the DS4 watchdog picks it up).
+    """
+    cfg = _load_bt_config()
+    mac = cfg.get("last_gamepad_mac")
+    if not mac:
+        logger.info("[BT] No saved gamepad MAC — skipping auto-connect")
+        return
+
+    def _do_auto_connect():
+        # Wait a bit for system to stabilize
+        time.sleep(3.0)
+        logger.info(f"[BT] Auto-connecting to saved gamepad {mac}...")
+        success, msg = _pair_and_connect(mac)
+        if success:
+            logger.info(f"[BT] Auto-connect success: {msg}")
+        else:
+            logger.warning(f"[BT] Auto-connect failed: {msg}")
+            # The DS4 watchdog will keep looking for evdev devices anyway
+
+    t = threading.Thread(target=_do_auto_connect, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
 # Blueprint
 # ---------------------------------------------------------------------------
 
@@ -173,7 +340,7 @@ def create_bluetooth_blueprint(state):
         gamepads (gamepads first).
         """
         try:
-            devices = _scan_devices(scan_time=5)
+            devices = _scan_devices(scan_time=3)
             # Mark gamepad-like devices
             for d in devices:
                 d["is_gamepad"] = _is_gamepad(d["name"])
@@ -196,7 +363,6 @@ def create_bluetooth_blueprint(state):
         if not mac:
             return jsonify({"ok": False, "error": "MAC address required"})
 
-        # Run pairing in background thread to avoid blocking
         result = {"ok": False, "message": ""}
         done = threading.Event()
 
@@ -207,17 +373,14 @@ def create_bluetooth_blueprint(state):
             if success:
                 # Save to config for auto-connect
                 cfg = _load_bt_config()
-                cfg["last_gamepad_mac"] = mac
+                cfg["last_gamepad_mac"] = mac.upper()
                 cfg["last_gamepad_name"] = data.get("name", "")
                 _save_bt_config(cfg)
-                # Trigger DS4 reconnect after a short delay
-                if state.ds4:
-                    threading.Timer(3.0, lambda: None).start()  # let BT settle
             done.set()
 
         t = threading.Thread(target=_do_connect, daemon=True)
         t.start()
-        done.wait(timeout=20)
+        done.wait(timeout=25)
 
         return jsonify(result)
 
@@ -268,7 +431,7 @@ def create_bluetooth_blueprint(state):
 
         t = threading.Thread(target=_do_auto, daemon=True)
         t.start()
-        done.wait(timeout=20)
+        done.wait(timeout=25)
 
         return jsonify(result)
 

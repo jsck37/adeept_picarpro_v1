@@ -577,10 +577,10 @@ document.addEventListener('keyup', function(e) {
 //  SERVO CONTROL (angle sliders + home)
 // ═══════════════════════════════════════════════════════════════
 var servoGrid = document.getElementById('servo-grid');
-var servoValues = [];
+var servoValues = {};
 
 servoDefs.forEach(function(sd) {
-  servoValues.push(sd.init);
+  servoValues[sd.id] = sd.init;
   var item = document.createElement('div');
   item.className = 'servo-item';
   item.innerHTML =
