@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PiCar Pro Flask app — HTTP + MJPEG + REST API.
+""" Flask app — HTTP + MJPEG + REST API.
 
 Routes are organised into Blueprint modules under Server/routes/ for
 readability and maintainability.

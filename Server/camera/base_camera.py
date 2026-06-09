@@ -1,8 +1,4 @@
 """Base camera — background capture thread with FPS control and auto-restart.
-
-The capture thread automatically stops after 60 seconds of inactivity
-to free the camera resource.  When a new request comes in, the thread
-is automatically restarted.
 """
 
 import threading, time
@@ -33,9 +29,9 @@ class BaseCamera:
         BaseCamera.event.clear()
         BaseCamera.thread = threading.Thread(target=self._capture_thread, daemon=True)
         BaseCamera.thread.start()
-        # Wait for first frame
-        deadline = time.time() + 10
-        while not self.event.wait(1):
+        # Wait for first frame with shorter timeout
+        deadline = time.time() + 5
+        while not self.event.wait(0.5):
             if not BaseCamera._running:
                 raise RuntimeError("Camera thread failed to start")
             if time.time() > deadline:
@@ -56,9 +52,9 @@ class BaseCamera:
                     if sleep > 0:
                         time.sleep(sleep)
                 last_time = time.time()
-                # Auto-stop after 60s inactivity to free camera resource
-                if time.time() - BaseCamera.last_access > 60:
-                    logger.info("[Camera] 60s inactivity — stopping capture thread")
+                # Auto-stop after 120s inactivity to free camera resource
+                if time.time() - BaseCamera.last_access > 120:
+                    logger.info("[Camera] 120s inactivity — stopping capture thread")
                     frames_gen.close()
                     break
         except Exception as e:
@@ -70,7 +66,7 @@ class BaseCamera:
     @staticmethod
     def get_frame():
         BaseCamera.last_access = time.time()
-        # Auto-restart capture thread if it died (e.g. after 60s inactivity)
+        # Auto-restart capture thread if it died
         if BaseCamera.thread is None or not BaseCamera.thread.is_alive():
             logger.info("[Camera] Thread not running — restarting...")
             if BaseCamera._camera_instance is not None:
@@ -81,7 +77,8 @@ class BaseCamera:
                     return None
             else:
                 return None
-        BaseCamera.event.wait(timeout=5)
+        # Wait for next frame with shorter timeout for less latency
+        BaseCamera.event.wait(timeout=2)
         return BaseCamera.frame
 
     @staticmethod

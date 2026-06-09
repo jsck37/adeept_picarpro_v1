@@ -2,22 +2,6 @@
 """Bluetooth API blueprint — DS4 gamepad scanning, pairing & auto-connect.
 
 All routes are registered under the ``/api/bt`` url prefix.
-
-Uses an INTERACTIVE bluetoothctl session (persistent agent) for reliable
-pairing and connection.  This is critical because without a running agent,
-bluetoothctl connect may fail silently — this is why the gamepad only
-worked when the desktop Bluetooth UI (which runs its own agent) was open.
-
-The interactive session keeps a bluetoothctl process running with
-'agent on' + 'default-agent' active, so all pairing handshakes work.
-
-After a successful BT connection, the ``hid-sony`` kernel module is
-loaded (if not already present) so that the DS4 gamepad creates a
-proper /dev/input/eventX device that evdev can read.
-
-A small JSON config file (``bt_config.json``) stores the MAC address of
-the last successfully connected gamepad so that auto-connect can work on
-boot without user interaction.
 """
 
 import json, os, re, subprocess, threading, time
@@ -31,16 +15,7 @@ BT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 # ---------------------------------------------------------------------------
 
 class BluetoothctlSession:
-    """Persistent interactive bluetoothctl session.
-
-    WHY: Without a running Bluetooth agent, `bluetoothctl connect` fails
-    silently because no agent is available to handle the pairing handshake.
-    The desktop Bluetooth UI (blueman, GNOME Bluetooth, etc.) runs its own
-    agent — that's why connecting only worked when the UI was open.
-
-    This class keeps a bluetoothctl process running with 'agent on' and
-    'default-agent' so that pairing always works, even headless.
-    """
+    """Persistent interactive bluetoothctl session."""
 
     def __init__(self):
         self._lock = threading.Lock()

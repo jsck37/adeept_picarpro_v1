@@ -38,7 +38,7 @@ class ServoController:
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
                         # Dynamic defaults for crane servos
-                        if i == 4:   # Claw Arm
+                        if i == 6:   # Claw Arm (moved from ch4 to ch6)
                             init_angle = CLAW_ARM_UP
                         elif i == 5: # Claw Grip
                             init_angle = CLAW_GRIP_OPEN

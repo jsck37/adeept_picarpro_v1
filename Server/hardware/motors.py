@@ -2,8 +2,7 @@
 
 Supports:
   - Normal driving (forward/backward/turn)
-  - Drift mode: over-steer front wheels + aggressive rear power
-    with reduced inner wheel to induce oversteer on RWD car.
+  - Forward-biased turning: inner wheel slows but never stops during turns
 """
 
 import threading
@@ -11,7 +10,6 @@ from Server.config import (
     MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
     MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2,
     DEFAULT_SPEED, TURN_RADIUS_MIN, TURN_RADIUS_MAX,
-    DRIFT_ENABLED, DRIFT_POWER_MULT, DRIFT_INNER_BRAKE,
 )
 from Server.logger import logger
 
@@ -20,7 +18,6 @@ class MotorController:
         self._speed = DEFAULT_SPEED
         self._initialized = False
         self._lock = threading.Lock()
-        self._drift_mode = False
         self._init_motors()
 
     def _init_motors(self):
@@ -46,6 +43,10 @@ class MotorController:
             'no', 'left', or 'right'
         radius : float
             Turn radius factor (0.0 = pivot, 1.0 = gentle curve)
+
+        During turns, the inner wheel is slowed down but never goes below
+        30% of the outer wheel speed. This ensures the car keeps moving
+        forward during turns instead of stopping.
         """
         if not self._initialized:
             return
@@ -55,46 +56,28 @@ class MotorController:
         radius = max(TURN_RADIUS_MIN, min(TURN_RADIUS_MAX, radius))
         s = speed / 100.0
 
-        if self._drift_mode and DRIFT_ENABLED and turn != 'no':
-            # ── Drift mode ──
-            # Apply power multiplier for aggressive rear drive
-            drift_s = min(1.0, s * DRIFT_POWER_MULT)
-            # Inner wheel gets reduced power to break traction
-            if turn == 'left':
-                left = drift_s * DRIFT_INNER_BRAKE   # inner wheel brakes
-                right = drift_s                       # outer wheel full power
-            else:  # right
-                left = drift_s
-                right = drift_s * DRIFT_INNER_BRAKE
-            if direction == 'forward':
-                self._motor_a.forward(right)
-                self._motor_b.forward(left)
-            elif direction == 'backward':
-                self._motor_a.backward(right)
-                self._motor_b.backward(left)
-            else:
-                self.stop()
+        # ── Normal mode with forward-biased turning ──
+        if turn == 'no':
+            left = s
+            right = s
+        elif turn == 'left':
+            # Inner wheel (left) slows but keeps at least 30% speed
+            inner_min = 0.3
+            left = max(s * inner_min, s * (1 - radius))
+            right = s
+        else:  # right
+            inner_min = 0.3
+            left = s
+            right = max(s * inner_min, s * (1 - radius))
+
+        if direction == 'forward':
+            self._motor_a.forward(right)
+            self._motor_b.forward(left)
+        elif direction == 'backward':
+            self._motor_a.backward(right)
+            self._motor_b.backward(left)
         else:
-            # ── Normal mode ──
-            left = s * (1 - radius) if turn == 'left' else s
-            right = s * (1 - radius) if turn == 'right' else s
-            if direction == 'forward':
-                self._motor_a.forward(right)
-                self._motor_b.forward(left)
-            elif direction == 'backward':
-                self._motor_a.backward(right)
-                self._motor_b.backward(left)
-            else:
-                self.stop()
-
-    def set_drift_mode(self, enabled):
-        """Enable or disable drift mode."""
-        self._drift_mode = enabled and DRIFT_ENABLED
-        logger.info(f"[Motors] Drift mode: {'ON' if self._drift_mode else 'OFF'}")
-
-    @property
-    def drift_mode(self):
-        return self._drift_mode
+            self.stop()
 
     def stop(self):
         if self._initialized:

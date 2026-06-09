@@ -5,7 +5,9 @@ Modes:
   - automatic:      Obstacle avoidance driving  (requires ULTRASONIC_ENABLED)
   - trackLine:      IR-sensor line following    (requires LINE_TRACKER_ENABLED)
   - trackLineCV:    OpenCV + IR sensor line following (requires camera)
+      Detects black lines on white background using camera + IR sensors
   - keepDistance:    Hold distance from obstacle  (requires ULTRASONIC_ENABLED)
+  - trackHand:      OpenCV hand tracking with improved following (requires camera)
 """
 
 import threading
@@ -57,11 +59,14 @@ class AutonomousController:
         # Camera ref for CV line following (set later)
         self._camera = None
 
-        # Hand tracking state
+        # Hand tracking state — improved with exponential smoothing
         self._hand_pan = 90
         self._hand_tilt = 90
+        self._hand_smooth_x = 0.0   # smoothed x offset
+        self._hand_smooth_y = 0.0   # smoothed y offset
         self._hand_history = []       # list of (timestamp, x, y) for shake detection
         self._hand_shake_count = 0
+        self._hand_last_seen = 0.0    # timestamp when hand was last detected
 
     def set_camera(self, camera):
         """Set camera reference for CV-based line following."""
@@ -215,40 +220,38 @@ class AutonomousController:
             left, right = self._read_ir()
 
             if left and right:
-                # Both sensors on line — go straight (line is wide / crossroads)
                 self.motors.move(35, 'forward', 'no', 0.5)
             elif left and not right:
-                # Line drifted left — steer left
                 self.motors.move(25, 'forward', 'left', 0.4)
             elif right and not left:
-                # Line drifted right — steer right
                 self.motors.move(25, 'forward', 'right', 0.4)
             else:
-                # No line under either sensor — search slowly
                 self.motors.move(15, 'forward', 'no', 0.5)
 
             time.sleep(0.05)
 
-    # ── OpenCV + IR line following ─────────────────────────────────────
+    # ── OpenCV + IR line following (black lines on white background) ───
 
     def _track_line_cv(self):
-        """Follow a black line using OpenCV + IR sensor fusion.
+        """Follow a black line on white background using OpenCV + IR sensor fusion.
 
-        The camera sees the line ahead (long range) and IR sensors
-        detect the line right under the wheels (close range).
+        The camera detects black lines on a white surface using:
+          1. Grayscale conversion
+          2. Gaussian blur to reduce noise
+          3. Otsu's automatic thresholding (adapts to lighting)
+          4. Morphological operations to clean up the binary mask
+          5. Region-of-interest masking (ignore upper portion of frame)
+          6. Centre-of-mass calculation for line position
+
+        IR sensors detect the line right under the wheels (close range).
 
         Fusion strategy:
           - CV is the primary steering source (sees ahead, allows smooth curves)
           - IR provides confirmation and close-range correction:
-            • CV sees line + IR confirms → boost steering confidence
-            • CV sees line + IR disagrees → add small IR bias (trust CV)
-            • CV loses line + IR still sees → IR fallback (slow, strong turn)
-            • CV loses line + IR lost too  → slow search forward
-
-        This makes CV Line mode significantly more robust:
-          - Less likely to lose the line on sharp bends
-          - Faster recovery when the line reappears under the wheels
-          - IR acts as a safety net when camera glare/blur occurs
+            * CV sees line + IR confirms -> boost steering confidence
+            * CV sees line + IR disagrees -> add small IR bias (trust CV)
+            * CV loses line + IR still sees -> IR fallback (slow, strong turn)
+            * CV loses line + IR lost too  -> slow search forward
         """
         import cv2
         import numpy as np
@@ -266,6 +269,7 @@ class AutonomousController:
             return
 
         frame_w = CAMERA_RESOLUTION[0]
+        frame_h = CAMERA_RESOLUTION[1]
         centre_x = frame_w / 2.0
         scan_y_ratio = CV_LINE_FOLLOW_SCAN_Y_RATIO
         speed = CV_LINE_FOLLOW_SPEED
@@ -278,15 +282,20 @@ class AutonomousController:
             logger.info(f"[Auto] CV line follow started (speed={speed}, gain={steer_gain}, IR sensors OFF)")
 
         # ── IR influence weights ──
-        # When IR sensors detect the line near the wheels (close-range),
-        # they can confirm or override the CV steering decision.
-        # IR is more reliable at close range, CV at longer range.
-        IR_STEER_BIAS    = 0.25    # how much IR adds to steering offset
-        IR_SPEED_PENALTY = 0.3     # speed reduction when IR detects off-centre
+        IR_STEER_BIAS    = 0.25
+        IR_SPEED_PENALTY = 0.3
+
+        # ── Smoothing for CV offset ──
+        smooth_offset = 0.0
+        SMOOTH_ALPHA  = 0.4   # exponential smoothing factor (0=slow, 1=no smoothing)
+
+        # ── Line lost counter for recovery strategy ──
+        line_lost_count = 0
+        last_known_offset = 0.0   # remember last direction when line is lost
 
         while self._active:
             try:
-                # ── Read IR sensors first (fast, no frame needed) ──
+                # ── Read IR sensors first ──
                 ir_left, ir_right = self._read_ir()
 
                 # ── Capture frame ──
@@ -297,53 +306,83 @@ class AutonomousController:
 
                 frame = raw
                 h, w = frame.shape[:2]
-                scan_y = int(h * scan_y_ratio)
 
-                # Convert to grayscale and threshold
+                # ── Convert to grayscale ──
                 gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-                _, binary = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
 
-                # Find centre of mass of black pixels at scan row
-                scan_line = binary[scan_y]
-                indices = np.where(scan_line > 0)[0]
+                # ── Gaussian blur to reduce noise ──
+                gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
-                cv_line_found = len(indices) > 10
+                # ── Otsu's thresholding for black-on-white detection ──
+                # THRESH_BINARY_INV: black lines become white (255) in the mask
+                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+                # ── Morphological cleanup ──
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+                binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+                binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+
+                # ── Region of interest: only scan lower portion of frame ──
+                roi_top = int(h * 0.4)  # ignore upper 40% of frame (sky, etc.)
+                mask = np.zeros_like(binary)
+                mask[roi_top:, :] = 255
+                binary = cv2.bitwise_and(binary, binary, mask=mask)
+
+                # ── Scan at specific Y position ──
+                scan_y = int(h * scan_y_ratio)
+                scan_y = max(roi_top, scan_y)  # ensure scan_y is within ROI
+
+                # Also scan at a second row slightly above for angle estimation
+                scan_y2 = int(h * (scan_y_ratio - 0.15))
+                scan_y2 = max(roi_top, scan_y2)
+
+                # ── Find centre of mass of black pixels at scan rows ──
+                scan_line1 = binary[scan_y]
+                indices1 = np.where(scan_line1 > 0)[0]
+
+                # Use both scan rows for more robust detection
+                scan_line2 = binary[scan_y2]
+                indices2 = np.where(scan_line2 > 0)[0]
+
+                # Combine detections from both scan rows
+                all_indices = np.concatenate([indices1, indices2]) if len(indices2) > 0 else indices1
+
+                cv_line_found = len(all_indices) > 15
 
                 if cv_line_found:
-                    # ── CV: line detected — calculate offset ──
-                    line_centre = int(np.mean(indices))
-                    cv_offset = (line_centre - w / 2.0) / (w / 2.0)  # normalised -1..+1
+                    line_lost_count = 0
+                    line_centre = int(np.mean(all_indices))
+                    raw_offset = (line_centre - w / 2.0) / (w / 2.0)
+
+                    # Exponential smoothing
+                    smooth_offset = SMOOTH_ALPHA * raw_offset + (1 - SMOOTH_ALPHA) * smooth_offset
+                    last_known_offset = smooth_offset
 
                     # ── IR: compute supplementary offset ──
                     ir_offset = 0.0
                     if ir_available:
                         if ir_left and not ir_right:
-                            ir_offset = -1.0   # line under left sensor → steer left
+                            ir_offset = -1.0
                         elif ir_right and not ir_left:
-                            ir_offset = 1.0    # line under right sensor → steer right
+                            ir_offset = 1.0
                         elif ir_left and ir_right:
-                            ir_offset = 0.0    # line under both → centred
-                        # If neither sensor sees the line, ir_offset stays 0
+                            ir_offset = 0.0
 
                     # ── Fuse CV + IR offsets ──
-                    # CV is the primary source (sees ahead), IR confirms at wheel level
-                    # If CV and IR agree → boost steering
-                    # If they disagree → trust CV more but add small IR bias
                     if ir_offset != 0.0:
-                        # IR has a reading — blend with CV
-                        fused_offset = cv_offset + ir_offset * IR_STEER_BIAS
+                        fused_offset = smooth_offset + ir_offset * IR_STEER_BIAS
                         fused_offset = max(-1.0, min(1.0, fused_offset))
                     else:
-                        fused_offset = cv_offset
+                        fused_offset = smooth_offset
 
                     # Steer
                     steer_angle = 90 - int(fused_offset * 60 * steer_gain)
                     steer_angle = max(30, min(150, steer_angle))
 
-                    # Speed: reduce on sharp turns, extra penalty if IR says off-centre
+                    # Speed: reduce on sharp turns
                     turn_factor = 1.0 - abs(fused_offset) * 0.4
                     if ir_available and (ir_left or ir_right) and not (ir_left and ir_right):
-                        turn_factor -= IR_SPEED_PENALTY   # one sensor on line = sharp correction
+                        turn_factor -= IR_SPEED_PENALTY
                     actual_speed = max(15, int(speed * turn_factor))
 
                     self.servos.set_angle(SERVO_STEERING, steer_angle)
@@ -358,9 +397,11 @@ class AutonomousController:
                         self.motors.move(actual_speed, 'forward', 'no', 0.5)
 
                 else:
-                    # ── CV: no line detected in camera frame ──
-                    # Use IR sensors as fallback — they can still see the line
+                    # ── CV: no line detected ──
+                    line_lost_count += 1
+
                     if ir_available and (ir_left or ir_right):
+                        # IR fallback
                         if ir_left and not ir_right:
                             self.motors.move(20, 'forward', 'left', 0.3)
                             self.servos.set_angle(SERVO_STEERING, 120)
@@ -368,14 +409,27 @@ class AutonomousController:
                             self.motors.move(20, 'forward', 'right', 0.3)
                             self.servos.set_angle(SERVO_STEERING, 60)
                         else:
-                            # Both on line — probably at crossroads, go straight slowly
                             self.motors.move(15, 'forward', 'no', 0.5)
                             self.servos.set_angle(SERVO_STEERING, 90)
+                    elif line_lost_count < 15:
+                        # Line recently lost — continue in last known direction
+                        steer_angle = 90 - int(last_known_offset * 60 * steer_gain)
+                        steer_angle = max(30, min(150, steer_angle))
+                        self.servos.set_angle(SERVO_STEERING, steer_angle)
+                        # Slow down while searching
+                        search_speed = max(10, speed // 3)
+                        if last_known_offset < -0.2:
+                            self.motors.move(search_speed, 'forward', 'left', 0.3)
+                        elif last_known_offset > 0.2:
+                            self.motors.move(search_speed, 'forward', 'right', 0.3)
+                        else:
+                            self.motors.move(search_speed, 'forward', 'no', 0.5)
                     else:
-                        # No CV, no IR — line completely lost, search slowly
-                        self.motors.move(max(10, speed // 3), 'forward', 'no', 0.5)
+                        # Line lost for too long — slow forward search
+                        self.motors.move(max(8, speed // 4), 'forward', 'no', 0.5)
+                        self.servos.set_angle(SERVO_STEERING, 90)
 
-                time.sleep(0.05)
+                time.sleep(0.03)  # ~33Hz update rate
 
             except Exception as e:
                 logger.error(f"[Auto] CV line error: {e}")
@@ -398,19 +452,25 @@ class AutonomousController:
                 self.motors.stop()
             time.sleep(0.1)
 
-    # ── Hand tracking ──────────────────────────────────────────────────
+    # ── Hand tracking (improved) ───────────────────────────────────────
 
     def _track_hand(self):
-        """Track a hand using OpenCV skin-colour detection.
+        """Track a hand using OpenCV with improved following.
+
+        Improvements over v1:
+          - Exponential smoothing on hand position for smoother tracking
+          - Larger tracking step sizes for better responsiveness
+          - Car moves toward the hand instead of just rotating when at edge
+          - Graceful hand-loss handling with short memory (keeps last position)
+          - Faster pan/tilt response with proportional steps
+          - Better shake detection with adaptive threshold
 
         The camera (pan/tilt servos) follows the hand to keep it centred
         in the frame.  If the hand moves too far horizontally for the
-        camera to track, the car rotates in place to follow it.
+        camera to track, the car moves forward toward the hand.
 
         Shake detection: if rapid horizontal position reversals are
-        detected (the hand is shaken left-right), the mode automatically
-        stops.  This is detected by tracking the hand x-position history
-        and counting direction reversals within a short time window.
+        detected (the hand is shaken left-right), the mode automatically stops.
         """
         from Server.camera.camera_opencv import CV_HAND
 
@@ -436,18 +496,28 @@ class AutonomousController:
         # Reset state
         self._hand_pan = 90
         self._hand_tilt = 90
+        self._hand_smooth_x = 0.0
+        self._hand_smooth_y = 0.0
         self._hand_history = []
         self._hand_shake_count = 0
+        self._hand_last_seen = time.time()
         self.servos.set_angle(SERVO_CAM_PAN, 90)
         self.servos.set_angle(SERVO_CAM_TILT, 90)
         self.servos.set_angle(SERVO_STEERING, 90)
 
-        PAN_STEP = 3       # degrees per update
-        TILT_STEP = 2      # degrees per update
-        STEER_STEP = 5     # steering servo degrees per update
-        DEADZONE = 0.08    # fraction of frame — ignore small offsets
-        SHAKE_WINDOW = 1.5 # seconds to look back for shake detection
-        SHAKE_THRESHOLD = 5 # number of direction reversals = shake
+        # ── Tracking parameters ──
+        PAN_STEP = 4        # degrees per update (increased for better tracking)
+        TILT_STEP = 3       # degrees per update (increased for better tracking)
+        STEER_STEP = 5      # steering servo degrees per update
+        DEADZONE = 0.06     # smaller deadzone for more responsive tracking
+        SMOOTH_ALPHA = 0.5  # exponential smoothing (0=very slow, 1=no smoothing)
+
+        SHAKE_WINDOW = 1.5
+        SHAKE_THRESHOLD = 5
+
+        # ── Hand-loss timeout ──
+        HAND_LOST_TIMEOUT = 2.0   # seconds before stopping motors after hand lost
+        HAND_REMEMBER = 0.5       # seconds to keep last known position
 
         # Callback for hand detection from CV thread
         def on_hand(pos, area):
@@ -455,20 +525,33 @@ class AutonomousController:
 
             if area == 0:
                 # Hand lost
-                self.motors.stop()
-                self.servos.set_angle(SERVO_STEERING, 90)
+                time_since_seen = now - self._hand_last_seen
+                if time_since_seen > HAND_LOST_TIMEOUT:
+                    # Hand lost for too long — stop car
+                    self.motors.stop()
+                    self.servos.set_angle(SERVO_STEERING, 90)
+                elif time_since_seen > HAND_REMEMBER:
+                    # Gradually slow down
+                    pass
                 return False
+
+            self._hand_last_seen = now
 
             x, y = pos
             # Normalised offset from centre (-1..+1)
-            offset_x = (x - centre_x) / centre_x
-            offset_y = (y - centre_y) / centre_y
+            raw_offset_x = (x - centre_x) / centre_x
+            raw_offset_y = (y - centre_y) / centre_y
+
+            # ── Exponential smoothing ──
+            self._hand_smooth_x = SMOOTH_ALPHA * raw_offset_x + (1 - SMOOTH_ALPHA) * self._hand_smooth_x
+            self._hand_smooth_y = SMOOTH_ALPHA * raw_offset_y + (1 - SMOOTH_ALPHA) * self._hand_smooth_y
+
+            offset_x = self._hand_smooth_x
+            offset_y = self._hand_smooth_y
 
             # ── Shake detection ──
             self._hand_history.append((now, offset_x))
-            # Prune old entries
             self._hand_history = [(t, ox) for t, ox in self._hand_history if now - t < SHAKE_WINDOW]
-            # Count direction reversals in the window
             reversals = 0
             if len(self._hand_history) > 2:
                 prev_dir = None
@@ -480,34 +563,35 @@ class AutonomousController:
 
             if reversals >= SHAKE_THRESHOLD:
                 logger.info("[Auto] Hand shake detected — stopping hand tracking")
-                self._hand_shake_count += 1  # flag for main loop
-                return True  # signal shake detected
+                self._hand_shake_count += 1
+                return True
 
-            # ── Camera pan/tilt ──
+            # ── Camera pan/tilt (proportional to offset) ──
             if abs(offset_x) > DEADZONE:
-                self._hand_pan -= int(offset_x * PAN_STEP)
+                pan_delta = int(offset_x * PAN_STEP * (1 + abs(offset_x)))
+                self._hand_pan -= pan_delta
                 self._hand_pan = max(0, min(180, self._hand_pan))
             if abs(offset_y) > DEADZONE:
-                self._hand_tilt += int(offset_y * TILT_STEP)
+                tilt_delta = int(offset_y * TILT_STEP * (1 + abs(offset_y)))
+                self._hand_tilt += tilt_delta
                 self._hand_tilt = max(0, min(180, self._hand_tilt))
 
             self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
             self.servos.set_angle(SERVO_CAM_TILT, self._hand_tilt)
 
-            # ── Car rotation when hand is near camera edge ──
+            # ── Car movement — follow the hand ──
             # If camera pan is near its limit, rotate the car to follow
             if self._hand_pan < 30 or self._hand_pan > 150:
+                # Hand at camera edge — rotate car toward hand
                 if self._hand_pan < 30:
-                    # Hand is far left — rotate car left
                     steer_angle = max(30, 90 - STEER_STEP * 3)
-                    self.motors.move(20, 'forward', 'left', 0.4)
+                    self.motors.move(25, 'forward', 'left', 0.35)
                 else:
-                    # Hand is far right — rotate car right
                     steer_angle = min(150, 90 + STEER_STEP * 3)
-                    self.motors.move(20, 'forward', 'right', 0.4)
+                    self.motors.move(25, 'forward', 'right', 0.35)
                 self.servos.set_angle(SERVO_STEERING, steer_angle)
 
-                # Re-centre camera slightly so it doesn't stay at the edge
+                # Re-centre camera slightly
                 if self._hand_pan < 30:
                     self._hand_pan += STEER_STEP
                 else:
@@ -515,16 +599,29 @@ class AutonomousController:
                 self._hand_pan = max(0, min(180, self._hand_pan))
                 self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
             else:
-                # Hand is within camera range — stay still, just track
-                self.motors.stop()
-                self.servos.set_angle(SERVO_STEERING, 90)
+                # Hand is within camera range
+                # If hand is significantly off-centre horizontally, steer toward it
+                if abs(offset_x) > 0.25:
+                    if offset_x < 0:
+                        # Hand is to the left — steer left
+                        steer_angle = max(30, 90 - int(abs(offset_x) * STEER_STEP * 4))
+                        self.motors.move(20, 'forward', 'left', 0.35)
+                    else:
+                        # Hand is to the right — steer right
+                        steer_angle = min(150, 90 + int(abs(offset_x) * STEER_STEP * 4))
+                        self.motors.move(20, 'forward', 'right', 0.35)
+                    self.servos.set_angle(SERVO_STEERING, steer_angle)
+                else:
+                    # Hand is roughly centred — stay still
+                    self.motors.stop()
+                    self.servos.set_angle(SERVO_STEERING, 90)
 
             return False
 
         # Register callback
         self._camera.cv_thread.on_hand_found = on_hand
 
-        logger.info("[Auto] Hand tracking started — shake hand to stop")
+        logger.info("[Auto] Hand tracking started (improved) — shake hand to stop")
 
         # Keep the thread alive until stopped or shake detected
         try:

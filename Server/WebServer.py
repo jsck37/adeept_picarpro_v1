@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""PiCar Pro v1 — Flask (5000) + WebSocket (8888) server.
-
-Refactored:
-  - Module system removed (no more dynamic script loading)
-  - Lazy hardware init for fast systemd startup
-  - OpenCV line-following added as autonomous mode
-  - Log console fully integrated via WebSocket
-  - Drift mode support (RWD + front steering)
-  - Bluetooth gamepad management via web UI
-  - Stick inversion and speed boost for DS4
-  - Modular Flask blueprints
-"""
+"""Flask (5000) + WebSocket (8888) server."""
 
 import asyncio, json, os, signal, socket, sys, threading, time
 
@@ -30,7 +19,7 @@ from Server.config import (
     SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
     SWITCH_PINS, ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED, DS4_ENABLED,
-    DRIFT_ENABLED, HOTSPOT_IP, STEER_MAP,
+    HOTSPOT_IP, STEER_MAP, CAMERA_FPS,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController
@@ -285,7 +274,7 @@ def process_command(data):
         elif d in ('backward',):
             state.motors.move(state.speed, 'backward', 'no', 0.5)
         elif d in ('left', 'right'):
-            state.motors.stop()
+            state.motors.move(state.speed, 'forward', d, 0.3)
         elif d.startswith('forward_'):
             state.motors.move(state.speed, 'forward', d.split('_')[1], 0.3)
         elif d.startswith('backward_'):
@@ -395,12 +384,10 @@ def process_command(data):
         valid_funcs = ('radarScan', 'automatic', 'trackLine',
                        'trackLineCV', 'trackHand', 'keepDistance', 'stop')
         if func in valid_funcs:
-            # For CV line following, ensure camera is available
             if func == 'trackLineCV':
                 state.init_camera()
                 if state.camera:
                     state.autonomous.set_camera(state.camera)
-            # For hand tracking, ensure camera is available
             if func == 'trackHand':
                 state.init_camera()
                 if state.camera:
@@ -420,16 +407,6 @@ def process_command(data):
     elif cmd == 'ds4_status':
         r = {'ok': True}
         r.update(state.ds4.get_status() if state.ds4 else {'enabled': False, 'connected': False})
-
-    elif cmd == 'drift':
-        enabled = p.get('enabled', False)
-        if DRIFT_ENABLED:
-            state.motors.set_drift_mode(enabled)
-            if state.ds4:
-                state.ds4._drift_mode = enabled
-            r = {'ok': True, 'drift_mode': enabled}
-        else:
-            r['error'] = 'Drift mode not enabled in config'
 
     elif cmd == 'get_log':
         after = p.get('after_ts', 0.0)
@@ -549,7 +526,7 @@ def main():
     # (no need for log_buffer.install() since we don't use print() anymore)
 
     logger.info("=" * 50)
-    logger.info("  PiCar Pro v1 (Flask + WebSocket)")
+    logger.info("  PiCar Pro v2 (Flask + WebSocket)")
     logger.info("=" * 50)
 
     if not HAS_WS:
@@ -640,12 +617,6 @@ def main():
         except Exception as e:
             logger.warning(f"[WebServer] BT auto-connect setup failed: {e}")
 
-    logger.info("-" * 50)
-    logger.info(f"  MPU6050: {'ON' if state.mpu6050.initialized else 'OFF (retrying)'}")
-    logger.info(f"  Buzzer:  {'ON' if state.buzzer._initialized else 'OFF'}")
-    logger.info(f"  Crane:   {'ON' if CRANE_ENABLED else 'OFF'}")
-    logger.info(f"  DS4:     {'ON' if state.ds4 else 'OFF'}")
-    logger.info(f"  Drift:   {'ON' if DRIFT_ENABLED else 'OFF'}")
     logger.info("-" * 50)
     logger.info(f"  Web UI:  http://{ip}:{FLASK_PORT}")
     logger.info(f"  Hotspot: {HOTSPOT_IP}:{FLASK_PORT}")

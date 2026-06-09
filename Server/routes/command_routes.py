@@ -30,7 +30,7 @@ def create_command_blueprint(state):
         elif d in ("backward",):
             state.motors.move(state.speed, 'backward', 'no', 0.5)
         elif d in ("left", "right"):
-            state.motors.stop()
+            state.motors.move(state.speed, 'forward', d, 0.3)
         elif d.startswith("forward_"):
             state.motors.move(state.speed, 'forward', d.split("_")[1], 0.3)
         elif d.startswith("backward_"):

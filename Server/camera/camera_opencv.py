@@ -1,4 +1,5 @@
-"""Camera — PiCamera2 + OpenCV, rgb_raw only, 30fps."""
+"""Camera — PiCamera2 + OpenCV, optimized for 45fps, smooth and stable.
+"""
 
 import threading, time, math, cv2, numpy as np
 from Server.logger import logger
@@ -43,7 +44,7 @@ class CVThread(threading.Thread):
 
     def run(self):
         while self._running:
-            self._flag.wait()
+            self._flag.wait(timeout=0.5)
             if not self._running:
                 break
             self._flag.clear()
@@ -54,6 +55,11 @@ class CVThread(threading.Thread):
                     logger.error(f"[CV] Error: {e}")
 
     def submit_frame(self, frame):
+        """Submit a new frame for processing.
+
+        If still processing the previous frame, skip this one (drop frame
+        rather than queue — prevents lag buildup).
+        """
         if self._processing:
             return
         self._frame = frame
@@ -79,13 +85,15 @@ class CVThread(threading.Thread):
             self._processing = False
 
     def _find_line(self, frame):
+        """Detect black lines on white background using Otsu thresholding."""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # Gaussian blur to reduce noise before thresholding
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, binary = cv2.threshold(gray, self.line_threshold, 255, cv2.THRESH_BINARY_INV)
+        # Use Otsu's automatic thresholding (adapts to lighting conditions)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         # Morphological cleanup
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+
         indices1 = np.where(binary[self.line_pos_1] > 0)[0]
         indices2 = np.where(binary[self.line_pos_2] > 0)[0]
         pos1 = int(np.mean(indices1)) if len(indices1) > 0 else 0
@@ -96,44 +104,62 @@ class CVThread(threading.Thread):
             self.on_line_found(self.line_pos, self.line_angle)
 
     def _find_hand(self, frame):
-        """Detect a hand using skin-colour segmentation in HSV.
+        """Detect a hand using improved skin-colour segmentation.
 
-        Uses multiple HSV ranges for robust skin detection across different
-        lighting conditions and skin tones.  Finds the largest skin-coloured
-        contour, computes its centroid and area, and calls the callback
-        with the hand position and area.
+        Uses BOTH HSV and YCrCb colour spaces for more robust skin detection
+        across different lighting conditions and skin tones. The YCrCb space
+        is particularly good for skin detection because it separates
+        luminance from chrominance, making detection more lighting-invariant.
 
-        The callback (on_hand_found) also receives a shake_detected flag
-        that is True when rapid position changes are observed — this is
-        used by the autonomous controller to auto-stop the mode.
+        Improvements over v1:
+          - Dual colour space detection (HSV + YCrCb)
+          - Larger morphological kernels for better noise removal
+          - Area-based filtering with convex hull for hand shape validation
+          - Reduced minimum hand area threshold for detecting hands at distance
         """
+        # ── HSV skin detection ──
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # Two HSV ranges for skin detection (works for a variety of skin tones)
-        lower1 = np.array([0, 40, 60])
+        # Two HSV ranges for skin detection
+        lower1 = np.array([0, 30, 50])
         upper1 = np.array([25, 255, 255])
-        lower2 = np.array([170, 40, 60])
+        lower2 = np.array([170, 30, 50])
         upper2 = np.array([180, 255, 255])
 
         mask1 = cv2.inRange(hsv, lower1, upper1)
         mask2 = cv2.inRange(hsv, lower2, upper2)
-        mask = cv2.bitwise_or(mask1, mask2)
+        hsv_mask = cv2.bitwise_or(mask1, mask2)
 
-        # Morphological cleanup
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        # ── YCrCb skin detection ──
+        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+        # YCrCb skin colour bounds (well-established ranges)
+        ycrcb_lower = np.array([0, 133, 77])
+        ycrcb_upper = np.array([255, 173, 127])
+        ycrcb_mask = cv2.inRange(ycrcb, ycrcb_lower, ycrcb_upper)
+
+        # ── Combine masks ──
+        combined_mask = cv2.bitwise_or(hsv_mask, ycrcb_mask)
+
+        # ── Morphological cleanup ──
+        kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+        # Close gaps in the hand region
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel_large, iterations=2)
+        # Remove small noise blobs
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel_small, iterations=2)
         # Smooth edges
-        mask = cv2.GaussianBlur(mask, (5, 5), 0)
-        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+        combined_mask = cv2.GaussianBlur(combined_mask, (5, 5), 0)
+        _, combined_mask = cv2.threshold(combined_mask, 127, 255, cv2.THRESH_BINARY)
 
-        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+        contours = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
 
         self.hand_detected = False
         if contours:
+            # Sort by area, pick largest
             c = max(contours, key=cv2.contourArea)
             area = cv2.contourArea(c)
-            if area > 1500:  # minimum hand size
+            if area > 800:  # reduced threshold to detect hands at distance
                 M = cv2.moments(c)
                 if M["m00"] > 0:
                     cx = int(M["m10"] / M["m00"])
@@ -142,7 +168,6 @@ class CVThread(threading.Thread):
                     self.hand_area = int(area)
                     self.hand_detected = True
 
-                    # Shake detection: check if on_hand_found callback reports shake
                     shake = False
                     if self.on_hand_found:
                         shake = self.on_hand_found(self.hand_pos, self.hand_area)
@@ -151,7 +176,7 @@ class CVThread(threading.Thread):
                         return
                     return
 
-        # No hand found — still call callback so tracker knows hand is lost
+        # No hand found
         if self.on_hand_found:
             self.on_hand_found([0, 0], 0)
 
@@ -161,48 +186,137 @@ class Camera(BaseCamera):
         self.cv_thread = CVThread()
         self.cv_thread.start()
         self._picam = None
+        self._reconnect_count = 0
+        self._last_frame_time = 0.0
         super().__init__(target_fps=CAMERA_FPS)
 
     def _init_camera(self):
+        """Initialize PiCamera2 with optimized settings for 45fps smooth stream."""
         if self._picam is not None:
             return
         if Picamera2 is None:
             raise RuntimeError("picamera2 not installed")
-        self._picam = Picamera2()
-        cfg = self._picam.create_preview_configuration(
-            main={"size": CAMERA_RESOLUTION, "format": "RGB888"}
-        )
-        self._picam.configure(cfg)
-        if CAMERA_FLIP_HORIZONTAL:
-            self._picam.set_control("flip_h", True)
-        if CAMERA_FLIP_VERTICAL:
-            self._picam.set_control("flip_v", True)
-        self._picam.start()
-        logger.info(f"[Camera] {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps q={CAMERA_JPEG_QUALITY}%")
+
+        try:
+            self._picam = Picamera2()
+
+            # Configure for low-latency, high-framerate streaming
+            cfg = self._picam.create_preview_configuration(
+                main={"size": CAMERA_RESOLUTION, "format": "RGB888"}
+            )
+            self._picam.configure(cfg)
+
+            # Apply flip settings
+            if CAMERA_FLIP_HORIZONTAL:
+                self._picam.set_control("flip_h", True)
+            if CAMERA_FLIP_VERTICAL:
+                self._picam.set_control("flip_v", True)
+
+            # Set controls for low-latency operation
+            # FrameDurationLimits: min/max frame time in microseconds
+            # For 45fps: ~22222 microseconds per frame
+            try:
+                self._picam.set_controls({
+                    "FrameRate": CAMERA_FPS,
+                    "AeEnable": True,           # Auto exposure
+                    "AwbEnable": True,          # Auto white balance
+                    "NoiseReductionMode": 1,    # Fast noise reduction (not HQ)
+                })
+            except Exception as e:
+                logger.warning(f"[Camera] Control setting failed: {e}")
+
+            self._picam.start()
+            self._reconnect_count = 0
+            logger.info(f"[Camera] {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps q={CAMERA_JPEG_QUALITY}%")
+
+        except Exception as e:
+            self._picam = None
+            raise RuntimeError(f"Camera init failed: {e}")
+
+    def _restart_camera(self):
+        """Restart the camera with exponential backoff."""
+        self._reconnect_count += 1
+        backoff = min(5.0, 0.5 * (2 ** min(self._reconnect_count, 4)))
+
+        logger.warning(f"[Camera] Restarting (attempt {self._reconnect_count}, "
+                      f"wait {backoff:.1f}s)...")
+
+        if self._picam:
+            try:
+                self._picam.stop()
+            except Exception:
+                pass
+            try:
+                self._picam.close()
+            except Exception:
+                pass
+            self._picam = None
+
+        time.sleep(backoff)
+
+        try:
+            self._init_camera()
+            logger.info("[Camera] Restart successful")
+        except Exception as e:
+            logger.error(f"[Camera] Restart failed: {e}")
 
     def frames(self):
+        """Generate MJPEG frames with FPS control and auto-reconnect."""
         self._init_camera()
+        frame_interval = 1.0 / CAMERA_FPS if CAMERA_FPS > 0 else 0
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 10
+
         while True:
             try:
                 if self._picam is None:
-                    time.sleep(0.3)
-                    self._init_camera()
+                    self._restart_camera()
                     if self._picam is None:
                         continue
+
+                loop_start = time.monotonic()
+
+                # Capture frame
                 raw = self._picam.capture_array()
                 if raw is None or len(raw.shape) != 3:
+                    consecutive_errors += 1
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        self._restart_camera()
+                        consecutive_errors = 0
+                    time.sleep(0.01)
                     continue
-                # rgb_raw: use as-is (no conversion)
+
+                consecutive_errors = 0
                 frame = raw
+
+                # Submit to CV thread if active
                 if self.cv_thread.cv_mode != CV_NONE:
                     self.cv_thread.submit_frame(frame.copy())
+
+                # Draw overlays
                 frame = self._draw_overlays(frame)
-                ok, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
+
+                # Encode JPEG
+                ok, jpg = cv2.imencode('.jpg', frame,
+                                       [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
                 if ok:
+                    self._last_frame_time = time.monotonic()
                     yield jpg.tobytes()
+
+                # FPS control — sleep remaining time to hit target
+                elapsed = time.monotonic() - loop_start
+                sleep_time = frame_interval - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
             except Exception as e:
-                logger.error(f"[Camera] Error: {e}")
-                time.sleep(0.1)
+                consecutive_errors += 1
+                logger.error(f"[Camera] Frame error: {e}")
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    self._restart_camera()
+                    consecutive_errors = 0
+                else:
+                    time.sleep(0.05)
 
     def _draw_overlays(self, frame):
         mode = self.cv_thread.cv_mode
@@ -238,6 +352,10 @@ class Camera(BaseCamera):
         if self._picam:
             try:
                 self._picam.stop()
+            except Exception:
+                pass
+            try:
+                self._picam.close()
             except Exception:
                 pass
             self._picam = None
