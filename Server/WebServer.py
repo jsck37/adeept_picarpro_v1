@@ -71,26 +71,32 @@ def save_servo_cal(angles):
 def get_ip():
     """Get the best IP address for web UI access.
 
-    When connected to a WiFi hotspot, the hotspot gateway IP
-    (10.42.0.1) is the correct address for clients.
-    Otherwise, try to detect the LAN IP.
+    Checks all network interfaces for a usable IP address.
+    Prioritises hotspot gateway addresses (10.42.x.x, 192.168.4.x)
+    since those are the IPs clients connect to when the Pi is an AP.
     """
     try:
-        # Check if we're running a hotspot (gateway IP)
         import subprocess
-        result = subprocess.run(
-            ["ip", "addr", "show", "wlan0"],
-            capture_output=True, text=True, timeout=2
-        )
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("inet "):
-                ip = line.split()[1].split("/")[0]
-                if ip.startswith("10.42."):
-                    return ip  # Hotspot gateway
+        # Check all wireless interfaces for hotspot IP
+        for iface in ['wlan0', 'wlan1', 'uap0']:
+            try:
+                result = subprocess.run(
+                    ["ip", "addr", "show", iface],
+                    capture_output=True, text=True, timeout=2
+                )
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith("inet "):
+                        ip = line.split()[1].split("/")[0]
+                        # Hotspot / AP typical ranges
+                        if ip.startswith(("10.42.", "192.168.4.", "172.20.")):
+                            return ip
+            except Exception:
+                continue
     except Exception:
         pass
     try:
+        # Try to get any non-loopback IP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
@@ -101,6 +107,66 @@ def get_ip():
         pass
     # Fallback to hotspot IP
     return HOTSPOT_IP
+
+
+def start_redirect_server(port=80, target_port=None):
+    """Start a lightweight HTTP server on port 80 that redirects all
+    requests to the Flask app on target_port.
+
+    This makes the web panel accessible by simply typing the Pi's
+    IP address in the browser (without :5000).  It also handles
+    captive portal detection requests from mobile devices, so that
+    connecting to the Pi's WiFi hotspot automatically shows the
+    control panel.
+
+    Requires root/sudo to bind port 80 — if binding fails, a
+    warning is logged and the function returns silently.
+    """
+    if target_port is None:
+        target_port = FLASK_PORT
+
+    try:
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                # Get the Host header to build the redirect URL
+                host = self.headers.get('Host', '')
+                # Remove existing port if present
+                if ':' in host:
+                    host = host.split(':')[0]
+                redirect_url = f'http://{host}:{target_port}{self.path}'
+                self.send_response(302)
+                self.send_header('Location', redirect_url)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                self.wfile.write(
+                    f'<html><body>Redirecting to <a href="{redirect_url}">'
+                    f'{redirect_url}</a></body></html>'.encode()
+                )
+
+            def log_message(self, format, *args):
+                # Suppress access logs for the redirect server
+                pass
+
+        server = HTTPServer(('0.0.0.0', port), RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info(f"[WebServer] Port {port} redirect -> :{target_port}")
+        return True
+    except PermissionError:
+        logger.warning(f"[WebServer] Cannot bind port {port} (need root). "
+                       f"Run with sudo or access http://IP:{target_port}")
+        return False
+    except OSError as e:
+        if 'Address already in use' in str(e) or 'Permission denied' in str(e):
+            logger.warning(f"[WebServer] Port {port} already in use or denied: {e}")
+        else:
+            logger.warning(f"[WebServer] Port {port} redirect failed: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"[WebServer] Port {port} redirect failed: {e}")
+        return False
 
 
 # ── Shared state ──────────────────────────────────────────────────────
@@ -551,6 +617,9 @@ def main():
         daemon=True,
     ).start()
     logger.info(f"[WebServer] Flask on :{FLASK_PORT}")
+
+    # Port 80 redirect for hotspot / captive portal access
+    start_redirect_server(port=80, target_port=FLASK_PORT)
 
     # Signal handlers
     signal.signal(signal.SIGINT, lambda s, f: (state.shutdown_hardware(), sys.exit(0)))

@@ -12,6 +12,11 @@ Stick ranges vary by connection:
   - USB (hid-playstation): -32768..32767, centre 0
 Axis ranges are auto-detected from device capabilities.
 
+IMPORTANT: The hid-sony (or hid-playstation) kernel module MUST be
+loaded for the DS4 to create proper /dev/input/eventX devices over
+Bluetooth.  Without it, the DS4 connects at the BT level but no input
+device appears, so evdev cannot read it and keys appear unresponsive.
+
 Button mapping (v1):
   - Left stick: Drive wheels (LY inverted + speed mult)
   - Right stick: Smooth crane pan/tilt control (servos 1 & 2)
@@ -28,7 +33,7 @@ Button mapping (v1):
   - Triangle/Square auto modes: any subsequent button press stops auto mode first
 """
 
-import math, os, select, threading, time
+import math, os, select, subprocess, threading, time
 from Server.logger import logger
 
 try:
@@ -49,6 +54,33 @@ from Server.config import (
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_DRIFT_STEER_RANGE, DS4_STEER_RANGE,
 )
+
+
+def _ensure_hid_sony():
+    """Try to load hid-sony kernel module on startup.
+
+    This is needed for DS4 Bluetooth input to work.  Without it,
+    the DS4 pairs via bluetoothctl but no /dev/input/eventX device
+    is created, so evdev cannot read it.
+    """
+    try:
+        with open('/proc/modules', 'r') as f:
+            for line in f:
+                if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
+                    return  # Already loaded
+    except Exception:
+        pass
+
+    try:
+        subprocess.run(['modprobe', 'hid-sony'],
+                       capture_output=True, text=True, timeout=5)
+        logger.info("[DS4] Loaded hid-sony kernel module")
+    except FileNotFoundError:
+        # Not running as root or modprobe not available
+        logger.warning("[DS4] modprobe not found — if DS4 keys don't respond, "
+                       "run: sudo modprobe hid-sony")
+    except Exception as e:
+        logger.warning(f"[DS4] Could not load hid-sony: {e}")
 
 
 class DS4Controller:
@@ -79,22 +111,25 @@ class DS4Controller:
         self._headlights_on = self._claw_grip_closed = self._claw_arm_down = False
         self._lock = threading.Lock()
 
-        # ── Drift mode ──
+        # -- Drift mode --
         self._drift_mode = False
         self._drift_active = False  # actively drifting (steering + throttle)
 
-        # ── Blinker state ──
+        # -- Blinker state --
         self._left_blinking = False
         self._right_blinking = False
         self._left_blink_thread = None
         self._right_blink_thread = None
 
-        # ── Auto mode state ──
+        # -- Auto mode state --
         self._auto_mode_active = False
 
-        # ── Trigger blinker debounce ──
+        # -- Trigger blinker debounce --
         self._l2_pressed = False
         self._r2_pressed = False
+
+        # -- Rescan flag --
+        self._rescan_flag = threading.Event()
 
     # -- Public API -------------------------------------------------------
 
@@ -108,6 +143,10 @@ class DS4Controller:
         self._speed, self._shared_state = speed, shared_state
         self._autonomous = autonomous
         self._running = True
+
+        # Ensure hid-sony is loaded for DS4 Bluetooth support
+        _ensure_hid_sony()
+
         self._watchdog_thread = threading.Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
         logger.info("[DS4] Searching for controller...")
@@ -137,6 +176,16 @@ class DS4Controller:
             'drift_mode': self._drift_mode,
         }
 
+    def trigger_rescan(self):
+        """Force the watchdog to re-scan for input devices immediately.
+
+        Called by the Bluetooth connection code after a successful
+        bluetoothctl connect, so that the DS4 controller picks up the
+        new evdev device without waiting for the next watchdog cycle.
+        """
+        self._rescan_flag.set()
+        logger.info("[DS4] Rescan triggered")
+
     # -- Device discovery -------------------------------------------------
 
     def _find_device(self):
@@ -146,6 +195,7 @@ class DS4Controller:
         try:
             paths = evdev.list_devices()
             if not paths:
+                logger.debug("[DS4] No evdev devices found")
                 return None
             devices = []
             for p in paths:
@@ -153,28 +203,40 @@ class DS4Controller:
                     devices.append(InputDevice(p))
                 except OSError:
                     continue
+
             candidates = []
             for dev in devices:
                 name = dev.name.lower()
                 if (DS4_DEVICE_NAME.lower() in name
                         or 'dualshock' in name
-                        or 'sony interactive' in name):
+                        or 'sony interactive' in name
+                        or 'playstation' in name):
                     candidates.append(dev)
+
             if not candidates:
+                logger.debug(f"[DS4] No DS4 candidates among {len(devices)} devices. "
+                             f"Names: {[d.name for d in devices]}")
                 return None
             if len(candidates) == 1:
+                logger.info(f"[DS4] Single candidate: {candidates[0].name} @ {candidates[0].path}")
                 return candidates[0]
 
+            # Multiple candidates — pick the one with BTN_SOUTH (main gamepad)
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 keys = caps.get(ecodes.EV_KEY, [])
                 if ecodes.BTN_SOUTH in keys or ecodes.BTN_A in keys:
+                    logger.info(f"[DS4] Selected main gamepad: {dev.name} @ {dev.path}")
                     return dev
 
+            # Fallback: pick the one with ABS_X axis (not just touchpad)
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 if any(c == ecodes.ABS_X for c, _ in caps.get(ecodes.EV_ABS, [])):
+                    logger.info(f"[DS4] Fallback selected: {dev.name} @ {dev.path}")
                     return dev
+
+            logger.info(f"[DS4] Using first candidate: {candidates[0].name}")
             return candidates[0]
         except Exception as e:
             logger.error(f"[DS4] Search error: {e}")
@@ -214,9 +276,13 @@ class DS4Controller:
                 ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}'
                 for k, v in self._axis_ranges.items()
             }
+            # Log key capabilities for debugging
+            keys = caps.get(ecodes.EV_KEY, [])
+            key_names = [ecodes.KEY.get(k, ecodes.BTN.get(k, hex(k))) for k in keys[:20]]
             logger.info(f"[DS4] Connected #{self._connect_count}: "
                   f"{device.name} @ {device.path}")
             logger.info(f"[DS4] Axes: {abs_info}")
+            logger.info(f"[DS4] Keys: {key_names}")
         except Exception:
             logger.info(f"[DS4] Connected #{self._connect_count}: {device.name}")
 
@@ -257,14 +323,17 @@ class DS4Controller:
         the heartbeat when connected.
 
         Uses shorter intervals when disconnected for faster reconnection.
+        The rescan_flag allows external code (bluetooth_routes) to trigger
+        an immediate scan after a successful BT connection.
         """
         while self._running:
             if not self._connected:
                 dev = self._find_device()
                 if dev:
                     self._connect(dev)
-                # Poll faster when searching for controller (1s vs 3s)
-                time.sleep(1.0)
+                # Wait for next cycle, but break early if rescan requested
+                self._rescan_flag.wait(timeout=1.0)
+                self._rescan_flag.clear()
             else:
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
@@ -362,7 +431,7 @@ class DS4Controller:
             self._rx = self._norm_axis(value, code)
             self._apply_crane_pan_tilt()
         elif code == ecodes.ABS_RY:
-            # INVERTED for crane: push stick up = ry < 0 → we want tilt up
+            # INVERTED for crane: push stick up = ry < 0 -> we want tilt up
             raw = self._norm_axis(value, code)
             self._ry = -raw if DS4_INVERT_RY else raw
             self._apply_crane_pan_tilt()
@@ -406,7 +475,7 @@ class DS4Controller:
             self._auto_mode_active = False
 
     def _btn_press(self, code):
-        # ── Auto-mode buttons: Triangle (trackLineCV) and Square (trackHand) ──
+        # -- Auto-mode buttons: Triangle (trackLineCV) and Square (trackHand) --
         if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle - CV line follow
             if self._autonomous and self._shared_state:
                 # Ensure camera is available
@@ -434,7 +503,7 @@ class DS4Controller:
                 logger.info("[DS4] Started hand tracking mode")
             return
 
-        # ── All other buttons: stop auto mode first if active ──
+        # -- All other buttons: stop auto mode first if active --
         self._stop_auto_mode_if_active()
 
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):       # Cross - claw grip
@@ -544,7 +613,7 @@ class DS4Controller:
         s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
         s = min(100, s)  # Cap at 100
 
-        # ── Drift mode ──
+        # -- Drift mode --
         if self._drift_mode and s > 0 and abs(lx) > 0.3:
             self._drift_active = True
             # Over-steer: exaggerate front wheel angle
@@ -563,8 +632,8 @@ class DS4Controller:
     def _apply_crane_pan_tilt(self):
         """Apply right stick to camera pan/tilt servos (1 & 2).
 
-        Right stick X → cam pan servo (1)
-        Right stick Y → cam tilt servo (2)
+        Right stick X -> cam pan servo (1)
+        Right stick Y -> cam tilt servo (2)
 
         Uses proportional control: stick deflection determines step size,
         making small movements precise and large movements fast.
@@ -577,10 +646,10 @@ class DS4Controller:
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
 
-        # Pan (servo 1): rx > 0 → increase angle (pan right), rx < 0 → decrease (pan left)
+        # Pan (servo 1): rx > 0 -> increase angle (pan right), rx < 0 -> decrease (pan left)
         if abs(rx) >= DS4_DEADZONE:
             current_pan = self._servos.get_angle(SERVO_CAM_PAN)
-            # Proportional step: 1° at small deflection, up to 10° at full deflection
+            # Proportional step: 1 deg at small deflection, up to 10 deg at full deflection
             pan_step = max(1, int(abs(rx) * DS4_CAM_SENSITIVITY * 10))
             if rx > 0:
                 new_pan = min(180, current_pan + pan_step)
@@ -590,10 +659,10 @@ class DS4Controller:
                 self._servos.set_angle(SERVO_CAM_PAN, new_pan)
                 self._cam_pan = new_pan
 
-        # Tilt (servo 2): ry > 0 (stick up) → increase angle (tilt up)
+        # Tilt (servo 2): ry > 0 (stick up) -> increase angle (tilt up)
         if abs(ry) >= DS4_DEADZONE:
             current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
-            # Proportional step: 1° at small deflection, up to 10° at full deflection
+            # Proportional step: 1 deg at small deflection, up to 10 deg at full deflection
             tilt_step = max(1, int(abs(ry) * DS4_CAM_SENSITIVITY * 10))
             if ry > 0:
                 new_tilt = min(180, current_tilt + tilt_step)
@@ -606,10 +675,10 @@ class DS4Controller:
     def _apply_dpad(self):
         """D-pad controls the claw grip with smooth movement.
 
-        hat_y > 0 = D-pad DOWN → arm goes DOWN
-        hat_y < 0 = D-pad UP   → arm goes UP
-        hat_x < 0 = D-pad LEFT  → grip opens
-        hat_x > 0 = D-pad RIGHT → grip closes
+        hat_y > 0 = D-pad DOWN -> arm goes DOWN
+        hat_y < 0 = D-pad UP   -> arm goes UP
+        hat_x < 0 = D-pad LEFT  -> grip opens
+        hat_x > 0 = D-pad RIGHT -> grip closes
         """
         if not CRANE_ENABLED or not self._servos:
             return

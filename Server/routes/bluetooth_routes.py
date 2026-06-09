@@ -7,6 +7,10 @@ Uses individual ``bluetoothctl`` subprocess calls with strict timeouts
 for each operation.  This is more reliable than an interactive session
 because each command starts fresh and cannot get stuck in a bad state.
 
+After a successful BT connection, the ``hid-sony`` kernel module is
+loaded (if not already present) so that the DS4 gamepad creates a
+proper /dev/input/eventX device that evdev can read.
+
 A small JSON config file (``bt_config.json``) stores the MAC address of
 the last successfully connected gamepad so that auto-connect can work on
 boot without user interaction.
@@ -17,6 +21,101 @@ from flask import Blueprint, jsonify, request
 from Server.logger import logger
 
 BT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bt_config.json")
+
+# ---------------------------------------------------------------------------
+# Kernel module helpers
+# ---------------------------------------------------------------------------
+
+def _load_hid_sony():
+    """Try to load the hid-sony kernel module (DS4 Bluetooth support).
+
+    Without hid-sony, the DS4 connects at the Bluetooth level but does
+    NOT create a /dev/input/eventX device, so evdev cannot read it.
+    This is the #1 reason why a DS4 "connects" but keys don't respond.
+    """
+    try:
+        # Check if already loaded
+        with open('/proc/modules', 'r') as f:
+            for line in f:
+                if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
+                    logger.info("[BT] hid-sony already loaded")
+                    return True
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            ['modprobe', 'hid-sony'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            logger.info("[BT] Loaded hid-sony kernel module")
+            time.sleep(0.5)
+            return True
+        else:
+            logger.warning(f"[BT] modprobe hid-sony failed: {result.stderr.strip()}")
+    except FileNotFoundError:
+        logger.warning("[BT] modprobe not found — cannot load hid-sony")
+    except Exception as e:
+        logger.warning(f"[BT] modprobe hid-sony error: {e}")
+
+    # Try hid-playstation as fallback (newer kernels)
+    try:
+        result = subprocess.run(
+            ['modprobe', 'hid-playstation'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            logger.info("[BT] Loaded hid-playstation kernel module")
+            time.sleep(0.5)
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _wait_for_evdev_device(timeout=8):
+    """Wait for a new DS4-compatible evdev device to appear.
+
+    After bluetoothctl connects the DS4, there is a delay (1-5 seconds)
+    before the kernel creates the /dev/input/eventX device.  This
+    function polls until a matching device appears or the timeout expires.
+
+    Returns the device path or None.
+    """
+    try:
+        import evdev
+    except ImportError:
+        logger.warning("[BT] evdev not installed — cannot wait for input device")
+        return None
+
+    ds4_keywords = ['wireless controller', 'dualshock', 'sony interactive', 'playstation']
+    deadline = time.monotonic() + timeout
+
+    logger.info(f"[BT] Waiting up to {timeout}s for evdev device...")
+    while time.monotonic() < deadline:
+        try:
+            for path in evdev.list_devices():
+                try:
+                    dev = evdev.InputDevice(path)
+                    name_lower = dev.name.lower()
+                    if any(kw in name_lower for kw in ds4_keywords):
+                        # Verify it has gamepad buttons (not just the touchpad)
+                        caps = dev.capabilities()
+                        keys = caps.get(evdev.ecodes.EV_KEY, [])
+                        if evdev.ecodes.BTN_SOUTH in keys:
+                            logger.info(f"[BT] Found evdev device: {dev.name} @ {dev.path}")
+                            return dev.path
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    logger.warning(f"[BT] No evdev device appeared within {timeout}s")
+    return None
+
 
 # ---------------------------------------------------------------------------
 # bluetoothctl helpers — one subprocess per command (reliable)
@@ -52,6 +151,9 @@ def _scan_devices(scan_time=3):
     Starts a background scan, waits, then reads the device list.
     Returns a list of dicts: [{"name": "...", "mac": "XX:XX:XX:XX:XX:XX"}, ...]
     """
+    # Ensure hid-sony is loaded before scanning
+    _load_hid_sony()
+
     # Power on and start scan in background
     _btctl('power', 'on', timeout=5)
     time.sleep(0.2)
@@ -105,32 +207,40 @@ def _is_gamepad(name):
     return any(kw in name_lower for kw in keywords)
 
 
-def _pair_and_connect(mac):
+def _pair_and_connect(mac, ds4_controller=None):
     """Pair, trust and connect to a Bluetooth device by MAC address.
 
     Strategy:
-      1. Try direct connect first (device may already be paired/trusted)
-      2. If that fails, do remove → pair → trust → connect
-      3. Each step has its own timeout to prevent hanging
+      1. Load hid-sony kernel module
+      2. Try direct connect first (device may already be paired/trusted)
+      3. If that fails, do remove -> pair -> trust -> connect
+      4. Wait for evdev device to appear
+      5. Trigger DS4 controller rescan
 
     Returns (success: bool, message: str).
     """
     mac = mac.upper()
+
+    # Step 0: Ensure hid-sony is loaded
+    _load_hid_sony()
+
     _btctl('power', 'on', timeout=5)
     _btctl('agent', 'on', timeout=5)
     _btctl('default-agent', timeout=5)
     time.sleep(0.3)
 
-    # ── Step 1: Try direct connect (device may already be paired) ──
+    # -- Step 1: Try direct connect (device may already be paired) --
     logger.info(f"[BT] Attempting direct connect to {mac}...")
     out = _btctl('connect', mac, timeout=10)
     if 'successful' in out.lower():
         # Already paired — ensure trusted
         _btctl('trust', mac, timeout=5)
         logger.info(f"[BT] Direct connect succeeded for {mac}")
+        # Wait for evdev device and trigger rescan
+        _post_connect(mac, ds4_controller)
         return True, f"Connected to {mac}"
 
-    # ── Step 2: Full pair sequence ──
+    # -- Step 2: Full pair sequence --
     logger.info(f"[BT] Direct connect failed, full pairing for {mac}...")
 
     # Remove any existing pairing
@@ -176,9 +286,36 @@ def _pair_and_connect(mac):
     conn_out = _btctl('connect', mac, timeout=10)
     if 'successful' in conn_out.lower():
         logger.info(f"[BT] Pair + connect succeeded for {mac}")
+        # Wait for evdev device and trigger rescan
+        _post_connect(mac, ds4_controller)
         return True, f"Paired and connected to {mac}"
 
     return False, f"Pairing succeeded but connection failed for {mac}"
+
+
+def _post_connect(mac, ds4_controller=None):
+    """After a successful BT connection, wait for evdev device and
+    trigger the DS4 controller to rescan for input devices.
+
+    This is critical — without this step, the DS4 connects at the
+    Bluetooth level but the robot never receives gamepad input.
+    """
+    # Wait for the evdev device to appear
+    evdev_path = _wait_for_evdev_device(timeout=8)
+
+    if evdev_path:
+        logger.info(f"[BT] DS4 input device ready: {evdev_path}")
+    else:
+        logger.warning("[BT] DS4 input device NOT found — keys may not respond")
+        logger.warning("[BT] Check: lsmod | grep hid_sony ; ls /dev/input/")
+
+    # Trigger DS4 controller rescan if available
+    if ds4_controller is not None:
+        try:
+            ds4_controller.trigger_rescan()
+            logger.info("[BT] Triggered DS4 controller rescan")
+        except Exception as e:
+            logger.warning(f"[BT] DS4 rescan trigger failed: {e}")
 
 
 def _disconnect_device(mac):
@@ -233,7 +370,7 @@ def auto_connect_on_boot(ds4_controller=None):
     def _do_auto_connect():
         time.sleep(3.0)
         logger.info(f"[BT] Auto-connecting to saved gamepad {mac}...")
-        success, msg = _pair_and_connect(mac)
+        success, msg = _pair_and_connect(mac, ds4_controller)
         if success:
             logger.info(f"[BT] Auto-connect success: {msg}")
         else:
@@ -290,7 +427,8 @@ def create_bluetooth_blueprint(state):
         done = threading.Event()
 
         def _do_connect():
-            success, msg = _pair_and_connect(mac)
+            ds4 = getattr(state, 'ds4', None)
+            success, msg = _pair_and_connect(mac, ds4_controller=ds4)
             result["ok"] = success
             result["message"] = msg
             if success:
@@ -302,7 +440,7 @@ def create_bluetooth_blueprint(state):
 
         t = threading.Thread(target=_do_connect, daemon=True)
         t.start()
-        done.wait(timeout=30)
+        done.wait(timeout=45)
 
         return jsonify(result)
 
@@ -326,11 +464,22 @@ def create_bluetooth_blueprint(state):
         """Return the current Bluetooth connection status and saved config."""
         cfg = _load_bt_config()
         ds4_connected = state.ds4.connected if state.ds4 else False
+        # Also check if hid-sony is loaded
+        hid_sony_loaded = False
+        try:
+            with open('/proc/modules', 'r') as f:
+                for line in f:
+                    if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
+                        hid_sony_loaded = True
+                        break
+        except Exception:
+            pass
         return jsonify({
             "ok": True,
             "connected": ds4_connected,
             "saved_mac": cfg.get("last_gamepad_mac"),
             "saved_name": cfg.get("last_gamepad_name"),
+            "hid_sony_loaded": hid_sony_loaded,
         })
 
     @bp.route("/auto_connect", methods=["POST"])
@@ -345,15 +494,26 @@ def create_bluetooth_blueprint(state):
         done = threading.Event()
 
         def _do_auto():
-            success, msg = _pair_and_connect(mac)
+            ds4 = getattr(state, 'ds4', None)
+            success, msg = _pair_and_connect(mac, ds4_controller=ds4)
             result["ok"] = success
             result["message"] = msg
             done.set()
 
         t = threading.Thread(target=_do_auto, daemon=True)
         t.start()
-        done.wait(timeout=30)
+        done.wait(timeout=45)
 
         return jsonify(result)
+
+    @bp.route("/load_hid_sony", methods=["POST"])
+    def bt_load_hid_sony():
+        """Manually trigger loading the hid-sony kernel module.
+
+        This endpoint is useful for debugging — if the DS4 connects
+        but keys don't respond, calling this endpoint may fix it.
+        """
+        ok = _load_hid_sony()
+        return jsonify({"ok": ok, "message": "hid-sony loaded" if ok else "Failed to load hid-sony"})
 
     return bp
