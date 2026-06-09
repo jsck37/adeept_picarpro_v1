@@ -23,7 +23,7 @@ var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
   switches: false, ultrasonic: false, mpu6050: false,
   oled: false, camera: false, autonomous: false, crane: false,
-  ds4: false,
+  ds4: false, voice: false,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -70,6 +70,7 @@ function updateHardwareUI(hardwareStatus) {
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
   toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
   toggleHwSection(null, 'claw-missing-tag', hw.crane);
+  toggleHwSection('card-voice', 'voice-missing-tag', hw.voice);
 }
 
 function toggleHwSection(cardId, tagId, available) {
@@ -157,6 +158,7 @@ function sendCommand(cmd, params) {
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'claw': '/cmd/claw',
+      'voice': '/cmd/voice',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -261,6 +263,27 @@ function updateStatus(d) {
   } else {
     document.getElementById('sb-ds4').textContent = 'OFF';
     document.getElementById('sb-ds4').style.color = '#9aa0a6';
+  }
+
+  // Voice control status
+  var voice = d.voice;
+  if (voice) {
+    if (voice.available) {
+      document.getElementById('voice-missing-tag').style.display = 'none';
+      var vc = document.getElementById('card-voice');
+      if (vc) vc.classList.remove('hw-missing');
+    } else {
+      document.getElementById('voice-missing-tag').style.display = '';
+    }
+    voiceActive = voice.active;
+    voiceAvailable = voice.available;
+    if (voice.last_command) {
+      document.getElementById('voice-last-cmd').textContent = voice.last_command;
+    }
+    updateVoiceUI();
+  } else {
+    voiceAvailable = false;
+    updateVoiceUI();
   }
 }
 
@@ -485,8 +508,8 @@ function arrowCamUpdate() {
   var newTilt = camTiltAngle;
   if (left)  newPan  = Math.max(0,  camPanAngle  - CAM_ARROW_STEP);
   if (right) newPan  = Math.min(180, camPanAngle  + CAM_ARROW_STEP);
-  if (up)    newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
-  if (down)  newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
+  if (up)    newTilt = Math.max(0,  camTiltAngle - CAM_ARROW_STEP);
+  if (down)  newTilt = Math.min(180, camTiltAngle + CAM_ARROW_STEP);
 
   if (newPan !== camPanAngle || newTilt !== camTiltAngle) {
     camPanAngle = newPan;
@@ -651,7 +674,7 @@ function updateCamJoystick(clientX, clientY) {
   var panRange = 90;
   var tiltRange = 90;
   var newPan = Math.round(90 + (dx / maxR) * panRange);
-  var newTilt = Math.round(90 - (dy / maxR) * tiltRange);
+  var newTilt = Math.round(90 + (dy / maxR) * tiltRange);
   newPan = Math.max(0, Math.min(180, newPan));
   newTilt = Math.max(0, Math.min(180, newTilt));
   camJoystickLabel.textContent = 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
@@ -821,6 +844,51 @@ document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
 // Module system removed — all features are built-in
 
 // Module system removed — file upload code deleted
+
+// ═══════════════════════════════════════════════════════════════
+//  VOICE CONTROL
+// ═══════════════════════════════════════════════════════════════
+var voiceActive = false;
+var voiceAvailable = false;
+
+function updateVoiceUI() {
+  var startBtn = document.getElementById('voice-start-btn');
+  var stopBtn = document.getElementById('voice-stop-btn');
+  var dot = document.getElementById('voice-status-dot');
+  var txt = document.getElementById('voice-status-text');
+  if (!startBtn) return;
+  if (voiceActive) {
+    startBtn.style.display = 'none';
+    stopBtn.style.display = '';
+    dot.style.background = '#34a853';
+    txt.textContent = 'Listening...';
+    txt.style.color = '#34a853';
+  } else {
+    startBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    if (voiceAvailable) {
+      dot.style.background = '#9aa0a6';
+      txt.textContent = 'Inactive';
+      txt.style.color = '#9aa0a6';
+    } else {
+      dot.style.background = '#ea4335';
+      txt.textContent = 'Not available';
+      txt.style.color = '#ea4335';
+    }
+  }
+}
+
+document.getElementById('voice-start-btn').addEventListener('click', function() {
+  sendCommand('voice', { action: 'start' });
+  voiceActive = true;
+  updateVoiceUI();
+});
+
+document.getElementById('voice-stop-btn').addEventListener('click', function() {
+  sendCommand('voice', { action: 'stop' });
+  voiceActive = false;
+  updateVoiceUI();
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  INFO TAB — Documentation viewer

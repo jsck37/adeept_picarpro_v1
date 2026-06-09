@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from config import (
-    DEFAULT_SPEED, SERVO_COUNT, CRANE_ENABLED,
+    DEFAULT_SPEED, SERVO_COUNT,
     SERVO_CLAW_ARM, SERVO_CLAW_GRIP, CLAW_ARM_UP, CLAW_ARM_DOWN,
     CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP, SERVO_STEERING,
 )
@@ -80,8 +80,6 @@ def create_command_blueprint(state):
 
     @bp.route("/claw", methods=["POST"])
     def cmd_claw():
-        if not CRANE_ENABLED:
-            return jsonify({"ok": False}), 400
         act = (request.get_json(silent=True) or {}).get("action", "")
         m = {
             'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
@@ -108,5 +106,12 @@ def create_command_blueprint(state):
             state.camera.set_cv_mode(m)
             return jsonify({"ok": True})
         return jsonify({"ok": False}), 400
+
+    @bp.route("/voice", methods=["POST"])
+    def cmd_voice():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'voice', 'params': d})
+        return jsonify(r)
 
     return bp

@@ -24,8 +24,9 @@ loguru
 numpy
 pillow
 
-# IMU Sensor (optional — also uses smbus from apt package python3-smbus)
-mpu6050-raspberrypi
+# IMU Sensor — robot_hat (Adeept RobotHat) или smbus2 (fallback)
+robot-hat
+smbus2
 
 # DS4 Bluetooth Controller (optional — for PS4 gamepad support)
 evdev

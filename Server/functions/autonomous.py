@@ -2,7 +2,7 @@ import threading
 import time
 from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
-    ULTRASONIC_ENABLED, LINE_TRACKER_ENABLED,
+    ULTRASONIC_ENABLED,
     LINE_LEFT_PIN, LINE_RIGHT_PIN,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN, CV_LINE_FOLLOW_SCAN_Y_RATIO,
     CAMERA_RESOLUTION,
@@ -30,18 +30,15 @@ class AutonomousController:
         self._ir_left = None
         self._ir_right = None
         self._ir_available = False
-        if LINE_TRACKER_ENABLED:
-            try:
-                from gpiozero import InputDevice
-                self._ir_left = InputDevice(LINE_LEFT_PIN)
-                self._ir_right = InputDevice(LINE_RIGHT_PIN)
-                self._ir_available = True
-                logger.info("[Auto] IR line sensors initialized (L=GPIO%d, R=GPIO%d)"
-                            % (LINE_LEFT_PIN, LINE_RIGHT_PIN))
-            except Exception as e:
-                logger.error(f"[Auto] IR sensors failed: {e}")
-        else:
-            logger.warning("[Auto] Line tracker DISABLED in config")
+        try:
+            from gpiozero import InputDevice
+            self._ir_left = InputDevice(LINE_LEFT_PIN)
+            self._ir_right = InputDevice(LINE_RIGHT_PIN)
+            self._ir_available = True
+            logger.info("[Auto] IR line sensors initialized (L=GPIO%d, R=GPIO%d)"
+                        % (LINE_LEFT_PIN, LINE_RIGHT_PIN))
+        except Exception as e:
+            logger.error(f"[Auto] IR sensors failed: {e}")
 
         self._camera = None
 
@@ -84,7 +81,7 @@ class AutonomousController:
                 logger.warning(f"[Auto] Cannot start {mode}: ultrasonic not available")
                 return False, "Ultrasonic sensor not available"
         if mode == "trackLine":
-            if not LINE_TRACKER_ENABLED or not self._ir_available:
+            if not self._ir_available:
                 logger.warning("[Auto] Cannot start trackLine: IR sensors not available")
                 return False, "Line tracker not available"
         if mode == "trackLineCV":

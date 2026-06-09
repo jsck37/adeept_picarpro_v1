@@ -14,7 +14,7 @@ except ImportError:
 
 from config import (
     FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
-    SERVO_COUNT, SERVO_INIT_ANGLE, CRANE_ENABLED,
+    SERVO_COUNT, SERVO_INIT_ANGLE,
     DS4_ENABLED, HOTSPOT_IP, CAMERA_FPS,
 )
 from Server.hardware.motors import MotorController
@@ -35,7 +35,7 @@ def main():
     state = SharedState()
 
     logger.info("=" * 50)
-    logger.info("  PiCar Pro (Flask + WebSocket)")
+    logger.info("  PiCar Pro v2 (Flask + WebSocket)")
     logger.info("=" * 50)
 
     if not HAS_WS:

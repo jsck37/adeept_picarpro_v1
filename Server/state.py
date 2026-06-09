@@ -1,8 +1,7 @@
 import json, os
 from config import (
     DEFAULT_SPEED, SERVO_COUNT, SERVO_INIT_ANGLE,
-    CRANE_ENABLED, ULTRASONIC_ENABLED,
-    LINE_TRACKER_ENABLED,
+    ULTRASONIC_ENABLED,
 )
 from Server.utils.system_info import SystemInfo
 
@@ -58,9 +57,9 @@ class SharedState:
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
             "auto_mode": self.autonomous._current_mode if self.autonomous else "none",
             "speed": self.speed,
-            "crane_enabled": CRANE_ENABLED,
+            "crane_enabled": True,
             "ultrasonic_enabled": ULTRASONIC_ENABLED,
-            "line_tracker_enabled": LINE_TRACKER_ENABLED,
+            "line_tracker_enabled": True,
             "hw": {
                 "motors": self.motors._initialized if self.motors else False,
                 "servos": self.servos._pwm_initialized if self.servos else False,
@@ -71,10 +70,16 @@ class SharedState:
                 "mpu6050": mpu_ok,
                 "oled": self.oled._initialized if self.oled else False,
                 "camera": self.camera is not None,
-                "crane": CRANE_ENABLED,
+                "crane": True,
                 "ds4": self.ds4.connected if self.ds4 else False,
+                "voice": self.voice._initialized if self.voice else False,
             },
             "ds4": self.ds4.get_status() if self.ds4 else None,
+            "voice": {
+                "available": self.voice._initialized if self.voice else False,
+                "active": self.voice._active if self.voice else False,
+                "last_command": self.voice._last_command if self.voice else "",
+            },
         }
 
     def shutdown_hardware(self):

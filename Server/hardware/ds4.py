@@ -15,7 +15,6 @@ from config import (
     DEFAULT_SPEED, SERVO_CAM_PAN, SERVO_CAM_TILT,
     SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
     CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
-    CRANE_ENABLED,
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_STEER_RANGE,
 )
@@ -408,12 +407,12 @@ class DS4Controller:
         self._stop_auto_mode_if_active()
 
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):
-            if CRANE_ENABLED and self._servos:
+            if self._servos:
                 self._claw_grip_closed = not self._claw_grip_closed
                 angle = CLAW_GRIP_CLOSED if self._claw_grip_closed else CLAW_GRIP_OPEN
                 self._smooth_crane(SERVO_CLAW_GRIP, angle)
         elif code in (ecodes.BTN_EAST, ecodes.BTN_B):
-            if CRANE_ENABLED and self._servos:
+            if self._servos:
                 self._claw_arm_down = not self._claw_arm_down
                 angle = CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP
                 self._smooth_crane(SERVO_CLAW_ARM, angle)

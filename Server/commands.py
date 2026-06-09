@@ -80,19 +80,16 @@ def process_command(state, data):
         r = {'ok': True}
 
     elif cmd == 'claw':
-        if not CRANE_ENABLED:
-            r['error'] = 'Crane not enabled'
-        else:
-            act = p.get('action', '')
-            actions = {
-                'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
-                'arm_down': (SERVO_CLAW_ARM, CLAW_ARM_DOWN),
-                'grip_open': (SERVO_CLAW_GRIP, CLAW_GRIP_OPEN),
-                'grip_close': (SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED),
-            }
-            if act in actions:
-                state.servos.set_angle(*actions[act])
-                r = {'ok': True, 'action': act}
+        act = p.get('action', '')
+        actions = {
+            'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
+            'arm_down': (SERVO_CLAW_ARM, CLAW_ARM_DOWN),
+            'grip_open': (SERVO_CLAW_GRIP, CLAW_GRIP_OPEN),
+            'grip_close': (SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED),
+        }
+        if act in actions:
+            state.servos.set_angle(*actions[act])
+            r = {'ok': True, 'action': act}
 
     elif cmd == 'switch':
         sid, st = int(p.get('id', 0)), p.get('state', False)

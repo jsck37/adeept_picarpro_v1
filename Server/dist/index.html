@@ -152,6 +152,38 @@
         </div>
       </div>
 
+      <!-- Voice Control -->
+      <div class="card" id="card-voice">
+        <div class="card-title collapsible-header open" data-target="voice-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            Voice Control<span class="hw-missing-tag" id="voice-missing-tag" style="display:none">Module not found</span>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="voice-body">
+          <div id="voice-controls">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div id="voice-status-dot" style="width:10px;height:10px;border-radius:50%;background:#9aa0a6"></div>
+              <span id="voice-status-text" style="font-size:.78rem;color:#9aa0a6">Inactive</span>
+            </div>
+            <div class="btn-group" id="voice-group">
+              <button class="gbtn" id="voice-start-btn" style="background:#34a853;color:#fff">Start</button>
+              <button class="gbtn" id="voice-stop-btn" style="background:#ea4335;color:#fff;display:none">Stop</button>
+            </div>
+            <div style="margin-top:8px">
+              <div style="font-size:.72rem;color:#5f6368;font-weight:600;margin-bottom:2px">Last Command</div>
+              <div id="voice-last-cmd" style="font-size:.82rem;font-family:'Courier New',monospace;font-weight:600;color:#1a73e8;min-height:1.2em;padding:3px 8px;background:#f8f9fa;border-radius:5px">&mdash;</div>
+            </div>
+            <div style="font-size:.72rem;color:#5f6368;line-height:1.5;margin-top:8px">
+              <div><b>forward</b> / <b>backward</b> / <b>stop</b> &mdash; Drive</div>
+              <div><b>look left</b> / <b>look right</b> &mdash; Steering</div>
+              <div><b>camera up</b> / <b>camera down</b> &mdash; Tilt</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /col-left -->
 
     <!-- ========== RIGHT COLUMN ========== -->
