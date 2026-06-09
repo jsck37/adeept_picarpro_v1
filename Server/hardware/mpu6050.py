@@ -223,14 +223,15 @@ class MPU6050Controller:
             time.sleep(0.1)
 
     def _retry_loop(self):
-        retry = 0
-        while self._running and not self.initialized:
+        for retry in range(1, 6):
+            if not self._running or self.initialized:
+                return
             time.sleep(5)
-            retry += 1
-            logger.info(f"[MPU6050] Retry #{retry}...")
+            logger.info(f"[MPU6050] Retry #{retry}/5...")
             for addr in POSSIBLE_ADDRS:
                 if self._try_connect(addr):
                     return
+        logger.error("[MPU6050] Not found after 5 retries — giving up")
 
     def _reinit(self):
         self.initialized = False

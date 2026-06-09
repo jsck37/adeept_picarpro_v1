@@ -1187,6 +1187,7 @@ function esc(str) {
 // ═══════════════════════════════════════════════════════════════
 var consoleOutput = document.getElementById('console-output');
 var consoleLineCount = document.getElementById('console-line-count');
+var consoleLogCounts = { info: 0, warn: 0, error: 0, debug: 0 };
 var consoleAutoscroll = document.getElementById('console-autoscroll');
 var consoleClearBtn = document.getElementById('console-clear-btn');
 var consoleLineTotal = 0;
@@ -1200,12 +1201,27 @@ function classifyLogLine(text) {
   return '';
 }
 
+function updateLogCountBadge() {
+  var el = document.getElementById('console-log-counts');
+  if (!el) return;
+  var parts = [];
+  if (consoleLogCounts.info > 0) parts.push('<span style="color:#8ab4f8">[i] - ' + consoleLogCounts.info + '</span>');
+  if (consoleLogCounts.warn > 0) parts.push('<span style="color:#fdd663">[w] - ' + consoleLogCounts.warn + '</span>');
+  if (consoleLogCounts.error > 0) parts.push('<span style="color:#f28b82">[e] - ' + consoleLogCounts.error + '</span>');
+  if (consoleLogCounts.debug > 0) parts.push('<span style="color:#808080">[d] - ' + consoleLogCounts.debug + '</span>');
+  el.innerHTML = parts.length ? parts.join(' &nbsp;') : '';
+}
+
 function appendConsoleLine(text, _ts) {
   if (!consoleOutput) return;
   var div = document.createElement('div');
   var cls = classifyLogLine(text);
   div.className = 'log-line' + (cls ? ' log-' + cls : '');
   div.textContent = text;
+  if (cls && consoleLogCounts[cls] !== undefined) {
+    consoleLogCounts[cls]++;
+    updateLogCountBadge();
+  }
   consoleOutput.appendChild(div);
   consoleLineTotal++;
   // Trim old lines
@@ -1223,7 +1239,9 @@ if (consoleClearBtn) {
   consoleClearBtn.addEventListener('click', function() {
     if (consoleOutput) consoleOutput.innerHTML = '';
     consoleLineTotal = 0;
+    consoleLogCounts = { info: 0, warn: 0, error: 0, debug: 0 };
     if (consoleLineCount) consoleLineCount.textContent = '0 lines';
+    updateLogCountBadge();
     sendCommand('clear_log', {});
   });
 }

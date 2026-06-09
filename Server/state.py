@@ -57,9 +57,7 @@ class SharedState:
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
             "auto_mode": self.autonomous._current_mode if self.autonomous else "none",
             "speed": self.speed,
-            "crane_enabled": True,
             "ultrasonic_enabled": ULTRASONIC_ENABLED,
-            "line_tracker_enabled": True,
             "hw": {
                 "motors": self.motors._initialized if self.motors else False,
                 "servos": self.servos._pwm_initialized if self.servos else False,

@@ -73,6 +73,7 @@ class DS4Controller:
         self._auto_mode_active = False
 
         self._turbo_active = False
+        self._police_turbo_on = False
 
         self._rainbow_on = False
 
@@ -118,6 +119,7 @@ class DS4Controller:
             'connect_count': self._connect_count,
             'turbo': self._turbo_active,
             'rainbow': self._rainbow_on,
+            'police_turbo': self._police_turbo_on,
         }
 
     def trigger_rescan(self):
@@ -425,10 +427,8 @@ class DS4Controller:
             if self._servos:
                 self._servos.move_init()
                 self._cam_pan = self._cam_tilt = 90
-        elif code == ecodes.BTN_START:
-            pass
-        elif code == ecodes.BTN_SELECT:
-            pass
+        elif code in (ecodes.BTN_START, ecodes.BTN_SELECT):
+            self._toggle_police_turbo()
         elif code == ecodes.BTN_THUMBL:
             pass
         elif code == ecodes.BTN_THUMBR:
@@ -466,7 +466,7 @@ class DS4Controller:
 
         if turbo_on and not self._turbo_active:
             self._turbo_active = True
-            logger.info("[DS4] TURBO BOOST ON!")
+            logger.info("[DS4] TURBO BOOST ON! 100% speed, forward")
         elif not turbo_on and self._turbo_active:
             self._turbo_active = False
             logger.info("[DS4] Turbo boost OFF")
@@ -484,6 +484,13 @@ class DS4Controller:
             with self._lock:
                 speed = 100
             d = 'forward'
+        elif self._police_turbo_on:
+            speed = 100
+            d = 'forward' if ly >= 0 else 'backward'
+            if math.hypot(lx, ly) < 0.05:
+                self._motors.stop()
+                self._servos.set_angle(SERVO_STEERING, 90)
+                return
         else:
             if math.hypot(lx, ly) < 0.05:
                 self._motors.stop()
@@ -503,7 +510,7 @@ class DS4Controller:
         else:
             turn, radius = 'left', max(0.2, 0.5 + lx * DS4_STEER_SENSITIVITY * 0.3)
 
-        if self._turbo_active:
+        if self._turbo_active or self._police_turbo_on:
             s = 100
         else:
             abs_ly = abs(ly)
@@ -511,13 +518,30 @@ class DS4Controller:
             s = min(100, s)
 
         if s > 0:
-            if turn != 'no':
+            if self._police_turbo_on and turn != 'no':
+                self._motors_single_turn(s, d, turn)
+            elif turn != 'no':
                 self.motors_move_with_forward_turn(s, d, turn, radius)
             else:
                 self._motors.move(s, d, turn, radius)
 
         steer = max(30, min(150, 90 - int(lx * DS4_STEER_RANGE * DS4_STEER_SENSITIVITY)))
         self._servos.set_angle(SERVO_STEERING, steer)
+
+    def _motors_single_turn(self, speed, direction, turn):
+        if not self._motors or not self._motors._initialized:
+            return
+        s = speed / 100.0
+        if turn == 'left':
+            left, right = 0, s
+        else:
+            left, right = s, 0
+        if direction == 'forward':
+            self._motors._motor_a.forward(right)
+            self._motors._motor_b.forward(left)
+        elif direction == 'backward':
+            self._motors._motor_a.backward(right)
+            self._motors._motor_b.backward(left)
 
     def motors_move_with_forward_turn(self, speed, direction, turn, radius):
         if not self._motors or not self._motors._initialized:
@@ -603,6 +627,17 @@ class DS4Controller:
             self._leds.set_mode('rainbow', (255, 255, 255))
         else:
             self._leds.set_mode('off', (0, 0, 0))
+
+    def _toggle_police_turbo(self):
+        self._police_turbo_on = not self._police_turbo_on
+        if self._police_turbo_on:
+            if self._leds:
+                self._leds.set_mode('police', (255, 0, 0))
+            logger.info("[DS4] Police Turbo ON — speed 100%, single-motor turns")
+        else:
+            if self._leds:
+                self._leds.set_mode('off', (0, 0, 0))
+            logger.info("[DS4] Police Turbo OFF")
 
     def _start_left_blinker(self):
         if self._left_blinking:
