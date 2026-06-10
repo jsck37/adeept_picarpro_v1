@@ -2,7 +2,7 @@ import threading, time
 from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
-    SERVO_INIT_ANGLES, CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
+    SERVO_INIT_ANGLES, SERVO_CRANE_GRIP, CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 from Server.logger import logger
 
@@ -56,7 +56,8 @@ class ServoController:
     def set_angle(self, sid, angle):
         if not self._pwm_initialized or sid >= SERVO_COUNT or self._servos[sid] is None:
             return
-        angle = max(0, min(180, angle))
+        max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
+        angle = max(0, min(max_angle, angle))
         with self._lock:
             try:
                 self._servos[sid].angle = angle

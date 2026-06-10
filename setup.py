@@ -704,7 +704,7 @@ if __name__ == "__main__":
     except Exception:
         CRANE_ARM_OPEN = 80
         CRANE_ARM_CLOSED = 150
-        CRANE_GRIP_LOW = 120
-        CRANE_GRIP_MID = 65
-        CRANE_GRIP_HIGH = 10
+        CRANE_GRIP_LOW = 0
+        CRANE_GRIP_MID = 135
+        CRANE_GRIP_HIGH = 190
     main()

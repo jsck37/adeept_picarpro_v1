@@ -270,25 +270,48 @@ class Camera(BaseCamera):
     def _draw_overlays(self, frame):
         mode = self.cv_thread.cv_mode
         if mode == CV_LINE:
+            h, w = frame.shape[:2]
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+            display = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
             p1, p2 = self.cv_thread.line_pos
-            h, w = frame.shape[:2]
-            cv2.line(frame, (0, self.cv_thread.line_pos_1), (w, self.cv_thread.line_pos_1), (0, 255, 0), 1)
-            cv2.line(frame, (0, self.cv_thread.line_pos_2), (w, self.cv_thread.line_pos_2), (0, 255, 0), 1)
+            cv2.line(display, (0, self.cv_thread.line_pos_1), (w, self.cv_thread.line_pos_1), (0, 255, 0), 1)
+            cv2.line(display, (0, self.cv_thread.line_pos_2), (w, self.cv_thread.line_pos_2), (0, 255, 0), 1)
+            if p1 > 0 and p2 > 0:
+                cv2.line(display, (p2, self.cv_thread.line_pos_2), (p1, self.cv_thread.line_pos_1), (0, 0, 255), 2)
+                mid_x = (p1 + p2) // 2
+                mid_y = (self.cv_thread.line_pos_1 + self.cv_thread.line_pos_2) // 2
+                cv2.circle(display, (mid_x, mid_y), 6, (0, 0, 255), -1)
             if p1 > 0:
-                cv2.circle(frame, (p1, self.cv_thread.line_pos_1), 5, (0, 0, 255), -1)
+                cv2.circle(display, (p1, self.cv_thread.line_pos_1), 5, (0, 255, 0), -1)
             if p2 > 0:
-                cv2.circle(frame, (p2, self.cv_thread.line_pos_2), 5, (0, 0, 255), -1)
-        elif mode == CV_HAND and self.cv_thread.hand_detected:
-            x, y = self.cv_thread.hand_pos
-            cv2.circle(frame, (x, y), 15, (0, 255, 0), 2)
-            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+                cv2.circle(display, (p2, self.cv_thread.line_pos_2), 5, (0, 255, 0), -1)
+            cv2.putText(display, mode, (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            return display
+        elif mode == CV_HAND:
             h, w = frame.shape[:2]
-            cv2.line(frame, (w // 2 - 20, h // 2), (w // 2 + 20, h // 2), (255, 255, 0), 1)
-            cv2.line(frame, (w // 2, h // 2 - 20), (w // 2, h // 2 + 20), (255, 255, 0), 1)
-            cv2.putText(frame, f"HAND ({x},{y})", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        if mode != CV_NONE:
-            cv2.putText(frame, mode, (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cx_center, cy_center = w // 2, h // 2
+            if self.cv_thread.hand_detected:
+                hx, hy = self.cv_thread.hand_pos
+                cross_len = 25
+                cv2.line(frame, (hx - cross_len, hy), (hx + cross_len, hy), (0, 0, 255), 2)
+                cv2.line(frame, (hx, hy - cross_len), (hx, hy + cross_len), (0, 0, 255), 2)
+                cv2.circle(frame, (hx, hy), 18, (0, 0, 255), 2)
+                cv2.circle(frame, (hx, hy), 3, (0, 0, 255), -1)
+                cv2.line(frame, (cx_center, cy_center), (hx, hy), (0, 255, 255), 1)
+                cv2.putText(frame, f"LOCK ({hx},{hy})", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            else:
+                cross_len = 20
+                cv2.line(frame, (cx_center - cross_len, cy_center), (cx_center + cross_len, cy_center), (0, 255, 0), 1)
+                cv2.line(frame, (cx_center, cy_center - cross_len), (cx_center, cy_center + cross_len), (0, 255, 0), 1)
+                cv2.circle(frame, (cx_center, cy_center), 15, (0, 255, 0), 1)
+                cv2.putText(frame, "SEARCHING...", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, mode, (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            return frame
         return frame
 
     def set_cv_mode(self, mode):

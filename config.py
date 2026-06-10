@@ -117,18 +117,23 @@ CRANE_ARM_CLOSED = 150
 
 # ---------------------------------------------------------------------------
 # Crane grip (channel 5) — tilt angle positions
-#   CRANE_GRIP_LOW  = 120  — arm tilted down  (picking up objects).
-#   CRANE_GRIP_MID  = 65   — arm horizontal   (carrying position).
-#   CRANE_GRIP_HIGH = 10   — arm raised       (default / safe position).
+#   CRANE_GRIP_LOW  = 0    — arm fully lowered (picking up objects).
+#   CRANE_GRIP_MID  = 135  — arm at middle     (carrying position).
+#   CRANE_GRIP_HIGH = 190  — arm fully raised   (default / safe position).
 #
 #   Because grip is controlled by a single button (gamepad ▢ / web UI),
 #   it cycles through positions: low -> mid -> high -> mid -> low -> ...
 #   The direction reverses at each endpoint so every press moves
 #   to the next adjacent position.
+#
+#   NOTE: CRANE_GRIP_HIGH = 190 exceeds the standard 180-degree range,
+#   but the servo hardware and PCA9685 driver support it with the
+#   configured actuation_range. The ServoController.set_angle() clamp
+#   has been extended to allow up to 190 for grip positions.
 # ---------------------------------------------------------------------------
-CRANE_GRIP_LOW = 120
-CRANE_GRIP_MID = 65
-CRANE_GRIP_HIGH = 10
+CRANE_GRIP_LOW = 0
+CRANE_GRIP_MID = 135
+CRANE_GRIP_HIGH = 190
 
 # ---------------------------------------------------------------------------
 # Passive buzzer — GPIO 24, driven by PWM for melodies.
