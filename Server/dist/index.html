@@ -8,7 +8,6 @@
 </head>
 <body>
 
-<!-- ==================== STATUS BAR ==================== -->
 <div class="status-bar" id="status-bar">
   <div class="sb-item"><span class="sb-label">CPU</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
   <div class="sb-sep"></div>
@@ -29,7 +28,6 @@
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
-<!-- ==================== HEADER ==================== -->
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
@@ -42,14 +40,11 @@
   </nav>
 </header>
 
-<!-- ==================== CONTROL TAB ==================== -->
 <div class="tab-content active" id="content-control">
   <div class="control-layout">
 
-    <!-- ========== LEFT COLUMN ========== -->
     <div class="col-left">
 
-      <!-- Camera -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="camera-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -66,7 +61,6 @@
         </div>
       </div>
 
-      <!-- OpenCV Modes -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="cv-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -84,7 +78,6 @@
         </div>
       </div>
 
-      <!-- Autonomous -->
       <div class="card" id="card-autonomous">
         <div class="card-title collapsible-header open" data-target="auto-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -106,7 +99,6 @@
         </div>
       </div>
 
-      <!-- DS4 Controller with Bluetooth -->
       <div class="card" id="card-ds4">
         <div class="card-title collapsible-header open" data-target="ds4-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -117,13 +109,11 @@
         </div>
         <div class="collapsible-body open" id="ds4-body">
           <div id="ds4-controls">
-            <!-- Connection status -->
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
               <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
             </div>
 
-            <!-- Bluetooth scan & connect -->
             <div class="bt-section">
               <div style="display:flex;gap:6px;margin-bottom:8px">
                 <button class="btn-sm btn-primary" id="bt-scan-btn">Scan BT</button>
@@ -138,15 +128,15 @@
               <div id="bt-saved-info" style="font-size:.7rem;color:#5f6368;margin-top:4px"></div>
             </div>
 
-            <!-- Controls help -->
             <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
               <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> — Crane pan/tilt (servos 1 &amp; 2)</div>
+              <div><b>Right stick</b> — Camera pan/tilt</div>
               <div><b>L2</b> / <b>R2</b> — Turbo boost (100% speed)</div>
               <div><b>L1</b> — Headlights &nbsp; <b>R1</b> — Buzzer beep</div>
               <div><b>Dpad Up</b> — Headlights &nbsp; <b>Dpad Down</b> — Rainbow</div>
               <div><b>Dpad Left/Right</b> — Blinkers</div>
-              <div><b>Cross</b> — Claw grip &nbsp; <b>Circle</b> — Claw arm</div>
+              <div><b>Cross</b> — Crane arm (grab/release)</div>
+              <div><b>Circle</b> — Crane grip tilt (low/mid/high)</div>
               <div><b>Triangle</b> — CV line follow &nbsp; <b>Square</b> — Hand track</div>
               <div><b>Options</b> — Police light + 100% + single-motor turn</div>
               <div><b>PS</b> — Home all servos</div>
@@ -155,7 +145,6 @@
         </div>
       </div>
 
-      <!-- Voice Control -->
       <div class="card" id="card-voice">
         <div class="card-title collapsible-header open" data-target="voice-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -187,12 +176,10 @@
         </div>
       </div>
 
-    </div><!-- /col-left -->
+    </div>
 
-    <!-- ========== RIGHT COLUMN ========== -->
     <div class="col-right">
 
-      <!-- Movement -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -227,30 +214,26 @@
             </div>
           </div>
 
-          <!-- Claw Crane (collapsible sub-section) -->
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
             <div class="card-title collapsible-header open" data-target="claw-body" style="margin-bottom:0">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
-                Claw Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
+                Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
               </div>
               <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="collapsible-body open" id="claw-body">
-              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
-              <div class="btn-group" id="claw-arm-group">
-                <button class="gbtn" data-claw="arm_up" style="background:#1a73e8;color:#fff">Arm Up</button>
-                <button class="gbtn" data-claw="arm_down" style="background:#5f6368;color:#fff">Arm Down</button>
+              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm (squeeze/release)</div>
+              <div class="btn-group" id="crane-arm-group">
+                <button class="gbtn" id="crane-arm-btn" style="background:#1a73e8;color:#fff">Grab</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip</div>
-              <div class="btn-group" id="claw-grip-group">
-                <button class="gbtn" data-claw="grip_open" style="background:#34a853;color:#fff">Release</button>
-                <button class="gbtn" data-claw="grip_close" style="background:#ea4335;color:#fff">Grab</button>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (10)</span></div>
+              <div class="btn-group" id="crane-grip-group">
+                <button class="gbtn" id="crane-grip-btn" style="background:#34a853;color:#fff">High</button>
               </div>
             </div>
           </div>
 
-          <!-- Speed slider -->
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
             <div class="card-title" style="margin-bottom:6px">
               <div style="display:flex;align-items:center;gap:8px">
@@ -269,7 +252,6 @@
         </div>
       </div>
 
-      <!-- Servo Control -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="servo-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -288,7 +270,6 @@
         </div>
       </div>
 
-      <!-- IMU Sensor -->
       <div class="card">
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -326,7 +307,6 @@
         </div>
       </div>
 
-      <!-- Headlights -->
       <div class="card" id="card-headlights">
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -346,7 +326,6 @@
         </div>
       </div>
 
-      <!-- LED Strip -->
       <div class="card" id="card-led">
         <div class="card-title collapsible-header open" data-target="led-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -384,7 +363,6 @@
         </div>
       </div>
 
-      <!-- Buzzer -->
       <div class="card" id="card-buzzer">
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -404,11 +382,10 @@
         </div>
       </div>
 
-    </div><!-- /col-right -->
+    </div>
   </div>
 </div>
 
-<!-- ==================== CONSOLE TAB ==================== -->
 <div class="tab-content" id="content-console">
   <div class="console-card">
     <div class="console-toolbar">
@@ -427,7 +404,6 @@
   </div>
 </div>
 
-<!-- ==================== INFO TAB ==================== -->
 <div class="tab-content" id="content-info">
   <div class="info-layout">
     <div class="info-sidebar" id="info-sidebar">
@@ -444,7 +420,6 @@
   </div>
 </div>
 
-<!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
 <script src="app.js"></script>

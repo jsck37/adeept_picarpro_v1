@@ -13,11 +13,15 @@ from config import (
     DS4_STEER_SENSITIVITY, DS4_CAM_SENSITIVITY,
     DS4_HEARTBEAT_TIMEOUT, DS4_WATCHDOG_INTERVAL, DS4_READ_TIMEOUT,
     DEFAULT_SPEED, SERVO_CAM_PAN, SERVO_CAM_TILT,
-    SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
-    CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+    SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
+    CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_STEER_RANGE,
 )
+
+CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
+CRANE_GRIP_LABELS = ['low', 'mid', 'high']
 
 
 def _ensure_hid_sony():
@@ -62,7 +66,10 @@ class DS4Controller:
         self._autonomous = None
         self._speed = DEFAULT_SPEED
         self._cam_pan = self._cam_tilt = 90
-        self._headlights_on = self._claw_grip_closed = self._claw_arm_down = False
+        self._headlights_on = False
+        self._crane_arm_closed = False
+        self._crane_grip_index = 2
+        self._crane_grip_direction = -1
         self._lock = threading.Lock()
 
         self._left_blinking = False
@@ -108,6 +115,7 @@ class DS4Controller:
         return self._connected
 
     def get_status(self):
+        grip_label = CRANE_GRIP_LABELS[self._crane_grip_index] if 0 <= self._crane_grip_index < len(CRANE_GRIP_LABELS) else 'unknown'
         return {
             'enabled': DS4_ENABLED,
             'connected': self._connected,
@@ -120,6 +128,8 @@ class DS4Controller:
             'turbo': self._turbo_active,
             'rainbow': self._rainbow_on,
             'police_turbo': self._police_turbo_on,
+            'crane_arm_closed': self._crane_arm_closed,
+            'crane_grip': grip_label,
         }
 
     def trigger_rescan(self):
@@ -379,6 +389,18 @@ class DS4Controller:
                 logger.warning(f"[DS4] Error stopping auto mode: {e}")
             self._auto_mode_active = False
 
+    def _cycle_crane_grip(self):
+        self._crane_grip_index += self._crane_grip_direction
+        if self._crane_grip_index >= len(CRANE_GRIP_POSITIONS) - 1:
+            self._crane_grip_direction = -1
+        elif self._crane_grip_index <= 0:
+            self._crane_grip_direction = 1
+        self._crane_grip_index = max(0, min(len(CRANE_GRIP_POSITIONS) - 1, self._crane_grip_index))
+        target_angle = CRANE_GRIP_POSITIONS[self._crane_grip_index]
+        label = CRANE_GRIP_LABELS[self._crane_grip_index]
+        self._smooth_crane(SERVO_CRANE_GRIP, target_angle)
+        logger.info(f"[DS4] Crane grip -> {label} ({target_angle})")
+
     def _btn_press(self, code):
         if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):
             if self._autonomous and self._shared_state:
@@ -410,14 +432,13 @@ class DS4Controller:
 
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):
             if self._servos:
-                self._claw_grip_closed = not self._claw_grip_closed
-                angle = CLAW_GRIP_CLOSED if self._claw_grip_closed else CLAW_GRIP_OPEN
-                self._smooth_crane(SERVO_CLAW_GRIP, angle)
+                self._crane_arm_closed = not self._crane_arm_closed
+                angle = CRANE_ARM_CLOSED if self._crane_arm_closed else CRANE_ARM_OPEN
+                self._smooth_crane(SERVO_CRANE_ARM, angle)
+                logger.info(f"[DS4] Crane arm -> {'closed' if self._crane_arm_closed else 'open'} ({angle})")
         elif code in (ecodes.BTN_EAST, ecodes.BTN_B):
             if self._servos:
-                self._claw_arm_down = not self._claw_arm_down
-                angle = CLAW_ARM_DOWN if self._claw_arm_down else CLAW_ARM_UP
-                self._smooth_crane(SERVO_CLAW_ARM, angle)
+                self._cycle_crane_grip()
         elif code == ecodes.BTN_TL:
             self._toggle_headlights()
         elif code == ecodes.BTN_TR:
@@ -427,12 +448,11 @@ class DS4Controller:
             if self._servos:
                 self._servos.move_init()
                 self._cam_pan = self._cam_tilt = 90
+                self._crane_arm_closed = False
+                self._crane_grip_index = 2
+                self._crane_grip_direction = -1
         elif code in (ecodes.BTN_START, ecodes.BTN_SELECT):
             self._toggle_police_turbo()
-        elif code == ecodes.BTN_THUMBL:
-            pass
-        elif code == ecodes.BTN_THUMBR:
-            pass
 
     def _smooth_crane(self, servo_id, target_angle, step=DS4_CRANE_STEP, delay=0.03):
         if not self._servos:

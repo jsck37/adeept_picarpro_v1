@@ -2,9 +2,10 @@ import threading, time
 from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
-    SERVO_INIT_ANGLES, CLAW_ARM_UP, CLAW_GRIP_OPEN,
+    SERVO_INIT_ANGLES, CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 from Server.logger import logger
+
 
 class ServoController:
     def __init__(self):
@@ -35,9 +36,9 @@ class ServoController:
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
                         if i == 6:
-                            init_angle = CLAW_ARM_UP
+                            init_angle = CRANE_ARM_OPEN
                         elif i == 5:
-                            init_angle = CLAW_GRIP_OPEN
+                            init_angle = CRANE_GRIP_HIGH
                         else:
                             init_angle = SERVO_INIT_ANGLE
                     self._servos[i].angle = init_angle

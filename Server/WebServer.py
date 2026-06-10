@@ -35,7 +35,7 @@ def main():
     state = SharedState()
 
     logger.info("=" * 50)
-    logger.info("  PiCar Pro v2 (Flask + WebSocket)")
+    logger.info("  PiCar Pro v1 (Flask + WebSocket)")
     logger.info("=" * 50)
 
     if not HAS_WS:

@@ -1,6 +1,7 @@
 from config import (
-    SERVO_COUNT, SERVO_STEERING, SERVO_CLAW_ARM, SERVO_CLAW_GRIP,
-    CLAW_ARM_UP, CLAW_ARM_DOWN, CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED,
+    SERVO_COUNT, SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
+    CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     SWITCH_PINS, DEFAULT_SPEED, STEER_MAP,
 )
 from Server.camera.camera_opencv import CV_NONE, CV_LINE, CV_HAND
@@ -79,13 +80,14 @@ def process_command(state, data):
         state.buzzer.stop()
         r = {'ok': True}
 
-    elif cmd == 'claw':
+    elif cmd == 'crane':
         act = p.get('action', '')
         actions = {
-            'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
-            'arm_down': (SERVO_CLAW_ARM, CLAW_ARM_DOWN),
-            'grip_open': (SERVO_CLAW_GRIP, CLAW_GRIP_OPEN),
-            'grip_close': (SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED),
+            'arm_open': (SERVO_CRANE_ARM, CRANE_ARM_OPEN),
+            'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED),
+            'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW),
+            'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID),
+            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH),
         }
         if act in actions:
             state.servos.set_angle(*actions[act])

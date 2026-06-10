@@ -322,7 +322,7 @@ def stage_4_pip_packages(debian_ver):
     run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
-        ("I2C/Motor/Servo",
+        ("I2C/Motor/Servo/Crane",
          f"sudo -H pip3 install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
@@ -333,8 +333,9 @@ def stage_4_pip_packages(debian_ver):
          f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
          f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
-        ("IMU Sensor",
-         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
+        ("IMU Sensor / I2C Backend",
+         f"sudo -H pip3 install {pip_flag} "
+         "mpu6050-raspberrypi robot-hat smbus2"),
         ("DS4 Controller",
          f"sudo -H pip3 install {pip_flag} evdev"),
     ]
@@ -663,6 +664,10 @@ def main():
     else:
         print(f"  No I2C devices detected")
     print(f"")
+    print(f"  {BOLD}Crane Servos:{RST}")
+    print(f"  Ch 6 (Arm):   Squeeze/release claw ({CRANE_ARM_OPEN}/{CRANE_ARM_CLOSED})")
+    print(f"  Ch 5 (Grip):  Tilt angle — Low/Mid/High ({CRANE_GRIP_LOW}/{CRANE_GRIP_MID}/{CRANE_GRIP_HIGH})")
+    print(f"")
     print(f"  {BOLD}Network:{RST}")
     print(f"  IP:       {current_ip}")
     print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
@@ -693,4 +698,13 @@ def main():
 
 
 if __name__ == "__main__":
+    try:
+        sys.path.insert(0, thisPath)
+        from config import CRANE_ARM_OPEN, CRANE_ARM_CLOSED, CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH
+    except Exception:
+        CRANE_ARM_OPEN = 80
+        CRANE_ARM_CLOSED = 150
+        CRANE_GRIP_LOW = 120
+        CRANE_GRIP_MID = 65
+        CRANE_GRIP_HIGH = 10
     main()

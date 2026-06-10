@@ -1,8 +1,10 @@
 from flask import Blueprint, jsonify, request
 from config import (
     DEFAULT_SPEED, SERVO_COUNT,
-    SERVO_CLAW_ARM, SERVO_CLAW_GRIP, CLAW_ARM_UP, CLAW_ARM_DOWN,
-    CLAW_GRIP_OPEN, CLAW_GRIP_CLOSED, STEER_MAP, SERVO_STEERING,
+    SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
+    CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
+    STEER_MAP, SERVO_STEERING,
 )
 
 
@@ -78,14 +80,15 @@ def create_command_blueprint(state):
         state.buzzer.stop()
         return jsonify({"ok": True})
 
-    @bp.route("/claw", methods=["POST"])
-    def cmd_claw():
+    @bp.route("/crane", methods=["POST"])
+    def cmd_crane():
         act = (request.get_json(silent=True) or {}).get("action", "")
         m = {
-            'arm_up': (SERVO_CLAW_ARM, CLAW_ARM_UP),
-            'arm_down': (SERVO_CLAW_ARM, CLAW_ARM_DOWN),
-            'grip_open': (SERVO_CLAW_GRIP, CLAW_GRIP_OPEN),
-            'grip_close': (SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED),
+            'arm_open': (SERVO_CRANE_ARM, CRANE_ARM_OPEN),
+            'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED),
+            'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW),
+            'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID),
+            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH),
         }
         if act in m:
             state.servos.set_angle(*m[act])

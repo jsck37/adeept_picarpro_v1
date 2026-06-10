@@ -1,24 +1,26 @@
-// ═══════════════════════════════════════════════════════════════
-//  PiCar Pro v1 — Front-end application
-// ═══════════════════════════════════════════════════════════════
-
-// ── Servo definitions (3 servos, crane disabled) ──
 var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
-  { id: 6, name: 'Claw Arm', min: 0,  max: 180, init: 90 },
-  { id: 5, name: 'Claw Grip', min: 0, max: 180, init: 90 },
+  { id: 6, name: 'Crane Arm', min: 0,  max: 180, init: 80 },
+  { id: 5, name: 'Crane Grip', min: 0, max: 180, init: 10 },
 ];
 
-// ── State ──
 var hlLeft = false;
 var hlRight = false;
 var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 
-// Hardware availability
+var craneArmClosed = false;
+var craneGripPositions = [
+  { label: 'Low',  angle: 120, action: 'grip_low'  },
+  { label: 'Mid',  angle: 65,  action: 'grip_mid'  },
+  { label: 'High', angle: 10,  action: 'grip_high' }
+];
+var craneGripIndex = 2;
+var craneGripDirection = -1;
+
 var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
   switches: false, ultrasonic: false, mpu6050: false,
@@ -26,9 +28,6 @@ var hw = {
   ds4: false, voice: false,
 };
 
-// ═══════════════════════════════════════════════════════════════
-//  TOAST
-// ═══════════════════════════════════════════════════════════════
 function toast(msg, type) {
   type = type || 'info';
   var container = document.getElementById('toast-container');
@@ -42,9 +41,6 @@ function toast(msg, type) {
   }, 3000);
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  COLLAPSIBLE SECTIONS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.collapsible-header').forEach(function(header) {
   header.addEventListener('click', function() {
     var targetId = header.dataset.target;
@@ -56,14 +52,10 @@ document.querySelectorAll('.collapsible-header').forEach(function(header) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  HARDWARE AVAILABILITY
-// ═══════════════════════════════════════════════════════════════
 function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
   toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
-  // DS4 card is always visible — it's informational (shows Searching/Connected/Disabled status)
   toggleHwSection(null, 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
@@ -82,7 +74,6 @@ function toggleHwSection(cardId, tagId, available) {
       var card = document.getElementById(cardId);
       if (card) card.classList.remove('hw-missing');
     }
-    // For cards without cardId (servo, mpu), find parent card
     if (!cardId) {
       var parentCard = tagEl.closest('.card');
       if (parentCard) parentCard.classList.remove('hw-missing');
@@ -100,9 +91,6 @@ function toggleHwSection(cardId, tagId, available) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  WEBSOCKET CONNECTION (port 8888)
-// ═══════════════════════════════════════════════════════════════
 var ws = null;
 var wsReconnectTimer = null;
 var usePolling = false;
@@ -132,7 +120,6 @@ function wsConnect() {
         }
         else if (msgType === 'response') {
           if (msgData.error) toast(msgData.error, 'error');
-          // Handle I2C scan response
           if (msgData.cmd === 'i2c_scan' && msgData.ok) {
             var el = document.getElementById('i2c-scan-result');
             if (el) showI2CResult(msgData, el);
@@ -157,7 +144,7 @@ function sendCommand(cmd, params) {
       'move': '/cmd/move', 'speed': '/cmd/speed', 'servo': '/cmd/servo',
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
-      'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'claw': '/cmd/claw',
+      'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
       'voice': '/cmd/voice',
     };
     var url = urlMap[cmd];
@@ -167,9 +154,6 @@ function sendCommand(cmd, params) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  POLLING / SSE FALLBACK
-// ═══════════════════════════════════════════════════════════════
 var pollTimer = null;
 function startPolling() {
   if (pollTimer) return;
@@ -191,9 +175,6 @@ function startSSE() {
   } catch(e) { startPolling(); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  STATUS UPDATE
-// ═══════════════════════════════════════════════════════════════
 var firstStatus = true;
 function updateStatus(d) {
   if (!d) return;
@@ -210,7 +191,6 @@ function updateStatus(d) {
   }
   if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
   if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
-  // Show current autonomous mode or 'Ready'
   var autoModeLabels = {
     'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
     'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
@@ -235,7 +215,6 @@ function updateStatus(d) {
   } else {
     document.getElementById('sb-imu').textContent = 'N/A';
   }
-  // DS4 controller status
   var ds4 = d.ds4;
   if (ds4) {
     var ds4Dot = document.getElementById('ds4-status-dot');
@@ -259,13 +238,24 @@ function updateStatus(d) {
       if (ds4Text) { ds4Text.textContent = 'Disabled'; ds4Text.style.color = '#9aa0a6'; }
       document.getElementById('bt-disconnect-btn').style.display = 'none';
     }
-
+    if (ds4.crane_arm_closed !== undefined) {
+      craneArmClosed = ds4.crane_arm_closed;
+      updateCraneArmUI();
+    }
+    if (ds4.crane_grip !== undefined) {
+      var gripIdx = craneGripPositions.findIndex(function(p) { return p.label.toLowerCase() === ds4.crane_grip; });
+      if (gripIdx >= 0) {
+        craneGripIndex = gripIdx;
+        if (craneGripIndex >= craneGripPositions.length - 1) craneGripDirection = -1;
+        else if (craneGripIndex <= 0) craneGripDirection = 1;
+      }
+      updateCraneGripUI();
+    }
   } else {
     document.getElementById('sb-ds4').textContent = 'OFF';
     document.getElementById('sb-ds4').style.color = '#9aa0a6';
   }
 
-  // Voice control status
   var voice = d.voice;
   if (voice) {
     if (voice.available) {
@@ -288,15 +278,9 @@ function updateStatus(d) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════
-//  CONNECT
-// ═══════════════════════════════════════════════════════════════
 wsConnect();
 setTimeout(startSSE, 500);
 
-// ═══════════════════════════════════════════════════════════════
-//  TAB SWITCHING
-// ═══════════════════════════════════════════════════════════════
 var consoleHistoryLoaded = false;
 
 function fetchConsoleHistory() {
@@ -320,16 +304,12 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  CV MODE BUTTONS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.cv-btn[data-cv]').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     var mode = btn.dataset.cv;
     var badge = document.getElementById('cv-badge');
-    // CV Line and Hand tracking are autonomous functions, not just visual overlays
     if (mode === 'findlineCV') {
       badge.textContent = 'CV: Line Follow';
       badge.classList.toggle('visible', true);
@@ -341,24 +321,17 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     } else {
       badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
       badge.classList.toggle('visible', mode !== 'none');
-      // Stop autonomous mode if switching to a non-line CV mode
       if (mode !== 'none') sendCommand('auto', { func: 'stop' });
       sendCommand('cv_mode', { mode: mode });
     }
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  MOTOR SPEED SLIDER
-// ═══════════════════════════════════════════════════════════════
 var speedSlider = document.getElementById('speed-slider');
 var speedVal = document.getElementById('speed-val');
 speedSlider.addEventListener('input', function() { speedVal.textContent = speedSlider.value + '%'; });
 speedSlider.addEventListener('change', function() { sendCommand('speed', { value: parseInt(speedSlider.value) }); });
 
-// ═══════════════════════════════════════════════════════════════
-//  WHEEL JOYSTICK (touch/mouse + WASD keyboard)
-// ═══════════════════════════════════════════════════════════════
 var joystickContainer = document.getElementById('joystick-container');
 var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
@@ -459,7 +432,6 @@ document.addEventListener('pointercancel', function() {
   resetJoystick();
 });
 
-// ── WASD keyboard control — wheels only (using e.code for layout independence) ──
 var keysDown = {};
 
 function wasdGetDirection() {
@@ -492,10 +464,9 @@ function wasdUpdate() {
   }
 }
 
-// ── Arrow keyboard control — camera pan/tilt ──
 var arrowKeysDown = {};
-var CAM_ARROW_STEP = 5;   // degrees per keypress
-var CAM_ARROW_REPEAT = 80; // ms between repeats when held
+var CAM_ARROW_STEP = 5;
+var CAM_ARROW_REPEAT = 80;
 var camArrowTimer = null;
 
 function arrowCamUpdate() {
@@ -519,18 +490,15 @@ function arrowCamUpdate() {
       sendCommand('servo', { id: 1, angle: camPanAngle });
       sendCommand('servo', { id: 2, angle: camTiltAngle });
       camThrottle = now;
-      // sync servo sliders (pan=servo1, tilt=servo2)
       var panSlider = servoGrid.querySelector('[data-servo="1"]');
       var tiltSlider = servoGrid.querySelector('[data-servo="2"]');
       if (panSlider) { panSlider.value = camPanAngle; document.getElementById('sv-1').textContent = camPanAngle + '\u00B0'; }
       if (tiltSlider) { tiltSlider.value = camTiltAngle; document.getElementById('sv-2').textContent = camTiltAngle + '\u00B0'; }
     }
-    // move camera joystick knob visually
     moveCamKnobToAngles(camPanAngle, camTiltAngle);
     camJoystickLabel.textContent = 'Pan:' + camPanAngle + '\u00B0 Tilt:' + camTiltAngle + '\u00B0';
   }
 
-  // if no arrow keys held, stop repeating
   if (!up && !down && !left && !right) {
     if (camArrowTimer) { clearInterval(camArrowTimer); camArrowTimer = null; }
   }
@@ -545,7 +513,6 @@ function moveCamKnobToAngles(pan, tilt) {
   camJoystickKnob.classList.add('dragging');
 }
 
-// Combined keydown / keyup handlers
 var WASD_CODES = ['keyw','keya','keys','keyd'];
 var ARROW_CODES = ['arrowup','arrowdown','arrowleft','arrowright'];
 
@@ -555,14 +522,12 @@ document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
 
-  // WASD → wheels
   if (WASD_CODES.indexOf(code) !== -1) {
     var key = code.replace('key', '');
     keysDown[key] = true;
     wasdUpdate();
   }
 
-  // Arrow → camera
   if (ARROW_CODES.indexOf(code) !== -1) {
     if (!arrowKeysDown[code]) {
       arrowKeysDown[code] = true;
@@ -578,30 +543,23 @@ document.addEventListener('keyup', function(e) {
   var code = e.code.toLowerCase();
   if (WASD_CODES.indexOf(code) === -1 && ARROW_CODES.indexOf(code) === -1) return;
 
-  // WASD → wheels
   if (WASD_CODES.indexOf(code) !== -1) {
     var key = code.replace('key', '');
     delete keysDown[key];
     wasdUpdate();
   }
 
-  // Arrow → camera
   if (ARROW_CODES.indexOf(code) !== -1) {
     delete arrowKeysDown[code];
-    // if no arrows held anymore, just stop repeating — camera stays in position
     var anyArrow = arrowKeysDown['arrowup'] || arrowKeysDown['arrowdown'] || arrowKeysDown['arrowleft'] || arrowKeysDown['arrowright'];
     if (!anyArrow) {
       if (camArrowTimer) { clearInterval(camArrowTimer); camArrowTimer = null; }
       camJoystickKnob.classList.remove('dragging');
-      // Show current angle instead of resetting
       camJoystickLabel.textContent = 'Pan:' + camPanAngle + '\u00B0 Tilt:' + camTiltAngle + '\u00B0';
     }
   }
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  SERVO CONTROL (angle sliders + home)
-// ═══════════════════════════════════════════════════════════════
 var servoGrid = document.getElementById('servo-grid');
 var servoValues = {};
 
@@ -637,18 +595,19 @@ document.getElementById('servo-home').addEventListener('click', function() {
     document.getElementById('sv-' + sd.id).textContent = sd.init + '\u00B0';
   });
   sendCommand('servo_home', {});
-  // Reset camera joystick position and angles
   camPanAngle = 90;
   camTiltAngle = 90;
+  craneArmClosed = false;
+  craneGripIndex = 2;
+  craneGripDirection = -1;
+  updateCraneArmUI();
+  updateCraneGripUI();
   camJoystickKnob.classList.add('spring-back');
   camJoystickKnob.style.transform = 'translate(-50%, -50%)';
   camJoystickLabel.textContent = 'Camera \u2014 Arrows';
   setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); camJoystickKnob.classList.remove('dragging'); }, 300);
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  CAMERA JOYSTICK (cam pan = servo 1, cam tilt = servo 2)
-// ═══════════════════════════════════════════════════════════════
 var camJoystickContainer = document.getElementById('cam-joystick-container');
 var camJoystickKnob = document.getElementById('cam-joystick-knob');
 var camJoystickLabel = document.getElementById('cam-joystick-label');
@@ -713,8 +672,6 @@ document.addEventListener('pointermove', function(e) {
 document.addEventListener('pointerup', function() {
   if (!camJoystickDragging) return;
   camJoystickDragging = false;
-  // Camera joystick stays where released — NO return to center
-  // Only resets when "Home All" is pressed
   camJoystickKnob.classList.remove('dragging');
 });
 document.addEventListener('pointercancel', function() {
@@ -723,9 +680,6 @@ document.addEventListener('pointercancel', function() {
   camJoystickKnob.classList.remove('dragging');
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  HEADLIGHTS
-// ═══════════════════════════════════════════════════════════════
 function updateHeadlightUI() {
   document.getElementById('hl-left').className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
   document.getElementById('hl-right').className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
@@ -743,9 +697,6 @@ document.getElementById('hl-both').addEventListener('click', function() {
   sendCommand('switch', { id: 0, state: hlLeft }); sendCommand('switch', { id: 1, state: hlRight }); updateHeadlightUI();
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  LED STRIP
-// ═══════════════════════════════════════════════════════════════
 function hexToRgb(hex) {
   return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
 }
@@ -779,9 +730,6 @@ document.querySelectorAll('#led-group .gbtn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  BUZZER
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     if (btn.dataset.buzzer === 'stop') {
@@ -792,24 +740,56 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  CLAW CRANE
-// ═══════════════════════════════════════════════════════════════
-document.querySelectorAll('[data-claw]').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    sendCommand('claw', { action: btn.dataset.claw });
-  });
+function updateCraneArmUI() {
+  var btn = document.getElementById('crane-arm-btn');
+  if (!btn) return;
+  if (craneArmClosed) {
+    btn.textContent = 'Release';
+    btn.style.background = '#34a853';
+  } else {
+    btn.textContent = 'Grab';
+    btn.style.background = '#1a73e8';
+  }
+}
+
+function updateCraneGripUI() {
+  var btn = document.getElementById('crane-grip-btn');
+  var label = document.getElementById('crane-grip-label');
+  if (!btn) return;
+  var pos = craneGripPositions[craneGripIndex];
+  if (label) label.textContent = pos.label + ' (' + pos.angle + '\u00B0)';
+  btn.textContent = pos.label;
+  var colors = { 'Low': '#ea4335', 'Mid': '#fdd663', 'High': '#34a853' };
+  btn.style.background = colors[pos.label] || '#1a73e8';
+  if (pos.label === 'Mid') btn.style.color = '#202124';
+  else btn.style.color = '#fff';
+}
+
+document.getElementById('crane-arm-btn').addEventListener('click', function() {
+  craneArmClosed = !craneArmClosed;
+  var action = craneArmClosed ? 'arm_close' : 'arm_open';
+  sendCommand('crane', { action: action });
+  updateCraneArmUI();
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  I2C SCAN BUTTON (MPU6050 debug)
-// ═══════════════════════════════════════════════════════════════
+document.getElementById('crane-grip-btn').addEventListener('click', function() {
+  craneGripIndex += craneGripDirection;
+  if (craneGripIndex >= craneGripPositions.length - 1) craneGripDirection = -1;
+  else if (craneGripIndex <= 0) craneGripDirection = 1;
+  craneGripIndex = Math.max(0, Math.min(craneGripPositions.length - 1, craneGripIndex));
+  var pos = craneGripPositions[craneGripIndex];
+  sendCommand('crane', { action: pos.action });
+  updateCraneGripUI();
+});
+
+updateCraneArmUI();
+updateCraneGripUI();
+
 document.getElementById('i2c-scan-btn').addEventListener('click', function() {
   var resultEl = document.getElementById('i2c-scan-result');
   resultEl.textContent = 'Scanning...';
   resultEl.style.color = '#fdd663';
   sendCommand('i2c_scan', {});
-  // Also try REST API fallback
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     fetch('/api/i2c_scan').then(function(r) { return r.json(); }).then(function(d) {
       showI2CResult(d, resultEl);
@@ -830,9 +810,6 @@ function showI2CResult(d, el) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  AUTONOMOUS
-// ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('#auto-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
@@ -841,13 +818,6 @@ document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   });
 });
 
-// Module system removed — all features are built-in
-
-// Module system removed — file upload code deleted
-
-// ═══════════════════════════════════════════════════════════════
-//  VOICE CONTROL
-// ═══════════════════════════════════════════════════════════════
 var voiceActive = false;
 var voiceAvailable = false;
 
@@ -890,9 +860,6 @@ document.getElementById('voice-stop-btn').addEventListener('click', function() {
   updateVoiceUI();
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  INFO TAB — Documentation viewer
-// ═══════════════════════════════════════════════════════════════
 var docsData = null;
 var docsLoaded = false;
 var currentDocPage = 'overview';
@@ -903,456 +870,228 @@ async function loadDocs() {
   main.innerHTML = '<div class="info-loading">Loading documentation...</div>';
 
   try {
-    // Load all docs in parallel
     var [indexRes, pinoutRes] = await Promise.all([
       fetch('/docs/index.json').then(function(r) { return r.json(); }),
       fetch('/docs/pinout.json').then(function(r) { return r.json(); })
     ]);
 
-    // Load component docs
     var compFetches = (indexRes.components || []).map(function(c) {
       if (c.documentation_path) {
-        return fetch('/docs/' + c.documentation_path)
-          .then(function(r) { return r.json(); })
-          .then(function(d) { return { id: c.id, data: d }; })
-          .catch(function() { return { id: c.id, data: null }; });
+        return fetch('/' + c.documentation_path).then(function(r) { return r.json(); }).then(function(d) {
+          return { id: c.id, name: c.name, data: d };
+        }).catch(function() { return null; });
       }
-      return Promise.resolve({ id: c.id, data: null });
+      return Promise.resolve(null);
     });
+
     var compResults = await Promise.all(compFetches);
-    var compMap = {};
-    compResults.forEach(function(r) { if (r.data) compMap[r.id] = r.data; });
+    var components = {};
+    compResults.forEach(function(r) { if (r) components[r.id] = r; });
 
-    docsData = { index: indexRes, pinout: pinoutRes, components: compMap };
+    docsData = { index: indexRes, pinout: pinoutRes, components: components };
     docsLoaded = true;
-
-    // Build sidebar nav
-    buildInfoNav(indexRes);
-    renderDocPage('overview');
-
+    showDocPage(currentDocPage);
   } catch(e) {
-    main.innerHTML = '<div class="info-loading" style="color:#ea4335">Error loading documentation: ' + e.message + '</div>';
+    main.innerHTML = '<div class="info-loading">Failed to load docs</div>';
   }
 }
 
-function buildInfoNav(indexData) {
-  var compNav = document.getElementById('info-component-nav');
-  compNav.innerHTML = '';
-  (indexData.components || []).forEach(function(c) {
-    var btn = document.createElement('button');
-    btn.className = 'info-comp-btn';
-    btn.dataset.doc = 'comp_' + c.id;
-    btn.textContent = c.id.toUpperCase();
-    btn.title = c.name || c.id;
-    btn.addEventListener('click', function() {
-      setActiveDocNav(btn);
-      renderDocPage('comp_' + c.id);
-    });
-    compNav.appendChild(btn);
-  });
-
-  // Wire overview and pinout buttons
-  document.querySelectorAll('.info-nav-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      setActiveDocNav(btn);
-      renderDocPage(btn.dataset.doc);
-    });
-  });
-}
-
-function setActiveDocNav(activeBtn) {
-  document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
-  activeBtn.classList.add('active');
-}
-
-function renderDocPage(page) {
+function showDocPage(page) {
   currentDocPage = page;
   var main = document.getElementById('info-main');
-  var html = '';
+  if (!docsData) return;
+
+  document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
+  var activeBtn = document.querySelector('[data-doc="' + page + '"]');
+  if (activeBtn) activeBtn.classList.add('active');
 
   if (page === 'overview') {
-    html = renderOverview();
+    var idx = docsData.index;
+    var html = '<h2 class="info-title">' + (idx.project_name || 'PiCar Pro') + '</h2>';
+    html += '<p class="info-subtitle">' + (idx.description || '') + '</p>';
+    if (idx.features) {
+      html += '<div class="info-section"><h3 class="info-section-title">Features</h3>';
+      idx.features.forEach(function(f) {
+        html += '<div class="info-field"><span class="info-field-label">' + f.name + '</span><span class="info-field-value">' + f.description + '</span></div>';
+      });
+      html += '</div>';
+    }
+    if (idx.components) {
+      html += '<div class="info-section"><h3 class="info-section-title">Components</h3>';
+      idx.components.forEach(function(c) {
+        html += '<div class="info-field"><span class="info-field-label">' + c.name + '</span><span class="info-field-value">' + (c.description || '') + '</span></div>';
+      });
+      html += '</div>';
+    }
+    main.innerHTML = html;
   } else if (page === 'pinout') {
-    html = renderPinout();
-  } else if (page.startsWith('comp_')) {
-    var compId = page.replace('comp_', '');
-    html = renderComponent(compId);
-  }
-
-  main.innerHTML = html;
-  main.scrollTop = 0;
-}
-
-function renderOverview() {
-  var d = docsData.index;
-  var html = '<div class="info-title">' + esc(d.project) + ' v' + esc(d.version) + '</div>';
-  html += '<div class="info-subtitle">' + esc(d.description) + '</div>';
-
-  // Board info
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">Board Information</div>';
-  html += '<div class="info-field"><span class="info-field-label">Board</span><span class="info-field-value">' + esc(d.board) + '</span></div>';
-  html += '<div class="info-field"><span class="info-field-label">Generated</span><span class="info-field-value">' + esc(d.generated) + '</span></div>';
-  html += '</div>';
-
-  // Components
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">Components (' + d.components.length + ')</div>';
-  d.components.forEach(function(c) {
-    html += '<div class="info-field" style="margin-bottom:10px;padding:8px 12px;background:#f8f9fa;border-radius:6px">';
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
-    html += '<strong style="color:#1a73e8;font-size:.9rem">' + esc(c.id.toUpperCase()) + '</strong>';
-    html += '<span style="font-size:.82rem;color:#202124">' + esc(c.name) + '</span>';
-    html += '</div>';
-    html += '<div style="font-size:.8rem;color:#5f6368">' + esc(c.description) + '</div>';
-    if (c.i2c_address) {
-      html += '<div style="font-size:.75rem;color:#5f6368;margin-top:3px">I2C: <code style="background:#e8f0fe;padding:1px 5px;border-radius:3px">' + esc(c.i2c_address) + '</code></div>';
+    var pin = docsData.pinout;
+    var html = '<h2 class="info-title">GPIO Pinout</h2>';
+    html += '<p class="info-subtitle">Raspberry Pi GPIO assignments for PiCar Pro</p>';
+    if (pin.pins) {
+      html += '<table class="pin-table"><thead><tr><th>GPIO</th><th>Function</th><th>Component</th><th>Notes</th></tr></thead><tbody>';
+      pin.pins.forEach(function(p) {
+        html += '<tr><td><span class="pin-color" style="background:' + (p.color || '#dadce0') + '"></span>GPIO' + p.gpio + '</td><td>' + (p.function || '') + '</td><td>' + (p.component || '') + '</td><td>' + (p.notes || '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
     }
-    if (c.pins_used && c.pins_used.length > 0) {
-      html += '<div style="font-size:.75rem;color:#5f6368;margin-top:2px">Pins: ' + c.pins_used.map(function(p) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(p) + '</code>'; }).join(' ') + '</div>';
+    if (pin.conflicts && pin.conflicts.length > 0) {
+      html += '<div class="info-section" style="margin-top:16px"><h3 class="info-section-title">Conflicts</h3>';
+      pin.conflicts.forEach(function(c) {
+        html += '<div class="info-field"><span class="pin-conflict">' + c.gpio + '</span><span class="info-field-value">' + c.description + '</span></div>';
+      });
+      html += '</div>';
     }
-    if (c.datasheet_url) {
-      html += '<div style="font-size:.75rem;margin-top:3px"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">Datasheet</a></div>';
+    main.innerHTML = html;
+  } else if (docsData.components[page]) {
+    var comp = docsData.components[page];
+    var d = comp.data;
+    var html = '<h2 class="info-title">' + comp.name + '</h2>';
+    if (d.description) html += '<p class="info-subtitle">' + d.description + '</p>';
+    if (d.specs) {
+      html += '<div class="info-section"><h3 class="info-section-title">Specifications</h3><div class="specs-grid">';
+      d.specs.forEach(function(s) {
+        html += '<div class="spec-item"><span class="spec-key">' + s.key + '</span><span class="spec-val">' + s.value + '</span></div>';
+      });
+      html += '</div></div>';
     }
-    html += '</div>';
-  });
-  html += '</div>';
-
-  // I2C Bus Summary
-  if (d.i2c_bus_summary) {
-    var bus = d.i2c_bus_summary;
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">I2C Bus Summary</div>';
-    html += '<div class="info-field"><span class="info-field-label">Bus</span><span class="info-field-value">' + esc(String(bus.bus)) + '</span></div>';
-    html += '<div class="info-field"><span class="info-field-label">SDA Pin</span><span class="info-field-value">GPIO ' + esc(String(bus.sda_pin)) + '</span></div>';
-    html += '<div class="info-field"><span class="info-field-label">SCL Pin</span><span class="info-field-value">GPIO ' + esc(String(bus.scl_pin)) + '</span></div>';
-    html += '<div class="i2c-device-grid" style="margin-top:8px">';
-    (bus.devices || []).forEach(function(dev) {
-      html += '<div class="i2c-device"><span class="i2c-device-addr">' + esc(dev.address) + '</span> <span class="i2c-device-name">' + esc(dev.name) + '</span></div>';
-    });
-    html += '</div></div>';
-  }
-
-  // Additional Hardware
-  if (d.additional_hardware && d.additional_hardware.length > 0) {
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">Additional Hardware</div>';
-    d.additional_hardware.forEach(function(h) {
-      html += '<div class="info-field" style="margin-bottom:8px;padding:6px 12px;background:#f8f9fa;border-radius:6px">';
-      html += '<strong style="color:#1a73e8">' + esc(h.id.toUpperCase()) + '</strong> — ' + esc(h.name);
-      html += '<div style="font-size:.8rem;color:#5f6368;margin-top:2px">' + esc(h.description) + '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  return html;
-}
-
-function renderPinout() {
-  var d = docsData.pinout;
-  var colors = d.color_categories || {};
-  var html = '<div class="info-title">' + esc(d.description) + '</div>';
-  html += '<div class="info-subtitle">' + esc(d.board) + ' | SoC: ' + esc(d.soc) + ' | Rev ' + esc(d.revision) + '</div>';
-
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">Raspberry Pi Pinout Diagram</div>';
-  html += '<img src="/rpi_pinout.png" style="width:100%;border-radius:8px;border:1px solid #e0e0e0" alt="Raspberry Pi Pinout">';
-  html += '</div>';
-
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">GPIO Pinout</div>';
-  html += '<table class="pin-table"><thead><tr><th>Pin</th><th>GPIO</th><th>Function</th><th>Name</th><th>Module</th></tr></thead><tbody>';
-  (d.pins || []).forEach(function(p) {
-    var color = colors[p.color_category] || '#5f6368';
-    html += '<tr>';
-    html += '<td>' + esc(String(p.pin)) + '</td>';
-    html += '<td>' + (p.gpio !== null ? '<span class="pin-color" style="background:' + color + '"></span>' + esc(String(p.gpio)) : '-') + '</td>';
-    html += '<td>' + esc(p.function || '') + '</td>';
-    html += '<td>' + esc(p.name || '') + '</td>';
-    html += '<td>' + esc(p.module || '-') + '</td>';
-    html += '</tr>';
-  });
-  html += '</tbody></table></div>';
-
-  // Pin conflicts
-  if (d.pin_conflicts && d.pin_conflicts.length > 0) {
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">Pin Conflicts</div>';
-    d.pin_conflicts.forEach(function(c) {
-      html += '<div style="margin-bottom:10px;padding:8px 12px;background:#fef7e0;border-radius:6px;font-size:.84rem">';
-      html += '<div style="font-weight:600;color:#b06000">GPIO ' + esc(String(c.gpio)) + ' (Pin ' + esc(String(c.pin)) + ')</div>';
-      html += '<div style="color:#5f6368;margin-top:2px">' + esc(c.conflict) + '</div>';
-      html += '<div style="color:#137333;margin-top:3px;font-weight:500">Resolution: ' + esc(c.resolution) + '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // I2C Bus
-  if (d.i2c_bus) {
-    var bus = d.i2c_bus;
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">I2C Bus</div>';
-    html += '<div class="i2c-device-grid">';
-    (bus.devices || []).forEach(function(dev) {
-      html += '<div class="i2c-device"><span class="i2c-device-addr">' + esc(dev.address) + '</span> <span class="i2c-device-name">' + esc(dev.name) + '</span></div>';
-    });
-    html += '</div></div>';
-  }
-
-  // Legend
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">Color Legend</div>';
-  html += '<div style="display:flex;flex-wrap:wrap;gap:12px">';
-  Object.keys(colors).forEach(function(cat) {
-    html += '<div style="display:flex;align-items:center;gap:5px;font-size:.82rem"><span class="pin-color" style="background:' + colors[cat] + '"></span>' + esc(cat) + '</div>';
-  });
-  html += '</div></div>';
-
-  return html;
-}
-
-function renderComponent(compId) {
-  var c = docsData.components[compId];
-  if (!c) return '<div class="info-loading">Documentation not available for ' + esc(compId) + '</div>';
-
-  var html = '<div class="info-title">' + esc(c.name || compId) + '</div>';
-  html += '<div class="info-subtitle">' + esc(c.description || '') + '</div>';
-
-  // Chip info
-  html += '<div class="info-section">';
-  html += '<div class="info-section-title">General</div>';
-  if (c.chip) html += '<div class="info-field"><span class="info-field-label">Chip</span><span class="info-field-value">' + esc(c.chip) + '</span></div>';
-  if (c.manufacturer) html += '<div class="info-field"><span class="info-field-label">Manufacturer</span><span class="info-field-value">' + esc(c.manufacturer) + '</span></div>';
-  if (c.i2c_address) html += '<div class="info-field"><span class="info-field-label">I2C Address</span><span class="info-field-value"><code style="background:#e8f0fe;padding:1px 5px;border-radius:3px">' + esc(c.i2c_address) + '</code></span></div>';
-  if (c.i2c_address_alternates && c.i2c_address_alternates.length > 0) {
-    html += '<div class="info-field"><span class="info-field-label">Alt Addresses</span><span class="info-field-value">' + c.i2c_address_alternates.map(function(a) { return '<code style="background:#f1f3f4;padding:1px 4px;border-radius:3px">' + esc(a) + '</code>'; }).join(' ') + '</span></div>';
-  }
-  if (c.datasheet_url) html += '<div class="info-field"><span class="info-field-label">Datasheet</span><span class="info-field-value"><a href="' + esc(c.datasheet_url) + '" target="_blank" rel="noopener">' + esc(c.datasheet_url) + '</a></span></div>';
-  if (c.related_modules) html += '<div class="info-field"><span class="info-field-label">Related Modules</span><span class="info-field-value">' + c.related_modules.map(function(m) { return '<code style="background:#e8f0fe;padding:1px 4px;border-radius:3px">' + esc(m) + '</code>'; }).join(' ') + '</span></div>';
-  html += '</div>';
-
-  // Specs
-  if (c.specs) {
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">Specifications</div>';
-    html += '<div class="specs-grid">';
-    Object.keys(c.specs).forEach(function(key) {
-      var label = key.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
-      html += '<div class="spec-item"><span class="spec-key">' + esc(label) + '</span><span class="spec-val">' + esc(String(c.specs[key])) + '</span></div>';
-    });
-    html += '</div></div>';
-  }
-
-  // Pins
-  if (c.pins && c.pins.length > 0) {
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">Pin Connections</div>';
-    html += '<div class="comp-pins-list">';
-    c.pins.forEach(function(p) {
-      html += '<div class="comp-pin">';
-      html += '<div class="comp-pin-name">' + esc(p.pin_name) + '</div>';
-      if (p.connected_to) html += '<div class="comp-pin-conn">' + esc(p.connected_to) + '</div>';
-      if (p.function) html += '<div class="comp-pin-func">' + esc(p.function) + '</div>';
-      html += '</div>';
-    });
-    html += '</div></div>';
-  }
-
-  // Tips
-  var tips = c.tips || [];
-  if (tips.length > 0) {
-    html += '<div class="info-section">';
-    html += '<div class="info-section-title">Tips</div>';
-    html += '<ul class="tips-list">';
-    tips.forEach(function(t) {
-      html += '<li>' + esc(t) + '</li>';
-    });
-    html += '</ul></div>';
-  }
-
-  return html;
-}
-
-function esc(str) {
-  if (str === null || str === undefined) return '';
-  var div = document.createElement('div');
-  div.appendChild(document.createTextNode(String(str)));
-  return div.innerHTML;
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  LOG CONSOLE
-// ═══════════════════════════════════════════════════════════════
-var consoleOutput = document.getElementById('console-output');
-var consoleLineCount = document.getElementById('console-line-count');
-var consoleLogCounts = { info: 0, warn: 0, error: 0, debug: 0 };
-var consoleAutoscroll = document.getElementById('console-autoscroll');
-var consoleClearBtn = document.getElementById('console-clear-btn');
-var consoleLineTotal = 0;
-var CONSOLE_MAX_LINES = 3000;
-
-function classifyLogLine(text) {
-  if (text.indexOf('| ERROR') !== -1 || text.indexOf('Traceback') !== -1 || text.indexOf('Exception') !== -1) return 'error';
-  if (text.indexOf('| WARNING') !== -1) return 'warn';
-  if (text.indexOf('| DEBUG') !== -1) return 'debug';
-  if (text.indexOf('| INFO') !== -1) return 'info';
-  return '';
-}
-
-function updateLogCountBadge() {
-  var el = document.getElementById('console-log-counts');
-  if (!el) return;
-  var parts = [];
-  if (consoleLogCounts.info > 0) parts.push('<span style="color:#8ab4f8">[i] - ' + consoleLogCounts.info + '</span>');
-  if (consoleLogCounts.warn > 0) parts.push('<span style="color:#fdd663">[w] - ' + consoleLogCounts.warn + '</span>');
-  if (consoleLogCounts.error > 0) parts.push('<span style="color:#f28b82">[e] - ' + consoleLogCounts.error + '</span>');
-  if (consoleLogCounts.debug > 0) parts.push('<span style="color:#808080">[d] - ' + consoleLogCounts.debug + '</span>');
-  el.innerHTML = parts.length ? parts.join(' &nbsp;') : '';
-}
-
-function appendConsoleLine(text, _ts) {
-  if (!consoleOutput) return;
-  var div = document.createElement('div');
-  var cls = classifyLogLine(text);
-  div.className = 'log-line' + (cls ? ' log-' + cls : '');
-  div.textContent = text;
-  if (cls && consoleLogCounts[cls] !== undefined) {
-    consoleLogCounts[cls]++;
-    updateLogCountBadge();
-  }
-  consoleOutput.appendChild(div);
-  consoleLineTotal++;
-  // Trim old lines
-  while (consoleOutput.childElementCount > CONSOLE_MAX_LINES) {
-    consoleOutput.removeChild(consoleOutput.firstChild);
-  }
-  if (consoleLineCount) consoleLineCount.textContent = consoleLineTotal + ' lines';
-  // Auto-scroll
-  if (consoleAutoscroll && consoleAutoscroll.checked) {
-    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    if (d.pins) {
+      html += '<div class="info-section"><h3 class="info-section-title">Pin Connections</h3><div class="comp-pins-list">';
+      d.pins.forEach(function(p) {
+        html += '<div class="comp-pin"><div class="comp-pin-name">' + p.name + '</div><div class="comp-pin-conn">' + (p.connection || '') + '</div><div class="comp-pin-func">' + (p.function || '') + '</div></div>';
+      });
+      html += '</div></div>';
+    }
+    if (d.tips) {
+      html += '<div class="info-section"><h3 class="info-section-title">Tips</h3><ul class="tips-list">';
+      d.tips.forEach(function(t) { html += '<li>' + t + '</li>'; });
+      html += '</ul></div>';
+    }
+    if (d.i2c_address) {
+      html += '<div class="info-section"><h3 class="info-section-title">I2C Info</h3><div class="i2c-device-grid"><div class="i2c-device"><div class="i2c-device-addr">0x' + d.i2c_address.toString(16).toUpperCase() + '</div><div class="i2c-device-name">' + comp.name + '</div></div></div></div>';
+    }
+    main.innerHTML = html;
   }
 }
 
-if (consoleClearBtn) {
-  consoleClearBtn.addEventListener('click', function() {
-    if (consoleOutput) consoleOutput.innerHTML = '';
-    consoleLineTotal = 0;
-    consoleLogCounts = { info: 0, warn: 0, error: 0, debug: 0 };
-    if (consoleLineCount) consoleLineCount.textContent = '0 lines';
-    updateLogCountBadge();
-    sendCommand('clear_log', {});
+function populateComponentNav() {
+  var nav = document.getElementById('info-component-nav');
+  if (!nav || !docsData) return;
+  nav.innerHTML = '';
+  (docsData.index.components || []).forEach(function(c) {
+    var btn = document.createElement('button');
+    btn.className = 'info-comp-btn';
+    btn.dataset.doc = c.id;
+    btn.textContent = c.name;
+    btn.addEventListener('click', function() { showDocPage(c.id); });
+    nav.appendChild(btn);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  BLUETOOTH SCANNER & GAMEPAD PAIRING
-// ═══════════════════════════════════════════════════════════════
+var origLoadDocs = loadDocs;
+loadDocs = async function() {
+  await origLoadDocs();
+  populateComponentNav();
+};
 
-// Load saved BT status on page load
-fetch('/api/bt/status').then(function(r) { return r.json(); }).then(function(d) {
-  if (d.saved_mac) {
-    var info = document.getElementById('bt-saved-info');
-    if (info) info.textContent = 'Saved: ' + (d.saved_name || d.saved_mac);
+document.querySelectorAll('.info-nav-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    showDocPage(btn.dataset.doc);
+  });
+});
+
+var consoleAutoScroll = true;
+var consoleLineCount = 0;
+
+function appendConsoleLine(text, ts) {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  var line = document.createElement('div');
+  line.className = 'log-line';
+  if (ts) {
+    var d = new Date(ts * 1000);
+    text = d.toLocaleTimeString() + ' ' + text;
   }
-}).catch(function() {});
+  line.textContent = text;
+  if (text.indexOf('[ERROR]') !== -1 || text.indexOf('[error]') !== -1) line.classList.add('log-error');
+  else if (text.indexOf('[WARN') !== -1 || text.indexOf('[warn') !== -1) line.classList.add('log-warn');
+  else if (text.indexOf('[DEBUG]') !== -1 || text.indexOf('[debug]') !== -1) line.classList.add('log-debug');
+  else if (text.indexOf('[INFO]') !== -1 || text.indexOf('[info]') !== -1) line.classList.add('log-info');
+  output.appendChild(line);
+  consoleLineCount++;
+  var countEl = document.getElementById('console-line-count');
+  if (countEl) countEl.textContent = consoleLineCount + ' lines';
+  if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
+}
 
-document.getElementById('bt-scan-btn').addEventListener('click', function() {
-  var scanBtn = document.getElementById('bt-scan-btn');
-  var scanIndicator = document.getElementById('bt-scanning');
-  var deviceList = document.getElementById('bt-device-list');
-  var devicesDiv = document.getElementById('bt-devices');
-  
-  scanBtn.disabled = true;
-  scanBtn.textContent = 'Scanning...';
-  scanIndicator.style.display = 'block';
-  deviceList.style.display = 'none';
-  devicesDiv.innerHTML = '';
+document.getElementById('console-autoscroll').addEventListener('change', function() {
+  consoleAutoScroll = this.checked;
+});
 
+document.getElementById('console-clear-btn').addEventListener('click', function() {
+  var output = document.getElementById('console-output');
+  output.innerHTML = '';
+  consoleLineCount = 0;
+  var countEl = document.getElementById('console-line-count');
+  if (countEl) countEl.textContent = '0 lines';
+  sendCommand('clear_log', {});
+});
+
+var btScanBtn = document.getElementById('bt-scan-btn');
+var btAutoBtn = document.getElementById('bt-auto-btn');
+var btDisconnectBtn = document.getElementById('bt-disconnect-btn');
+var btDeviceList = document.getElementById('bt-device-list');
+var btDevices = document.getElementById('bt-devices');
+var btScanning = document.getElementById('bt-scanning');
+var btSavedInfo = document.getElementById('bt-saved-info');
+
+btScanBtn.addEventListener('click', function() {
+  btScanning.style.display = '';
+  btDeviceList.style.display = 'none';
+  btDevices.innerHTML = '';
   fetch('/api/bt/scan').then(function(r) { return r.json(); }).then(function(d) {
-    scanBtn.disabled = false;
-    scanBtn.textContent = 'Scan BT';
-    scanIndicator.style.display = 'none';
-    
-    if (d.ok && d.devices && d.devices.length > 0) {
-      deviceList.style.display = 'block';
+    btScanning.style.display = 'none';
+    if (d.devices && d.devices.length > 0) {
+      btDeviceList.style.display = '';
       d.devices.forEach(function(dev) {
         var item = document.createElement('div');
         item.className = 'bt-device-item' + (dev.is_gamepad ? ' bt-gamepad' : '');
-        item.innerHTML = '<div class="bt-device-name">' + esc(dev.name) + (dev.is_gamepad ? ' <span style="color:#1a73e8;font-size:.68rem">[Gamepad]</span>' : '') + '</div>' +
-          '<div class="bt-device-mac" style="font-size:.68rem;color:#5f6368">' + esc(dev.mac) + '</div>' +
-          '<button class="btn-sm btn-primary bt-connect-btn" data-mac="' + esc(dev.mac) + '" data-name="' + esc(dev.name) + '">Connect</button>';
-        devicesDiv.appendChild(item);
-      });
-      
-      // Add connect handlers
-      devicesDiv.querySelectorAll('.bt-connect-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-          var mac = btn.dataset.mac;
-          var name = btn.dataset.name;
-          btn.disabled = true;
-          btn.textContent = 'Connecting...';
-          fetch('/api/bt/connect', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mac: mac, name: name})
-          }).then(function(r) { return r.json(); }).then(function(d) {
-            if (d.ok) {
-              toast('Connected to ' + name, 'success');
-              btn.textContent = 'Connected';
-              btn.disabled = true;
-              var info = document.getElementById('bt-saved-info');
-              if (info) info.textContent = 'Saved: ' + name + ' (' + mac + ')';
-            } else {
-              toast('Connection failed: ' + (d.message || d.error || 'Unknown error'), 'error');
-              btn.disabled = false;
-              btn.textContent = 'Connect';
-            }
-          }).catch(function() {
-            toast('Connection request failed', 'error');
-            btn.disabled = false;
-            btn.textContent = 'Connect';
-          });
+        item.innerHTML = '<span class="bt-device-name">' + dev.name + ' (' + dev.mac + ')</span>' +
+          '<button class="btn-sm btn-primary bt-connect-btn" data-mac="' + dev.mac + '">Connect</button>';
+        btDevices.appendChild(item);
+        item.querySelector('.bt-connect-btn').addEventListener('click', function() {
+          fetch('/api/bt/connect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ mac: dev.mac }) }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) toast('Connected!', 'success');
+            else toast(d.error || 'Connection failed', 'error');
+          }).catch(function() { toast('Connection error', 'error'); });
         });
       });
     } else {
-      toast('No Bluetooth devices found', 'info');
+      btDeviceList.style.display = '';
+      btDevices.innerHTML = '<div style="font-size:.75rem;color:#5f6368;padding:4px">No devices found</div>';
     }
   }).catch(function() {
-    scanBtn.disabled = false;
-    scanBtn.textContent = 'Scan BT';
-    scanIndicator.style.display = 'none';
-    toast('Bluetooth scan failed', 'error');
+    btScanning.style.display = 'none';
+    toast('Scan failed', 'error');
   });
 });
 
-document.getElementById('bt-auto-btn').addEventListener('click', function() {
-  var btn = document.getElementById('bt-auto-btn');
-  btn.disabled = true;
-  btn.textContent = 'Connecting...';
-  fetch('/api/bt/auto_connect', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
-    btn.disabled = false;
-    btn.textContent = 'Auto-Connect';
-    if (d.ok) {
-      toast('Auto-connected to gamepad!', 'success');
-    } else {
-      toast('Auto-connect failed: ' + (d.error || d.message || 'No saved gamepad'), 'error');
-    }
-  }).catch(function() {
-    btn.disabled = false;
-    btn.textContent = 'Auto-Connect';
-    toast('Auto-connect request failed', 'error');
-  });
+btAutoBtn.addEventListener('click', function() {
+  fetch('/api/bt/auto_connect', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) toast('Auto-connect started', 'success');
+    else toast(d.error || 'Auto-connect failed', 'error');
+  }).catch(function() { toast('Auto-connect error', 'error'); });
 });
 
-document.getElementById('bt-disconnect-btn').addEventListener('click', function() {
-  fetch('/api/bt/disconnect', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.ok) {
-      toast('Gamepad disconnected', 'info');
-      document.getElementById('bt-disconnect-btn').style.display = 'none';
-    }
-  }).catch(function() {});
+btDisconnectBtn.addEventListener('click', function() {
+  fetch('/api/bt/disconnect', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) toast('Disconnected', 'success');
+    else toast(d.error || 'Disconnect failed', 'error');
+  }).catch(function() { toast('Disconnect error', 'error'); });
 });
 
-
+fetch('/api/bt/status').then(function(r) { return r.json(); }).then(function(d) {
+  if (d.saved_mac) {
+    btSavedInfo.textContent = 'Saved: ' + d.saved_mac;
+  }
+}).catch(function() {});
