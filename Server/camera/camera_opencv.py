@@ -26,6 +26,7 @@ class CVThread(threading.Thread):
         self._frame = None
         self._processing = False
         self.cv_mode = CV_NONE
+
         self.line_pos_1 = CV_LINE_POS_1
         self.line_pos_2 = CV_LINE_POS_2
         self.line_pos = [0, 0]
@@ -33,10 +34,14 @@ class CVThread(threading.Thread):
         self.frame_size = list(CAMERA_RESOLUTION)
         self.line_threshold = CV_LINE_THRESHOLD
         self.on_line_found = None
+
         self.hand_pos = [0, 0]
         self.hand_detected = False
         self.hand_area = 0
         self.on_hand_found = None
+
+        self.overlay_frame = None
+        self._overlay_lock = threading.Lock()
 
     def run(self):
         while self._running:
@@ -55,6 +60,10 @@ class CVThread(threading.Thread):
             return
         self._frame = frame
         self._flag.set()
+
+    def get_overlay(self):
+        with self._overlay_lock:
+            return self.overlay_frame.copy() if self.overlay_frame is not None else None
 
     def stop(self):
         self._running = False
@@ -76,11 +85,14 @@ class CVThread(threading.Thread):
             self._processing = False
 
     def _find_line(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        h, w = binary.shape[:2]
 
         indices1 = np.where(binary[self.line_pos_1] > 0)[0]
         indices2 = np.where(binary[self.line_pos_2] > 0)[0]
@@ -88,11 +100,33 @@ class CVThread(threading.Thread):
         pos2 = int(np.mean(indices2)) if len(indices2) > 0 else 0
         self.line_pos = [pos1, pos2]
         self.line_angle = math.degrees(math.atan2(pos2 - pos1, self.line_pos_1 - self.line_pos_2)) if pos1 > 0 and pos2 > 0 else 0
+
+        display = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        cv2.line(display, (0, self.line_pos_1), (w, self.line_pos_1), (0, 255, 0), 1)
+        cv2.line(display, (0, self.line_pos_2), (w, self.line_pos_2), (0, 255, 0), 1)
+        if pos1 > 0 and pos2 > 0:
+            cv2.line(display, (pos2, self.line_pos_2), (pos1, self.line_pos_1), (0, 0, 255), 2)
+            mid_x = (pos1 + pos2) // 2
+            mid_y = (self.line_pos_1 + self.line_pos_2) // 2
+            cv2.circle(display, (mid_x, mid_y), 6, (0, 0, 255), -1)
+        if pos1 > 0:
+            cv2.circle(display, (pos1, self.line_pos_1), 5, (0, 255, 0), -1)
+        if pos2 > 0:
+            cv2.circle(display, (pos2, self.line_pos_2), 5, (0, 255, 0), -1)
+        cv2.putText(display, "LINE_FOLLOW", (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        status = "TRACKING" if (pos1 > 0 or pos2 > 0) else "SEARCHING"
+        cv2.putText(display, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if status == "TRACKING" else (0, 0, 255), 2)
+
+        overlay_rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+        with self._overlay_lock:
+            self.overlay_frame = overlay_rgb
+
         if self.on_line_found:
             self.on_line_found(self.line_pos, self.line_angle)
 
     def _find_hand(self, frame):
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
 
         lower1 = np.array([0, 30, 50])
         upper1 = np.array([25, 255, 255])
@@ -103,7 +137,7 @@ class CVThread(threading.Thread):
         mask2 = cv2.inRange(hsv, lower2, upper2)
         hsv_mask = cv2.bitwise_or(mask1, mask2)
 
-        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+        ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
         ycrcb_lower = np.array([0, 133, 77])
         ycrcb_upper = np.array([255, 173, 127])
         ycrcb_mask = cv2.inRange(ycrcb, ycrcb_lower, ycrcb_upper)
@@ -121,6 +155,10 @@ class CVThread(threading.Thread):
         contours = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
 
         self.hand_detected = False
+        h, w = bgr.shape[:2]
+        cx_center, cy_center = w // 2, h // 2
+        display = bgr.copy()
+
         if contours:
             c = max(contours, key=cv2.contourArea)
             area = cv2.contourArea(c)
@@ -133,15 +171,51 @@ class CVThread(threading.Thread):
                     self.hand_area = int(area)
                     self.hand_detected = True
 
-                    shake = False
-                    if self.on_hand_found:
-                        shake = self.on_hand_found(self.hand_pos, self.hand_area)
-                    if shake:
-                        self.hand_detected = False
-                        return
-                    return
+                    cv2.drawContours(display, [c], -1, (0, 255, 0), 2)
 
-        if self.on_hand_found:
+                    cross_len = 25
+                    cv2.line(display, (cx - cross_len, cy), (cx + cross_len, cy), (0, 0, 255), 2)
+                    cv2.line(display, (cx, cy - cross_len), (cx, cy + cross_len), (0, 0, 255), 2)
+                    cv2.circle(display, (cx, cy), 18, (0, 0, 255), 2)
+                    cv2.circle(display, (cx, cy), 3, (0, 0, 255), -1)
+                    cv2.line(display, (cx_center, cy_center), (cx, cy), (0, 255, 255), 1)
+                    cv2.putText(display, f"LOCK ({cx},{cy})", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                else:
+                    cross_len = 20
+                    cv2.line(display, (cx_center - cross_len, cy_center), (cx_center + cross_len, cy_center), (0, 255, 0), 1)
+                    cv2.line(display, (cx_center, cy_center - cross_len), (cx_center, cy_center + cross_len), (0, 255, 0), 1)
+                    cv2.circle(display, (cx_center, cy_center), 15, (0, 255, 0), 1)
+                    cv2.putText(display, "SEARCHING...", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            else:
+                cross_len = 20
+                cv2.line(display, (cx_center - cross_len, cy_center), (cx_center + cross_len, cy_center), (0, 255, 0), 1)
+                cv2.line(display, (cx_center, cy_center - cross_len), (cx_center, cy_center + cross_len), (0, 255, 0), 1)
+                cv2.circle(display, (cx_center, cy_center), 15, (0, 255, 0), 1)
+                cv2.putText(display, "SEARCHING...", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        else:
+            cross_len = 20
+            cv2.line(display, (cx_center - cross_len, cy_center), (cx_center + cross_len, cy_center), (0, 255, 0), 1)
+            cv2.line(display, (cx_center, cy_center - cross_len), (cx_center, cy_center + cross_len), (0, 255, 0), 1)
+            cv2.circle(display, (cx_center, cy_center), 15, (0, 255, 0), 1)
+            cv2.putText(display, "SEARCHING...", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        cv2.putText(display, "HAND_TRACK", (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        overlay_rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+        with self._overlay_lock:
+            self.overlay_frame = overlay_rgb
+
+        shake = False
+        if self.hand_detected and self.on_hand_found:
+            shake = self.on_hand_found(self.hand_pos, self.hand_area)
+            if shake:
+                self.hand_detected = False
+                return
+        elif not self.hand_detected and self.on_hand_found:
             self.on_hand_found([0, 0], 0)
 
 
@@ -241,12 +315,17 @@ class Camera(BaseCamera):
                     continue
 
                 consecutive_errors = 0
-                frame = raw
 
                 if self.cv_thread.cv_mode != CV_NONE:
-                    self.cv_thread.submit_frame(frame.copy())
+                    self.cv_thread.submit_frame(raw.copy())
 
-                frame = self._draw_overlays(frame)
+                    overlay = self.cv_thread.get_overlay()
+                    if overlay is not None:
+                        frame = overlay
+                    else:
+                        frame = raw
+                else:
+                    frame = raw
 
                 ok, jpg = cv2.imencode('.jpg', frame,
                                        [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
@@ -267,55 +346,11 @@ class Camera(BaseCamera):
                 else:
                     time.sleep(0.05)
 
-    def _draw_overlays(self, frame):
-        mode = self.cv_thread.cv_mode
-        if mode == CV_LINE:
-            h, w = frame.shape[:2]
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-            display = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-            p1, p2 = self.cv_thread.line_pos
-            cv2.line(display, (0, self.cv_thread.line_pos_1), (w, self.cv_thread.line_pos_1), (0, 255, 0), 1)
-            cv2.line(display, (0, self.cv_thread.line_pos_2), (w, self.cv_thread.line_pos_2), (0, 255, 0), 1)
-            if p1 > 0 and p2 > 0:
-                cv2.line(display, (p2, self.cv_thread.line_pos_2), (p1, self.cv_thread.line_pos_1), (0, 0, 255), 2)
-                mid_x = (p1 + p2) // 2
-                mid_y = (self.cv_thread.line_pos_1 + self.cv_thread.line_pos_2) // 2
-                cv2.circle(display, (mid_x, mid_y), 6, (0, 0, 255), -1)
-            if p1 > 0:
-                cv2.circle(display, (p1, self.cv_thread.line_pos_1), 5, (0, 255, 0), -1)
-            if p2 > 0:
-                cv2.circle(display, (p2, self.cv_thread.line_pos_2), 5, (0, 255, 0), -1)
-            cv2.putText(display, mode, (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            return display
-        elif mode == CV_HAND:
-            h, w = frame.shape[:2]
-            cx_center, cy_center = w // 2, h // 2
-            if self.cv_thread.hand_detected:
-                hx, hy = self.cv_thread.hand_pos
-                cross_len = 25
-                cv2.line(frame, (hx - cross_len, hy), (hx + cross_len, hy), (0, 0, 255), 2)
-                cv2.line(frame, (hx, hy - cross_len), (hx, hy + cross_len), (0, 0, 255), 2)
-                cv2.circle(frame, (hx, hy), 18, (0, 0, 255), 2)
-                cv2.circle(frame, (hx, hy), 3, (0, 0, 255), -1)
-                cv2.line(frame, (cx_center, cy_center), (hx, hy), (0, 255, 255), 1)
-                cv2.putText(frame, f"LOCK ({hx},{hy})", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            else:
-                cross_len = 20
-                cv2.line(frame, (cx_center - cross_len, cy_center), (cx_center + cross_len, cy_center), (0, 255, 0), 1)
-                cv2.line(frame, (cx_center, cy_center - cross_len), (cx_center, cy_center + cross_len), (0, 255, 0), 1)
-                cv2.circle(frame, (cx_center, cy_center), 15, (0, 255, 0), 1)
-                cv2.putText(frame, "SEARCHING...", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, mode, (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            return frame
-        return frame
-
     def set_cv_mode(self, mode):
         self.cv_thread.cv_mode = mode
+        if mode == CV_NONE:
+            with self.cv_thread._overlay_lock:
+                self.cv_thread.overlay_frame = None
 
     def shutdown(self):
         self.cv_thread.stop()

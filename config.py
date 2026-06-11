@@ -166,8 +166,8 @@ SWITCH_PINS = [6, 13]
 # IR line-tracking sensors — GPIO pins for left / right infrared detectors.
 # Active LOW: sensor outputs 0 when over a dark line, 1 on white surface.
 # ---------------------------------------------------------------------------
-LINE_LEFT_PIN = 20
-LINE_RIGHT_PIN = 19
+LINE_LEFT_PIN = 19
+LINE_RIGHT_PIN = 20
 
 # ---------------------------------------------------------------------------
 # Camera settings — resolution, frame rate, JPEG quality, and flip options.
@@ -194,12 +194,9 @@ CV_LINE_THRESHOLD = 80
 # CV line-following — speed and steering tuning
 #   CV_LINE_FOLLOW_SPEED      — base motor speed (0-100 %).
 #   CV_LINE_FOLLOW_STEER_GAIN — multiplier for steering correction.
-#   CV_LINE_FOLLOW_SCAN_Y_RATIO — vertical position (0=top, 1=bottom)
-#     of the primary scan line, as a fraction of frame height.
 # ---------------------------------------------------------------------------
 CV_LINE_FOLLOW_SPEED = 35
 CV_LINE_FOLLOW_STEER_GAIN = 0.8
-CV_LINE_FOLLOW_SCAN_Y_RATIO = 0.7
 
 # ---------------------------------------------------------------------------
 # Voice control — Sherpa-NCNN offline speech recognition

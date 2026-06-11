@@ -13,9 +13,9 @@ except ImportError:
     HAS_WS = False
 
 from config import (
-    FLASK_PORT, WEBSOCKET_PORT, DEFAULT_SPEED,
-    SERVO_COUNT, SERVO_INIT_ANGLE,
-    DS4_ENABLED, HOTSPOT_IP, CAMERA_FPS,
+    FLASK_PORT, WEBSOCKET_PORT,
+    SERVO_COUNT,
+    DS4_ENABLED, HOTSPOT_IP,
 )
 from Server.hardware.motors import MotorController
 from Server.hardware.servos import ServoController

@@ -99,6 +99,13 @@ class SharedState:
                 self.camera.shutdown()
             except Exception:
                 pass
+        try:
+            from Server.routes.bluetooth_routes import _get_session
+            bt_session = _get_session()
+            if bt_session:
+                bt_session.shutdown()
+        except Exception:
+            pass
         for hw in (self.motors, self.servos, self.leds, self.switches,
                    self.ultrasonic, self.buzzer, self.oled, self.mpu6050, self.ds4):
             if hw:

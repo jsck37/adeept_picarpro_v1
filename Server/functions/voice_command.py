@@ -2,7 +2,10 @@ import threading
 import time
 import os
 import subprocess
-from config import VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE
+from config import (
+    VOICE_MODEL_PATH, VOICE_ALSA_DEVICE, VOICE_OUTPUT_FILE,
+    SERVO_CAM_PAN, SERVO_CAM_TILT, DEFAULT_SPEED,
+)
 from Server.logger import logger
 
 
@@ -116,17 +119,17 @@ class VoiceCommandController:
     def _execute_command(self, command):
         logger.info(f"[Voice] Command: {command}")
         if command == 'lookLeft':
-            self.servos.move_angle(0, -30)
+            self.servos.move_angle(SERVO_CAM_PAN, -30)
         elif command == 'lookRight':
-            self.servos.move_angle(0, 30)
+            self.servos.move_angle(SERVO_CAM_PAN, 30)
         elif command == 'camUp':
-            self.servos.move_angle(2, 15)
+            self.servos.move_angle(SERVO_CAM_TILT, 15)
         elif command == 'camDown':
-            self.servos.move_angle(2, -15)
+            self.servos.move_angle(SERVO_CAM_TILT, -15)
         elif command == 'forward':
-            self.motors.move(40, 'forward', 'no', 0.5)
+            self.motors.move(DEFAULT_SPEED, 'forward', 'no', 0.5)
         elif command == 'backward':
-            self.motors.move(40, 'backward', 'no', 0.5)
+            self.motors.move(DEFAULT_SPEED, 'backward', 'no', 0.5)
         elif command == 'stop':
             self.motors.stop()
 

@@ -330,12 +330,12 @@ def stage_4_pip_packages(debian_ver):
         ("OLED/LED",
          f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip3 install {pip_flag} flask websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip3 install {pip_flag} numpy pillow"),
         ("IMU Sensor / I2C Backend",
          f"sudo -H pip3 install {pip_flag} "
-         "mpu6050-raspberrypi robot-hat smbus2"),
+         "robot-hat smbus2"),
         ("DS4 Controller",
          f"sudo -H pip3 install {pip_flag} evdev"),
     ]
@@ -398,7 +398,11 @@ def stage_6_wifi_hotspot(debian_ver):
 
     if debian_ver < 12:
         print(f"  {YLW}[!]{RST} Hotspot requires Bookworm+ (Debian 12+)")
-        return
+        try:
+            from config import HOTSPOT_SSID
+            return HOTSPOT_SSID
+        except Exception:
+            return "Adeept_Robot"
 
     if not is_package_installed("network-manager"):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
@@ -514,6 +518,7 @@ WantedBy=multi-user.target
         print(f"  {GRN}[+]{RST} Hotspot service enabled")
     except Exception as e:
         print(f"  {RED}[!]{RST} Error: {e}")
+    return existing_ssid
 
 
 def stage_7_systemd_service():
@@ -570,7 +575,7 @@ def main():
     stage_3_apt_packages(debian_ver, codename)
     stage_4_pip_packages(debian_ver)
     stage_5_hardware_config()
-    stage_6_wifi_hotspot(debian_ver)
+    hotspot_ssid = stage_6_wifi_hotspot(debian_ver)
     stage_7_systemd_service()
 
     try:
@@ -670,7 +675,7 @@ def main():
     print(f"")
     print(f"  {BOLD}Network:{RST}")
     print(f"  IP:       {current_ip}")
-    print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
+    print(f"  Hotspot:  {hotspot_ssid}")
     print(f"")
     print(f"  {BOLD}Server:{RST}")
     print(f"  Path:     {thisPath}")

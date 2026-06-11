@@ -6,6 +6,8 @@ from config import (
 )
 from Server.logger import logger
 
+I2C_BUS_PINS = {0: (1, 0), 1: (3, 2)}
+
 
 class ServoController:
     def __init__(self):
@@ -24,7 +26,8 @@ class ServoController:
             import busio
             from adafruit_pca9685 import PCA9685
             from adafruit_motor import servo as adafruit_servo
-            self._i2c = busio.I2C(3, 2)
+            scl, sda = I2C_BUS_PINS.get(I2C_BUS, (3, 2))
+            self._i2c = busio.I2C(scl, sda)
             self._pca = PCA9685(self._i2c, address=PCA9685_SERVO_ADDR)
             self._pca.frequency = PCA9685_SERVO_FREQ
             time.sleep(0.1)
@@ -48,7 +51,7 @@ class ServoController:
                 except Exception as e:
                     logger.warning(f"[Servos] S{i} init failed: {e}")
             self._pwm_initialized = True
-            logger.info(f"[Servos] PCA9685 OK, {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
+            logger.info(f"[Servos] PCA9685 OK (bus={I2C_BUS}, scl={scl}, sda={sda}), {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
             logger.info(f"[Servos] Init angles: {self._init_angles}")
         except Exception as e:
             logger.error(f"[Servos] Failed: {e}")
@@ -73,7 +76,8 @@ class ServoController:
         if not self._pwm_initialized or sid >= SERVO_COUNT:
             return
         self._stop_thread(sid)
-        target = max(0, min(180, target))
+        max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
+        target = max(0, min(max_angle, target))
         if abs(self._angles[sid] - target) < 1:
             return
         def _run():
@@ -95,7 +99,8 @@ class ServoController:
 
     def set_init_angle(self, sid, angle):
         if 0 <= sid < SERVO_COUNT:
-            self._init_angles[sid] = max(0, min(180, angle))
+            max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
+            self._init_angles[sid] = max(0, min(max_angle, angle))
 
     def get_angle(self, sid):
         return self._angles[sid] if 0 <= sid < SERVO_COUNT else 0

@@ -16,7 +16,6 @@ spidev
 
 # Web Server
 flask
-flask_cors
 websockets
 loguru
 

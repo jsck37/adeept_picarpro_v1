@@ -4,7 +4,7 @@ from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     ULTRASONIC_ENABLED,
     LINE_LEFT_PIN, LINE_RIGHT_PIN,
-    CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN, CV_LINE_FOLLOW_SCAN_Y_RATIO,
+    CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION,
 )
 from Server.logger import logger
@@ -107,6 +107,7 @@ class AutonomousController:
         self.servos.stop_all()
         if self._camera:
             self._camera.cv_thread.on_hand_found = None
+            self._camera.cv_thread.on_line_found = None
             self._camera.set_cv_mode("none")
         self._current_mode = "none"
 
@@ -196,8 +197,7 @@ class AutonomousController:
             time.sleep(0.05)
 
     def _track_line_cv(self):
-        import cv2
-        import numpy as np
+        from Server.camera.camera_opencv import CV_LINE
 
         if not self._camera:
             logger.warning("[Auto] No camera for CV line following")
@@ -210,10 +210,11 @@ class AutonomousController:
             self.stop()
             return
 
+        self._camera.set_cv_mode(CV_LINE)
+
         frame_w = CAMERA_RESOLUTION[0]
         frame_h = CAMERA_RESOLUTION[1]
         centre_x = frame_w / 2.0
-        scan_y_ratio = CV_LINE_FOLLOW_SCAN_Y_RATIO
         speed = CV_LINE_FOLLOW_SPEED
         steer_gain = CV_LINE_FOLLOW_STEER_GAIN
 
@@ -232,52 +233,26 @@ class AutonomousController:
         line_lost_count = 0
         last_known_offset = 0.0
 
+        cv_line_pos = [0, 0]
+        cv_line_found = False
+
+        def on_line(pos, angle):
+            nonlocal cv_line_pos, cv_line_found
+            cv_line_pos = pos
+            cv_line_found = pos[0] > 0 or pos[1] > 0
+
+        self._camera.cv_thread.on_line_found = on_line
+
         while self._active:
             try:
                 ir_left, ir_right = self._read_ir()
 
-                raw = self._camera._picam.capture_array()
-                if raw is None or len(raw.shape) != 3:
-                    time.sleep(0.05)
-                    continue
-
-                frame = raw
-                h, w = frame.shape[:2]
-
-                gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-                gray = cv2.GaussianBlur(gray, (5, 5), 0)
-                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-                binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
-                binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-
-                roi_top = int(h * 0.4)
-                mask = np.zeros_like(binary)
-                mask[roi_top:, :] = 255
-                binary = cv2.bitwise_and(binary, binary, mask=mask)
-
-                scan_y = int(h * scan_y_ratio)
-                scan_y = max(roi_top, scan_y)
-
-                scan_y2 = int(h * (scan_y_ratio - 0.15))
-                scan_y2 = max(roi_top, scan_y2)
-
-                scan_line1 = binary[scan_y]
-                indices1 = np.where(scan_line1 > 0)[0]
-
-                scan_line2 = binary[scan_y2]
-                indices2 = np.where(scan_line2 > 0)[0]
-
-                all_indices = np.concatenate([indices1, indices2]) if len(indices2) > 0 else indices1
-
-                cv_line_found = len(all_indices) > 15
-
                 if cv_line_found:
-                    line_lost_count = 0
-                    line_centre = int(np.mean(all_indices))
-                    raw_offset = (line_centre - w / 2.0) / (w / 2.0)
+                    p1, p2 = cv_line_pos
+                    line_centre = (p1 + p2) / 2.0 if (p1 > 0 and p2 > 0) else (p1 if p1 > 0 else p2)
+                    raw_offset = (line_centre - centre_x) / centre_x if centre_x > 0 else 0.0
 
+                    line_lost_count = 0
                     smooth_offset = SMOOTH_ALPHA * raw_offset + (1 - SMOOTH_ALPHA) * smooth_offset
                     last_known_offset = smooth_offset
 
@@ -287,8 +262,6 @@ class AutonomousController:
                             ir_offset = -1.0
                         elif ir_right and not ir_left:
                             ir_offset = 1.0
-                        elif ir_left and ir_right:
-                            ir_offset = 0.0
 
                     if ir_offset != 0.0:
                         fused_offset = smooth_offset + ir_offset * IR_STEER_BIAS
@@ -491,7 +464,7 @@ class AutonomousController:
 
         self._camera.cv_thread.on_hand_found = on_hand
 
-        logger.info("[Auto] Hand tracking started (improved) — shake hand to stop")
+        logger.info("[Auto] Hand tracking started — shake hand to stop")
 
         try:
             while self._active and self._hand_shake_count == 0:

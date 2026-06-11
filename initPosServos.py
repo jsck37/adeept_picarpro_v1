@@ -6,7 +6,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
-    SERVO_COUNT, SERVO_INIT_ANGLE,
+    SERVO_COUNT,
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_GRIP_HIGH,

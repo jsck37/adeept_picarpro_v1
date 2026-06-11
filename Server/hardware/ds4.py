@@ -352,14 +352,14 @@ class DS4Controller:
             self._apply_move()
         elif code == ecodes.ABS_Y:
             raw = self._norm_axis(value, code)
-            self._ly = -raw if DS4_INVERT_LY else raw
+            self._ly = -raw if not DS4_INVERT_LY else raw
             self._apply_move()
         elif code == ecodes.ABS_RX:
             self._rx = self._norm_axis(value, code)
             self._apply_pan_tilt()
         elif code == ecodes.ABS_RY:
             raw = self._norm_axis(value, code)
-            self._ry = -raw if DS4_INVERT_RY else raw
+            self._ry = -raw if not DS4_INVERT_RY else raw
             self._apply_pan_tilt()
         elif code == ecodes.ABS_Z:
             self._l2 = self._norm_trigger(value, code)
