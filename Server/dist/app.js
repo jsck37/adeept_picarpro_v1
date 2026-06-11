@@ -1160,11 +1160,11 @@ var consoleLineCount = 0;
 
 function getLogLevel(text) {
   if (!text) return 'debug';
-  var t = text.toLowerCase();
-  if (t.indexOf('[error]') !== -1 || t.indexOf('[err') !== -1) return 'error';
-  if (t.indexOf('[warn') !== -1) return 'warn';
-  if (t.indexOf('[debug]') !== -1) return 'debug';
-  if (t.indexOf('[info]') !== -1) return 'info';
+  var t = text.toUpperCase();
+  if (t.indexOf('| ERROR') !== -1 || t.indexOf('[ERROR]') !== -1) return 'error';
+  if (t.indexOf('| WARNING') !== -1 || t.indexOf('| WARN') !== -1 || t.indexOf('[WARN') !== -1) return 'warn';
+  if (t.indexOf('| DEBUG') !== -1 || t.indexOf('[DEBUG]') !== -1) return 'debug';
+  if (t.indexOf('| INFO') !== -1 || t.indexOf('[INFO]') !== -1) return 'info';
   return 'info';
 }
 
