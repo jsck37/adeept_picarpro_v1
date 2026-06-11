@@ -2,27 +2,26 @@ var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
-  { id: 6, name: 'Crane Arm', min: 0,  max: 180, init: 80 },
+  { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
+  { id: 4, name: 'Servo 4',  min: 0,  max: 180, init: 90 },
   { id: 5, name: 'Crane Grip', min: 0, max: 190, init: 190 },
+  { id: 6, name: 'Crane Arm', min: 0,  max: 180, init: 80 },
 ];
 
 var hlMainOn = false;
 var hlLeftSignal = false;
 var hlRightSignal = false;
-var consoleWarnCount = 0;
-var consoleErrorCount = 0;
 var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 
 var craneArmClosed = false;
-var craneGripPositions = [
-  { label: 'Low',  angle: 0,   action: 'grip_low'  },
-  { label: 'Mid',  angle: 135, action: 'grip_mid'  },
-  { label: 'High', angle: 190, action: 'grip_high' }
-];
-var craneGripIndex = 2;
-var craneGripDirection = -1;
+var craneGripPosition = 'high';
+
+var logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
+var logFilters = { info: true, warn: true, error: true, debug: true };
+var logSortMode = 'time';
+var logLines = [];
 
 var hw = {
   motors: false, servos: false, leds: false, buzzer: false,
@@ -127,6 +126,9 @@ function wsConnect() {
             var el = document.getElementById('i2c-scan-result');
             if (el) showI2CResult(msgData, el);
           }
+          if (msgData.cmd === 'servo_get_limits' && msgData.ok) {
+            applyServoLimits(msgData.limits);
+          }
         }
       } catch(err) {}
     };
@@ -141,7 +143,6 @@ function wsConnect() {
 function sendCommand(cmd, params) {
   params = params || {};
   if (cmd === 'move' || cmd === 'speed') {
-    var webActiveParams = Object.assign({}, params);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({cmd: 'web_active', params: {active: true}}));
     }
@@ -210,6 +211,9 @@ function updateStatus(d) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
   }
+  if (d.servo_limits) {
+    applyServoLimits(d.servo_limits);
+  }
   var mpu = d.mpu6050;
   if (mpu) {
     document.getElementById('sb-imu').textContent = 'R:' + mpu.roll + '\u00B0 P:' + mpu.pitch + '\u00B0';
@@ -264,17 +268,11 @@ function updateStatus(d) {
       if (ds4Dot) ds4Dot.style.background = '#34a853';
       if (ds4Text) { ds4Text.textContent = 'Connected (speed ' + ds4.speed + '%)'; ds4Text.style.color = '#34a853'; }
       document.getElementById('bt-disconnect-btn').style.display = '';
-    } else if (ds4.enabled) {
+    } else {
       document.getElementById('sb-ds4').textContent = 'Searching';
       document.getElementById('sb-ds4').style.color = '#fdd663';
       if (ds4Dot) ds4Dot.style.background = '#fdd663';
       if (ds4Text) { ds4Text.textContent = 'Searching...'; ds4Text.style.color = '#fdd663'; }
-      document.getElementById('bt-disconnect-btn').style.display = 'none';
-    } else {
-      document.getElementById('sb-ds4').textContent = 'OFF';
-      document.getElementById('sb-ds4').style.color = '#9aa0a6';
-      if (ds4Dot) ds4Dot.style.background = '#9aa0a6';
-      if (ds4Text) { ds4Text.textContent = 'Disabled'; ds4Text.style.color = '#9aa0a6'; }
       document.getElementById('bt-disconnect-btn').style.display = 'none';
     }
     if (ds4.crane_arm_closed !== undefined) {
@@ -282,17 +280,20 @@ function updateStatus(d) {
       updateCraneArmUI();
     }
     if (ds4.crane_grip !== undefined) {
-      var gripIdx = craneGripPositions.findIndex(function(p) { return p.label.toLowerCase() === ds4.crane_grip; });
-      if (gripIdx >= 0) {
-        craneGripIndex = gripIdx;
-        if (craneGripIndex >= craneGripPositions.length - 1) craneGripDirection = -1;
-        else if (craneGripIndex <= 0) craneGripDirection = 1;
-      }
+      craneGripPosition = ds4.crane_grip;
       updateCraneGripUI();
     }
   } else {
     document.getElementById('sb-ds4').textContent = 'OFF';
     document.getElementById('sb-ds4').style.color = '#9aa0a6';
+  }
+  if (d.crane_arm_closed !== undefined) {
+    craneArmClosed = d.crane_arm_closed;
+    updateCraneArmUI();
+  }
+  if (d.crane_grip_position !== undefined) {
+    craneGripPosition = d.crane_grip_position;
+    updateCraneGripUI();
   }
 
   var voice = d.voice;
@@ -606,16 +607,47 @@ servoDefs.forEach(function(sd) {
   servoValues[sd.id] = sd.init;
   var item = document.createElement('div');
   item.className = 'servo-item';
+  item.setAttribute('data-servo-item', sd.id);
   item.innerHTML =
     '<label>' + sd.name + ' <span class="val" id="sv-' + sd.id + '">' + sd.init + '\u00B0</span></label>' +
+    '<div class="servo-limits-row">' +
+      '<label class="servo-limit-label">Min</label>' +
+      '<input type="number" class="servo-limit-input" id="sv-min-' + sd.id + '" value="' + sd.min + '" data-servo-limit-min="' + sd.id + '">' +
+      '<label class="servo-limit-label">Max</label>' +
+      '<input type="number" class="servo-limit-input" id="sv-max-' + sd.id + '" value="' + sd.max + '" data-servo-limit-max="' + sd.id + '">' +
+    '</div>' +
     '<input type="range" min="' + sd.min + '" max="' + sd.max + '" value="' + sd.init + '" data-servo="' + sd.id + '">';
   servoGrid.appendChild(item);
 });
+
+function applyServoLimits(limits) {
+  if (!limits) return;
+  Object.keys(limits).forEach(function(key) {
+    var sid = parseInt(key);
+    var lim = limits[key];
+    var minInput = document.getElementById('sv-min-' + sid);
+    var maxInput = document.getElementById('sv-max-' + sid);
+    var slider = servoGrid.querySelector('[data-servo="' + sid + '"]');
+    if (minInput && lim.min !== undefined) minInput.value = lim.min;
+    if (maxInput && lim.max !== undefined) maxInput.value = lim.max;
+    if (slider) {
+      slider.min = lim.min;
+      slider.max = lim.max;
+    }
+    var sd = servoDefs.find(function(s) { return s.id === sid; });
+    if (sd) {
+      sd.min = lim.min;
+      sd.max = lim.max;
+    }
+  });
+}
 
 servoGrid.addEventListener('input', function(e) {
   if (e.target.dataset.servo === undefined) return;
   var idx = parseInt(e.target.dataset.servo);
   var val = parseInt(e.target.value);
+  var sd = servoDefs.find(function(s) { return s.id === idx; });
+  if (sd) val = Math.max(sd.min, Math.min(sd.max, val));
   servoValues[idx] = val;
   document.getElementById('sv-' + idx).textContent = val + '\u00B0';
 });
@@ -624,6 +656,33 @@ servoGrid.addEventListener('change', function(e) {
   if (e.target.dataset.servo === undefined) return;
   var idx = parseInt(e.target.dataset.servo);
   sendCommand('servo', { id: idx, angle: servoValues[idx] });
+});
+
+servoGrid.addEventListener('change', function(e) {
+  if (e.target.dataset.servoLimitMin !== undefined) {
+    var sid = parseInt(e.target.dataset.servoLimitMin);
+    var minVal = parseInt(e.target.value) || 0;
+    var maxInput = document.getElementById('sv-max-' + sid);
+    var maxVal = maxInput ? parseInt(maxInput.value) : 180;
+    if (minVal > maxVal) { minVal = maxVal; e.target.value = minVal; }
+    var slider = servoGrid.querySelector('[data-servo="' + sid + '"]');
+    if (slider) slider.min = minVal;
+    var sd = servoDefs.find(function(s) { return s.id === sid; });
+    if (sd) sd.min = minVal;
+    sendCommand('servo_set_limits', { id: sid, min: minVal, max: maxVal });
+  }
+  if (e.target.dataset.servoLimitMax !== undefined) {
+    var sid = parseInt(e.target.dataset.servoLimitMax);
+    var maxVal = parseInt(e.target.value) || 180;
+    var minInput = document.getElementById('sv-min-' + sid);
+    var minVal = minInput ? parseInt(minInput.value) : 0;
+    if (maxVal < minVal) { maxVal = minVal; e.target.value = maxVal; }
+    var slider = servoGrid.querySelector('[data-servo="' + sid + '"]');
+    if (slider) slider.max = maxVal;
+    var sd = servoDefs.find(function(s) { return s.id === sid; });
+    if (sd) sd.max = maxVal;
+    sendCommand('servo_set_limits', { id: sid, min: minVal, max: maxVal });
+  }
 });
 
 document.getElementById('servo-home').addEventListener('click', function() {
@@ -637,16 +696,24 @@ document.getElementById('servo-home').addEventListener('click', function() {
   camPanAngle = 90;
   camTiltAngle = 90;
   craneArmClosed = false;
-  craneGripIndex = 2;
-  craneGripDirection = -1;
+  craneGripPosition = 'high';
   updateCraneArmUI();
   updateCraneGripUI();
   camJoystickKnob.classList.add('spring-back');
   camJoystickKnob.style.transform = 'translate(-50%, -50%)';
   camJoystickLabel.textContent = 'Camera \u2014 Arrows';
-  var gripSlider = servoGrid.querySelector('[data-servo="5"]');
-  if (gripSlider) { gripSlider.value = 190; document.getElementById('sv-5').textContent = '190\u00B0'; }
   setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); camJoystickKnob.classList.remove('dragging'); }, 300);
+});
+
+document.getElementById('servo-save-limits').addEventListener('click', function() {
+  servoDefs.forEach(function(sd) {
+    var minInput = document.getElementById('sv-min-' + sd.id);
+    var maxInput = document.getElementById('sv-max-' + sd.id);
+    if (minInput && maxInput) {
+      sendCommand('servo_set_limits', { id: sd.id, min: parseInt(minInput.value), max: parseInt(maxInput.value) });
+    }
+  });
+  toast('Servo limits saved', 'success');
 });
 
 var camJoystickContainer = document.getElementById('cam-joystick-container');
@@ -722,10 +789,9 @@ document.addEventListener('pointercancel', function() {
 });
 
 function updateHeadlightUI() {
-  var hlLeft = false, hlRight = false;
-  document.getElementById('hl-left').className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
-  document.getElementById('hl-right').className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
-  document.getElementById('hl-both').className = 'headlight-btn ' + (hlLeft && hlRight ? 'on' : 'off');
+  document.getElementById('hl-left').className = 'headlight-btn off';
+  document.getElementById('hl-right').className = 'headlight-btn off';
+  document.getElementById('hl-both').className = 'headlight-btn off';
   document.getElementById('hl-main').className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
   document.getElementById('hl-left-signal').className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
   document.getElementById('hl-right-signal').className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
@@ -819,45 +885,54 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
 });
 
 function updateCraneArmUI() {
-  var btn = document.getElementById('crane-arm-btn');
-  if (!btn) return;
+  var openBtn = document.getElementById('crane-arm-open');
+  var closeBtn = document.getElementById('crane-arm-close');
+  if (!openBtn || !closeBtn) return;
   if (craneArmClosed) {
-    btn.textContent = 'Release';
-    btn.style.background = '#34a853';
+    closeBtn.classList.add('active');
+    openBtn.classList.remove('active');
   } else {
-    btn.textContent = 'Grab';
-    btn.style.background = '#1a73e8';
+    openBtn.classList.add('active');
+    closeBtn.classList.remove('active');
   }
 }
 
 function updateCraneGripUI() {
-  var btn = document.getElementById('crane-grip-btn');
+  var lowBtn = document.getElementById('crane-grip-low');
+  var midBtn = document.getElementById('crane-grip-mid');
+  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
-  if (!btn) return;
-  var pos = craneGripPositions[craneGripIndex];
-  if (label) label.textContent = pos.label + ' (' + pos.angle + '\u00B0)';
-  btn.textContent = pos.label;
-  var colors = { 'Low': '#ea4335', 'Mid': '#fdd663', 'High': '#34a853' };
-  btn.style.background = colors[pos.label] || '#1a73e8';
-  if (pos.label === 'Mid') btn.style.color = '#202124';
-  else btn.style.color = '#fff';
+  if (!lowBtn) return;
+  lowBtn.classList.remove('active');
+  midBtn.classList.remove('active');
+  highBtn.classList.remove('active');
+  var angleMap = { low: 0, mid: 135, high: 190 };
+  var labelMap = { low: 'Low', mid: 'Mid', high: 'High' };
+  if (craneGripPosition === 'low') lowBtn.classList.add('active');
+  else if (craneGripPosition === 'mid') midBtn.classList.add('active');
+  else highBtn.classList.add('active');
+  if (label) label.textContent = labelMap[craneGripPosition] + ' (' + angleMap[craneGripPosition] + '\u00B0)';
 }
 
-document.getElementById('crane-arm-btn').addEventListener('click', function() {
-  craneArmClosed = !craneArmClosed;
-  var action = craneArmClosed ? 'arm_close' : 'arm_open';
-  sendCommand('crane', { action: action });
-  updateCraneArmUI();
+document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var action = btn.dataset.action;
+    if (action === 'arm_close') craneArmClosed = true;
+    else if (action === 'arm_open') craneArmClosed = false;
+    sendCommand('crane', { action: action });
+    updateCraneArmUI();
+  });
 });
 
-document.getElementById('crane-grip-btn').addEventListener('click', function() {
-  craneGripIndex += craneGripDirection;
-  if (craneGripIndex >= craneGripPositions.length - 1) craneGripDirection = -1;
-  else if (craneGripIndex <= 0) craneGripDirection = 1;
-  craneGripIndex = Math.max(0, Math.min(craneGripPositions.length - 1, craneGripIndex));
-  var pos = craneGripPositions[craneGripIndex];
-  sendCommand('crane', { action: pos.action });
-  updateCraneGripUI();
+document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var action = btn.dataset.action;
+    if (action === 'grip_low') craneGripPosition = 'low';
+    else if (action === 'grip_mid') craneGripPosition = 'mid';
+    else if (action === 'grip_high') craneGripPosition = 'high';
+    sendCommand('crane', { action: action });
+    updateCraneGripUI();
+  });
 });
 
 updateCraneArmUI();
@@ -953,7 +1028,7 @@ async function loadDocs() {
       fetch('/docs/pinout.json').then(function(r) { return r.json(); })
     ]);
 
-    var compFetches = (indexRes.components || []).map(function(c) {
+    var compFetches = (indexRes.components || []).concat(indexRes.additional_hardware || []).map(function(c) {
       if (c.documentation_path) {
         return fetch('/' + c.documentation_path).then(function(r) { return r.json(); }).then(function(d) {
           return { id: c.id, name: c.name, data: d };
@@ -1006,6 +1081,7 @@ function showDocPage(page) {
     var pin = docsData.pinout;
     var html = '<h2 class="info-title">GPIO Pinout</h2>';
     html += '<p class="info-subtitle">Raspberry Pi GPIO assignments for PiCar Pro</p>';
+    html += '<div style="margin-bottom:16px;text-align:center"><img src="/dist/rpi_pinout.png" alt="Raspberry Pi Pinout" style="max-width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)"></div>';
     if (pin.pins) {
       html += '<table class="pin-table"><thead><tr><th>GPIO</th><th>Function</th><th>Component</th><th>Notes</th></tr></thead><tbody>';
       pin.pins.forEach(function(p) {
@@ -1056,7 +1132,8 @@ function populateComponentNav() {
   var nav = document.getElementById('info-component-nav');
   if (!nav || !docsData) return;
   nav.innerHTML = '';
-  (docsData.index.components || []).forEach(function(c) {
+  var allComps = (docsData.index.components || []).concat(docsData.index.additional_hardware || []);
+  allComps.forEach(function(c) {
     var btn = document.createElement('button');
     btn.className = 'info-comp-btn';
     btn.dataset.doc = c.id;
@@ -1081,28 +1158,84 @@ document.querySelectorAll('.info-nav-btn').forEach(function(btn) {
 var consoleAutoScroll = true;
 var consoleLineCount = 0;
 
+function getLogLevel(text) {
+  if (!text) return 'debug';
+  var t = text.toLowerCase();
+  if (t.indexOf('[error]') !== -1 || t.indexOf('[err') !== -1) return 'error';
+  if (t.indexOf('[warn') !== -1) return 'warn';
+  if (t.indexOf('[debug]') !== -1) return 'debug';
+  if (t.indexOf('[info]') !== -1) return 'info';
+  return 'info';
+}
+
 function appendConsoleLine(text, ts) {
   var output = document.getElementById('console-output');
   if (!output) return;
+  var level = getLogLevel(text);
+  logCounts[level] = (logCounts[level] || 0) + 1;
+  updateLogCounters();
+
   var line = document.createElement('div');
-  line.className = 'log-line';
+  line.className = 'log-line log-' + level;
+  line.dataset.level = level;
   if (ts) {
     var d = new Date(ts * 1000);
     text = d.toLocaleTimeString() + ' ' + text;
   }
   line.textContent = text;
-  if (text.indexOf('[ERROR]') !== -1 || text.indexOf('[error]') !== -1) { line.classList.add('log-error'); consoleErrorCount++; }
-  else if (text.indexOf('[WARN') !== -1 || text.indexOf('[warn') !== -1) { line.classList.add('log-warn'); consoleWarnCount++; }
-  else if (text.indexOf('[DEBUG]') !== -1 || text.indexOf('[debug]') !== -1) line.classList.add('log-debug');
-  else if (text.indexOf('[INFO]') !== -1 || text.indexOf('[info]') !== -1) line.classList.add('log-info');
+  line.style.display = logFilters[level] ? '' : 'none';
   output.appendChild(line);
+  logLines.push({ el: line, level: level, ts: ts || Date.now() / 1000 });
   consoleLineCount++;
   var countEl = document.getElementById('console-line-count');
   if (countEl) countEl.textContent = consoleLineCount + ' lines';
-  var countsEl = document.getElementById('console-log-counts');
-  if (countsEl) countsEl.textContent = '[w] - ' + consoleWarnCount + ', [e] - ' + consoleErrorCount;
   if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
 }
+
+function updateLogCounters() {
+  ['info', 'warn', 'error', 'debug'].forEach(function(level) {
+    var el = document.getElementById('log-count-' + level);
+    if (el) el.textContent = logCounts[level] || 0;
+  });
+}
+
+function applyLogFilters() {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  output.querySelectorAll('.log-line').forEach(function(line) {
+    var level = line.dataset.level || 'info';
+    line.style.display = logFilters[level] ? '' : 'none';
+  });
+}
+
+function applyLogSort() {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  var lines = Array.from(output.querySelectorAll('.log-line'));
+  var levelOrder = { error: 0, warn: 1, info: 2, debug: 3 };
+  if (logSortMode === 'level') {
+    lines.sort(function(a, b) {
+      var la = levelOrder[a.dataset.level] || 2;
+      var lb = levelOrder[b.dataset.level] || 2;
+      return la - lb;
+    });
+  }
+  lines.forEach(function(line) { output.appendChild(line); });
+}
+
+document.querySelectorAll('.log-filter-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var level = btn.dataset.level;
+    logFilters[level] = !logFilters[level];
+    btn.classList.toggle('active', logFilters[level]);
+    applyLogFilters();
+  });
+});
+
+document.getElementById('log-sort-select').addEventListener('change', function() {
+  logSortMode = this.value;
+  applyLogSort();
+});
 
 document.getElementById('console-autoscroll').addEventListener('change', function() {
   consoleAutoScroll = this.checked;
@@ -1112,12 +1245,11 @@ document.getElementById('console-clear-btn').addEventListener('click', function(
   var output = document.getElementById('console-output');
   output.innerHTML = '';
   consoleLineCount = 0;
-  consoleWarnCount = 0;
-  consoleErrorCount = 0;
+  logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
+  logLines = [];
+  updateLogCounters();
   var countEl = document.getElementById('console-line-count');
   if (countEl) countEl.textContent = '0 lines';
-  var countsEl = document.getElementById('console-log-counts');
-  if (countsEl) countsEl.textContent = '[w] - 0, [e] - 0';
   sendCommand('clear_log', {});
 });
 

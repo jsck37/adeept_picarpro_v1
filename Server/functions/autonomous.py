@@ -2,7 +2,6 @@ import threading
 import time
 from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
-    ULTRASONIC_ENABLED,
     LINE_LEFT_PIN, LINE_RIGHT_PIN,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION,
@@ -53,6 +52,9 @@ class AutonomousController:
     def set_camera(self, camera):
         self._camera = camera
 
+    def _ultra_ok(self):
+        return self.ultrasonic and self.ultrasonic._initialized
+
     def _run(self):
         while self._running:
             self._flag.wait()
@@ -77,7 +79,7 @@ class AutonomousController:
 
     def start(self, mode):
         if mode in ("radarScan", "automatic", "keepDistance"):
-            if not ULTRASONIC_ENABLED or not self.ultrasonic._initialized:
+            if not self._ultra_ok():
                 logger.warning(f"[Auto] Cannot start {mode}: ultrasonic not available")
                 return False, "Ultrasonic sensor not available"
         if mode == "trackLine":
@@ -136,7 +138,7 @@ class AutonomousController:
             return None, None
 
     def _radar_scan(self):
-        if not ULTRASONIC_ENABLED:
+        if not self._ultra_ok():
             self.stop()
             return
         self._radar_data = []
@@ -154,7 +156,7 @@ class AutonomousController:
         self.stop()
 
     def _automatic(self):
-        if not ULTRASONIC_ENABLED:
+        if not self._ultra_ok():
             self.stop()
             return
         scan_servo = SERVO_STEERING
@@ -331,7 +333,7 @@ class AutonomousController:
                 time.sleep(0.1)
 
     def _keep_distance(self):
-        if not ULTRASONIC_ENABLED:
+        if not self._ultra_ok():
             self.stop()
             return
         target = 20

@@ -41,21 +41,38 @@ def process_command(state, data):
     elif cmd == 'servo':
         sid, ang = int(p.get('id', 0)), int(p.get('angle', 90))
         if 0 <= sid < SERVO_COUNT:
-            state.servos.set_angle(sid, max(0, min(180, ang)))
+            state.servos.set_angle(sid, ang)
             r = {'ok': True, 'id': sid, 'angle': ang}
 
     elif cmd == 'servo_calibrate':
         sid, ang = int(p.get('id', 0)), int(p.get('angle', 90))
         if 0 <= sid < SERVO_COUNT:
-            ang = max(0, min(180, ang))
             state.servos.set_init_angle(sid, ang)
             cal = load_servo_cal()
             cal[sid] = ang
             save_servo_cal(cal)
             r = {'ok': True, 'id': sid, 'init_angle': ang}
 
+    elif cmd == 'servo_set_limits':
+        sid = int(p.get('id', 0))
+        min_ang = int(p.get('min', 0))
+        max_ang = int(p.get('max', 180))
+        if 0 <= sid < SERVO_COUNT:
+            if state.servos.set_limits(sid, min_ang, max_ang):
+                r = {'ok': True, 'id': sid, 'min': min_ang, 'max': max_ang}
+            else:
+                r['error'] = 'Failed to set limits'
+        else:
+            r['error'] = 'Invalid servo id'
+
+    elif cmd == 'servo_get_limits':
+        limits = state.servos.get_limits() if state.servos else {}
+        r = {'ok': True, 'limits': limits}
+
     elif cmd == 'servo_home':
         state.servos.move_init()
+        state.crane_arm_closed = False
+        state.crane_grip_position = "high"
         r = {'ok': True}
 
     elif cmd == 'led':
@@ -83,14 +100,19 @@ def process_command(state, data):
     elif cmd == 'crane':
         act = p.get('action', '')
         actions = {
-            'arm_open': (SERVO_CRANE_ARM, CRANE_ARM_OPEN),
-            'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED),
-            'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW),
-            'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID),
-            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH),
+            'arm_open': (SERVO_CRANE_ARM, CRANE_ARM_OPEN, False, None),
+            'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED, True, None),
+            'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, None, 'low'),
+            'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID, None, 'mid'),
+            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH, None, 'high'),
         }
         if act in actions:
-            state.servos.set_angle(*actions[act])
+            servo_id, angle, arm_state, grip_state = actions[act]
+            state.servos.set_angle(servo_id, angle)
+            if arm_state is not None:
+                state.crane_arm_closed = arm_state
+            if grip_state is not None:
+                state.crane_grip_position = grip_state
             r = {'ok': True, 'action': act}
 
     elif cmd == 'switch':
@@ -197,7 +219,7 @@ def process_command(state, data):
 
     elif cmd == 'ds4_status':
         r = {'ok': True}
-        r.update(state.ds4.get_status() if state.ds4 else {'enabled': False, 'connected': False})
+        r.update(state.ds4.get_status() if state.ds4 else {'connected': False})
 
     elif cmd == 'get_log':
         after = p.get('after_ts', 0.0)

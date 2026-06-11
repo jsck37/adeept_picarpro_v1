@@ -11,6 +11,7 @@ class OLEDDisplay:
         self._lock = threading.Lock()
         self._initialized = False
         self._scroll_pos = 0
+        self._scroll_text = OLED_SCROLL_TEXT
         try:
             from luma.core.interface.serial import i2c
             from luma.oled.device import ssd1306
@@ -25,6 +26,10 @@ class OLEDDisplay:
         with self._lock:
             for i, l in enumerate(lines[:4]):
                 self._lines[i] = str(l)[:21]
+
+    def set_scroll_text(self, text):
+        with self._lock:
+            self._scroll_text = text
 
     def _loop(self):
         from PIL import Image, ImageDraw, ImageFont
@@ -41,8 +46,9 @@ class OLEDDisplay:
                 draw = ImageDraw.Draw(img)
                 with self._lock:
                     lines = self._lines[:3]
-                scroll = OLED_SCROLL_TEXT * 3
-                pos = self._scroll_pos % len(OLED_SCROLL_TEXT)
+                    scroll_text = self._scroll_text
+                scroll = scroll_text * 3
+                pos = self._scroll_pos % len(scroll_text) if scroll_text else 0
                 for i, l in enumerate(lines):
                     draw.text((0, i * 16), l, fill=255, font=font)
                 draw.text((0, 48), scroll[pos:pos+21], fill=255, font=font)

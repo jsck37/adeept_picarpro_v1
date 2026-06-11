@@ -1,9 +1,22 @@
 {
   "project": "PiCar Pro",
+  "project_name": "PiCar Pro v1",
   "version": "1.0.0",
   "description": "PiCar Pro — автономный робот-автомобиль на базе Raspberry Pi с сервокраном, ультразвуковым дальномером, IMU, OLED-дисплеем, адресуемыми RGB-светодиодами, ИК-датчиками линии и камерой",
   "generated": "2025-03-04",
   "board": "Raspberry Pi 3 Model B+",
+  "features": [
+    {"name": "Управление движением", "description": "Два мотора постоянного тока с дифференциальным рулевым управлением через L298N"},
+    {"name": "Сервокран-манипулятор", "description": "Рука (открыть/закрыть: 80°/150°) и захват (Low: 0°, Mid: 135°, High: 190°)"},
+    {"name": "Камера", "description": "Потоковое видео MJPEG, обнаружение линии (OpenCV), отслеживание руки"},
+    {"name": "Ультразвуковой дальномер", "description": "HC-SR04 для измерения расстояния (2–400 см) и автономной навигации"},
+    {"name": "IMU", "description": "MPU6050 — акселерометр + гироскоп, данные ориентации в реальном времени"},
+    {"name": "OLED-дисплей", "description": "SSD1306 128x64 — IP, температура CPU, RAM, бегущая строка"},
+    {"name": "RGB LED-лента", "description": "WS2812B 16 светодиодов — заливка, дыхание, поток, радуга, полиция"},
+    {"name": "Фары и сигналы", "description": "Основная фара (GPIO5), боковые фары (GPIO6, GPIO13), поворотники"},
+    {"name": "DS4 геймпад", "description": "Bluetooth DualShock 4 через evdev — полный контроль робота"},
+    {"name": "Голосовое управление", "description": "Sherpa-NCNN — автономное распознавание речи"}
+  ],
   "documentation_files": {
     "pinout": {
       "path": "pinout.json",
@@ -15,7 +28,7 @@
       "id": "pca9685",
       "name": "PCA9685 ШИМ-контроллер сервоприводов",
       "chip": "PCA9685",
-      "description": "16-канальный 12-битный ШИМ/серво-драйвер через I2C. Управляет сервоприводами рулевого управления (канал 0), панорамирования камеры (канал 1), наклона камеры (канал 2), а также краном-манипулятором: рука (канал 4) и захват (канал 5).",
+      "description": "16-канальный 12-битный ШИМ/серво-драйвер через I2C. Управляет сервоприводами рулевого управления (канал 0), панорамирования камеры (канал 1), наклона камеры (канал 2), а также краном-манипулятором: захват (канал 5) и рука (канал 6).",
       "datasheet_url": "https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf",
       "documentation_path": "components/pca9685.json",
       "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
@@ -26,7 +39,7 @@
       "id": "ads7830",
       "name": "ADS7830 8-канальный АЦП",
       "chip": "ADS7830",
-      "description": "8-канальный 8-битный АЦП через I2C. Измеряет напряжение батареи через делитель напряжения на одном из входных каналов. Примечание: в текущей версии кода модуль мониторинга батареи не реализован.",
+      "description": "8-канальный 8-битный АЦП через I2C. Измеряет напряжение батареи через делитель напряжения на одном из входных каналов.",
       "datasheet_url": "https://www.ti.com/lit/ds/symlink/ads7830.pdf",
       "documentation_path": "components/ads7830.json",
       "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
@@ -37,7 +50,7 @@
       "id": "ssd1306",
       "name": "SSD1306 OLED-дисплей",
       "chip": "SSD1306",
-      "description": "Монохромный OLED-дисплей 128x64 с интерфейсом I2C. Отображает IP-адрес, температуру CPU, использование RAM и бегущую строку с текстом. Обновляется каждые 0.3 секунды.",
+      "description": "Монохромный OLED-дисплей 128x64 с интерфейсом I2C. Отображает IP-адрес, температуру CPU, использование RAM и бегущую строку с текстом.",
       "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/SSD1306.pdf",
       "documentation_path": "components/ssd1306.json",
       "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
@@ -48,7 +61,7 @@
       "id": "mpu6050",
       "name": "MPU6050 6-осевой IMU",
       "chip": "MPU6050",
-      "description": "6-осевой акселерометр + гироскоп через I2C. Определяет наклон, движение и ориентацию робота. Данные обновляются каждые 100 мс. Поддерживает автоматический поиск на шине I2C и фоновое переподключение при ошибках.",
+      "description": "6-осевой акселерометр + гироскоп через I2C. Определяет наклон, движение и ориентацию робота. Поддерживает автоматический поиск на шине I2C и фоновое переподключение при ошибках.",
       "datasheet_url": "https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/",
       "documentation_path": "components/mpu6050.json",
       "pins_used": ["GPIO2 (SDA1)", "GPIO3 (SCL1)"],
@@ -59,7 +72,7 @@
       "id": "hcsr04",
       "name": "HC-SR04 Ультразвуковой датчик",
       "chip": "HC-SR04",
-      "description": "Ультразвуковой датчик расстояния (2–400 см) через GPIO. Отключён по умолчанию (ULTRASONIC_ENABLED=False). Используется для обнаружения препятствий и поддержки автономной навигации.",
+      "description": "Ультразвуковой датчик расстояния (2–400 см) через GPIO. Используется для обнаружения препятствий и поддержки автономной навигации.",
       "datasheet_url": "https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf",
       "documentation_path": "components/hcsr04.json",
       "pins_used": ["GPIO11 (TRIG)", "GPIO8 (ECHO)"],
@@ -70,7 +83,7 @@
       "id": "ws2812",
       "name": "WS2812B Адресуемая RGB-лента",
       "chip": "WS2812B",
-      "description": "Адресуемая RGB LED-лента из 16 светодиодов. Управляется библиотекой rpi_ws281x через аппаратный PWM0 на GPIO12 (пин 32). Имеется SPI-fallback через spidev. Поддерживает режимы: заливка, дыхание, поток, радуга, полицейская мигалка, colorWipe.",
+      "description": "Адресуемая RGB LED-лента из 16 светодиодов. Управляется библиотекой rpi_ws281x через аппаратный PWM0 на GPIO12 (пин 32). Поддерживает режимы: заливка, дыхание, поток, радуга, полицейская мигалка, colorWipe.",
       "datasheet_url": "https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf",
       "documentation_path": "components/ws2812.json",
       "pins_used": ["GPIO12 (PWM0, пин 32)"],
@@ -92,7 +105,7 @@
       "id": "camera",
       "name": "Модуль камеры Raspberry Pi v2",
       "chip": "IMX219",
-      "description": "8МП камера через MIPI CSI-2. Потоковое видео MJPEG, обнаружение линии (OpenCV), отслеживание руки (HSV-сегментация кожи). Разрешение 640x480 при 30 fps. Ленивая инициализация — камера запускается только при первом обращении.",
+      "description": "8МП камера через MIPI CSI-2. Потоковое видео MJPEG, обнаружение линии (OpenCV), отслеживание руки (HSV-сегментация кожи). Ленивая инициализация — камера запускается только при первом обращении.",
       "datasheet_url": "https://www.raspberrypi.com/documentation/accessories/camera.html",
       "documentation_path": "components/camera.json",
       "pins_used": ["MIPI CSI-2 разъём"],
@@ -104,10 +117,18 @@
     {
       "id": "buzzer",
       "name": "Пассивный зуммер",
-      "description": "Пассивный зуммер (BUZZER_PASSIVE=True) для звуковой обратной связи. Подключён к GPIO24 (пин 18). Поддерживает воспроизведение мелодий через ШИМ: гудок, «С днём рождения», полицейская сирена. Использует RPi.GPIO или gpiozero.TonalBuzzer.",
+      "description": "Пассивный зуммер (BUZZER_PASSIVE=True) для звуковой обратной связи. Подключён к GPIO24 (пин 18). Поддерживает воспроизведение мелодий через ШИМ: гудок, «С днём рождения», полицейская сирена.",
       "pins_used": ["GPIO24 (пин 18)"],
       "i2c_address": null,
       "related_modules": ["buzzer"]
+    },
+    {
+      "id": "headlight",
+      "name": "Основная фара (robot-hat)",
+      "description": "Основная фара на робот-шляпе, подключённая к GPIO5 (пин 29). Простой ON/OFF контроль через gpiozero.LED. Управляется кнопкой на веб-панели или кнопкой L1 на DS4.",
+      "pins_used": ["GPIO5 (пин 29)"],
+      "i2c_address": null,
+      "related_modules": ["switch"]
     },
     {
       "id": "switch",
@@ -120,7 +141,7 @@
     {
       "id": "line_tracker",
       "name": "ИК-датчики линии (2 шт.)",
-      "description": "2 ИК-рефлекторных датчика для движения по линии: GPIO20 (левый, пин 38), GPIO19 (правый, пин 35). Датчики выдают LOW (0) на чёрной линии и HIGH (1) на белом фоне. Используются в режимах trackLine и trackLineCV (совместно с OpenCV).",
+      "description": "2 ИК-рефлекторных датчика для движения по линии: GPIO20 (левый, пин 38), GPIO19 (правый, пин 35). Датчики выдают LOW (0) на чёрной линии и HIGH (1) на белом фоне. Используются в режимах trackLine и trackLineCV.",
       "pins_used": ["GPIO20", "GPIO19"],
       "i2c_address": null,
       "related_modules": ["line_tracker"]
@@ -128,7 +149,7 @@
     {
       "id": "ds4",
       "name": "Контроллер DualShock 4 (Bluetooth)",
-      "description": "Геймпад DS4 через Bluetooth и evdev. Левый стик — управление движением (инверсия Y + множитель скорости 1.4x). Правый стик — пан/тильт камеры. Кнопки: L1 — фары, R1 — зуммер, L2/R2 — поворотники, Cross — захват, Circle — рука, Triangle — CV-линия, Square — рука, Options — дрифт, PS — домой. Автопереподключение при разрыве.",
+      "description": "Геймпад DS4 через Bluetooth и evdev. Левый стик — управление движением (инверсия Y + множитель скорости 1.4x). Правый стик — пан/тильт камеры. Кнопки: Cross — рука (grab/release), Circle — захват (low/mid/high), Triangle — CV-линия, Square — отслеживание руки, L1 — фары, R1 — зуммер, L2/R2 — турбо, Dpad Up — фары, Dpad Down — радуга, Dpad Left/Right — поворотники, Options — полицейский дрифт, PS — домой. Автопереподключение при разрыве.",
       "pins_used": ["Bluetooth"],
       "i2c_address": null,
       "related_modules": ["ds4"]
@@ -168,6 +189,12 @@
       "module": "ws2812",
       "pins": {
         "DATA": {"gpio": 12, "pin": 32, "function": "PWM0 — данные WS2812B через rpi_ws281x (DMA)"}
+      }
+    },
+    "headlight": {
+      "module": "headlight",
+      "pins": {
+        "HEADLIGHT": {"gpio": 5, "pin": 29, "function": "Основная фара robot-hat (ON/OFF)"}
       }
     },
     "switches": {

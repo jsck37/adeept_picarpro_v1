@@ -1,8 +1,5 @@
 import json, os
-from config import (
-    DEFAULT_SPEED, SERVO_COUNT, SERVO_INIT_ANGLE,
-    ULTRASONIC_ENABLED,
-)
+from config import DEFAULT_SPEED, SERVO_COUNT, SERVO_INIT_ANGLE
 from Server.utils.system_info import SystemInfo
 
 SERVO_CAL_FILE = os.path.join(os.path.dirname(__file__), "servo_cal.json")
@@ -20,8 +17,13 @@ def load_servo_cal():
 
 def save_servo_cal(angles):
     try:
+        data = {}
+        if os.path.isfile(SERVO_CAL_FILE):
+            with open(SERVO_CAL_FILE) as f:
+                data = json.load(f)
+        data["init_angles"] = angles
         with open(SERVO_CAL_FILE, "w") as f:
-            json.dump({"init_angles": angles}, f, indent=2)
+            json.dump(data, f, indent=2)
     except Exception:
         pass
 
@@ -37,6 +39,8 @@ class SharedState:
         self.left_blinker = False
         self.right_blinker = False
         self.web_active = False
+        self.crane_arm_closed = False
+        self.crane_grip_position = "high"
 
     def init_camera(self):
         if not self.camera:
@@ -48,6 +52,7 @@ class SharedState:
         ram = info['ram']
         ultra_ok = self.ultrasonic and self.ultrasonic._initialized
         mpu_ok = self.mpu6050 and self.mpu6050.initialized
+        servo_limits = self.servos.get_limits() if self.servos else {}
         return {
             "cpu_temp": info["cpu_temp"],
             "cpu_usage": info["cpu_usage"],
@@ -60,7 +65,6 @@ class SharedState:
             "auto_active": self.autonomous.is_active() if self.autonomous else False,
             "auto_mode": self.autonomous._current_mode if self.autonomous else "none",
             "speed": self.speed,
-            "ultrasonic_enabled": ULTRASONIC_ENABLED,
             "hw": {
                 "motors": self.motors._initialized if self.motors else False,
                 "servos": self.servos._pwm_initialized if self.servos else False,
@@ -86,6 +90,9 @@ class SharedState:
                 "active": self.voice._active if self.voice else False,
                 "last_command": self.voice._last_command if self.voice else "",
             },
+            "servo_limits": servo_limits,
+            "crane_arm_closed": self.crane_arm_closed,
+            "crane_grip_position": self.crane_grip_position,
         }
 
     def shutdown_hardware(self):

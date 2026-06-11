@@ -1,5 +1,5 @@
 import threading, time
-from config import ULTRASONIC_ENABLED, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
+from config import ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
 from Server.logger import logger
 
 class UltrasonicSensor:
@@ -8,8 +8,6 @@ class UltrasonicSensor:
         self._distance = 0.0
         self._running = False
         self._thread = None
-        if not ULTRASONIC_ENABLED:
-            return
         try:
             from gpiozero import DistanceSensor
             self._sensor = DistanceSensor(echo=ULTRASONIC_ECHO, trigger=ULTRASONIC_TRIGGER, max_distance=ULTRASONIC_MAX_DISTANCE)
@@ -19,7 +17,7 @@ class UltrasonicSensor:
             self._thread.start()
             logger.info("[Ultrasonic] OK")
         except Exception as e:
-            logger.error(f"[Ultrasonic] Failed: {e}")
+            logger.warning(f"[Ultrasonic] Not available: {e}")
 
     def _loop(self):
         while self._running:

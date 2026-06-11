@@ -1,12 +1,33 @@
-import threading, time
+import json, os, threading, time
 from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
-    SERVO_INIT_ANGLES, SERVO_CRANE_GRIP, CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
+    SERVO_INIT_ANGLES, SERVO_CRANE_GRIP, SERVO_LIMITS,
+    CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 from Server.logger import logger
 
 I2C_BUS_PINS = {0: (1, 0), 1: (3, 2)}
+
+SERVO_CAL_FILE = os.path.join(os.path.dirname(__file__), '..', 'servo_cal.json')
+
+
+def _load_servo_cal():
+    try:
+        if os.path.isfile(SERVO_CAL_FILE):
+            with open(SERVO_CAL_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_servo_cal(data):
+    try:
+        with open(SERVO_CAL_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 
 class ServoController:
@@ -19,7 +40,27 @@ class ServoController:
         self._pwm_initialized = False
         self._servo_threads = [None] * SERVO_COUNT
         self._servo_flags = [threading.Event() for _ in range(SERVO_COUNT)]
+        self._limits = {}
+        for i in range(SERVO_COUNT):
+            if i in SERVO_LIMITS:
+                self._limits[i] = dict(SERVO_LIMITS[i])
+            else:
+                self._limits[i] = {"min": 0, "max": 180}
+        self._load_limits_from_cal()
         self._init_pca9685()
+
+    def _load_limits_from_cal(self):
+        cal = _load_servo_cal()
+        limits = cal.get("limits", {})
+        for k, v in limits.items():
+            idx = int(k)
+            if 0 <= idx < SERVO_COUNT:
+                self._limits[idx] = {"min": int(v.get("min", 0)), "max": int(v.get("max", 180))}
+
+    def _save_limits_to_cal(self):
+        cal = _load_servo_cal()
+        cal["limits"] = {str(k): v for k, v in self._limits.items()}
+        _save_servo_cal(cal)
 
     def _init_pca9685(self):
         try:
@@ -33,9 +74,11 @@ class ServoController:
             time.sleep(0.1)
             for i in range(SERVO_COUNT):
                 try:
+                    lim = self._limits.get(i, {"min": 0, "max": 180})
+                    actuation_range = max(lim["max"], 180)
                     self._servos[i] = adafruit_servo.Servo(
                         self._pca.channels[i], min_pulse=SERVO_MIN_PULSE,
-                        max_pulse=SERVO_MAX_PULSE, actuation_range=180)
+                        max_pulse=SERVO_MAX_PULSE, actuation_range=actuation_range)
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
                         if i == 6:
@@ -44,6 +87,7 @@ class ServoController:
                             init_angle = CRANE_GRIP_HIGH
                         else:
                             init_angle = SERVO_INIT_ANGLE
+                    init_angle = self._clamp(i, init_angle)
                     self._servos[i].angle = init_angle
                     self._angles[i] = init_angle
                     self._init_angles[i] = init_angle
@@ -53,14 +97,18 @@ class ServoController:
             self._pwm_initialized = True
             logger.info(f"[Servos] PCA9685 OK (bus={I2C_BUS}, scl={scl}, sda={sda}), {sum(s is not None for s in self._servos)}/{SERVO_COUNT} servos")
             logger.info(f"[Servos] Init angles: {self._init_angles}")
+            logger.info(f"[Servos] Limits: {self._limits}")
         except Exception as e:
             logger.error(f"[Servos] Failed: {e}")
+
+    def _clamp(self, sid, angle):
+        lim = self._limits.get(sid, {"min": 0, "max": 180})
+        return max(lim["min"], min(lim["max"], angle))
 
     def set_angle(self, sid, angle):
         if not self._pwm_initialized or sid >= SERVO_COUNT or self._servos[sid] is None:
             return
-        max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
-        angle = max(0, min(max_angle, angle))
+        angle = self._clamp(sid, angle)
         with self._lock:
             try:
                 self._servos[sid].angle = angle
@@ -76,8 +124,7 @@ class ServoController:
         if not self._pwm_initialized or sid >= SERVO_COUNT:
             return
         self._stop_thread(sid)
-        max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
-        target = max(0, min(max_angle, target))
+        target = self._clamp(sid, target)
         if abs(self._angles[sid] - target) < 1:
             return
         def _run():
@@ -99,11 +146,23 @@ class ServoController:
 
     def set_init_angle(self, sid, angle):
         if 0 <= sid < SERVO_COUNT:
-            max_angle = 190 if sid == SERVO_CRANE_GRIP else 180
-            self._init_angles[sid] = max(0, min(max_angle, angle))
+            self._init_angles[sid] = self._clamp(sid, angle)
 
     def get_angle(self, sid):
         return self._angles[sid] if 0 <= sid < SERVO_COUNT else 0
+
+    def get_limits(self, sid=None):
+        if sid is not None:
+            return self._limits.get(sid, {"min": 0, "max": 180})
+        return dict(self._limits)
+
+    def set_limits(self, sid, min_angle, max_angle):
+        if 0 <= sid < SERVO_COUNT:
+            self._limits[sid] = {"min": int(min_angle), "max": int(max_angle)}
+            self._save_limits_to_cal()
+            logger.info(f"[Servos] S{sid} limits set: {min_angle}-{max_angle}")
+            return True
+        return False
 
     def _stop_thread(self, sid):
         self._servo_flags[sid].clear()

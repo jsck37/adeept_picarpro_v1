@@ -9,7 +9,7 @@ except ImportError:
     HAS_EVDEV = False
 
 from config import (
-    DS4_ENABLED, DS4_DEVICE_NAME, DS4_DEADZONE,
+    DS4_DEVICE_NAME, DS4_DEADZONE,
     DS4_STEER_SENSITIVITY, DS4_CAM_SENSITIVITY,
     DS4_HEARTBEAT_TIMEOUT, DS4_WATCHDOG_INTERVAL, DS4_READ_TIMEOUT,
     DEFAULT_SPEED, SERVO_CAM_PAN, SERVO_CAM_TILT,
@@ -32,14 +32,12 @@ def _ensure_hid_sony():
                     return
     except Exception:
         pass
-
     try:
         subprocess.run(['modprobe', 'hid-sony'],
                        capture_output=True, text=True, timeout=5)
         logger.info("[DS4] Loaded hid-sony kernel module")
     except FileNotFoundError:
-        logger.warning("[DS4] modprobe not found — if DS4 keys don't respond, "
-                       "run: sudo modprobe hid-sony")
+        logger.warning("[DS4] modprobe not found — if DS4 keys don't respond, run: sudo modprobe hid-sony")
     except Exception as e:
         logger.warning(f"[DS4] Could not load hid-sony: {e}")
 
@@ -91,8 +89,8 @@ class DS4Controller:
 
     def start(self, motors, servos, leds, buzzer, switches,
               speed=DEFAULT_SPEED, shared_state=None, autonomous=None):
-        if not DS4_ENABLED or not HAS_EVDEV:
-            logger.warning("[DS4] Disabled or evdev missing")
+        if not HAS_EVDEV:
+            logger.warning("[DS4] evdev not installed, skipping gamepad")
             return
         self._motors, self._servos, self._leds = motors, servos, leds
         self._buzzer, self._switches = buzzer, switches
@@ -117,7 +115,6 @@ class DS4Controller:
     def get_status(self):
         grip_label = CRANE_GRIP_LABELS[self._crane_grip_index] if 0 <= self._crane_grip_index < len(CRANE_GRIP_LABELS) else 'unknown'
         return {
-            'enabled': DS4_ENABLED,
             'connected': self._connected,
             'speed': self._speed,
             'lx': round(self._lx, 2),
@@ -161,8 +158,7 @@ class DS4Controller:
                     candidates.append(dev)
 
             if not candidates:
-                logger.debug(f"[DS4] No DS4 candidates among {len(devices)} devices. "
-                             f"Names: {[d.name for d in devices]}")
+                logger.debug(f"[DS4] No DS4 candidates among {len(devices)} devices. Names: {[d.name for d in devices]}")
                 return None
             if len(candidates) == 1:
                 logger.info(f"[DS4] Single candidate: {candidates[0].name} @ {candidates[0].path}")
@@ -222,8 +218,7 @@ class DS4Controller:
             }
             keys = caps.get(ecodes.EV_KEY, [])
             key_names = [ecodes.KEY.get(k, ecodes.BTN.get(k, hex(k))) for k in keys[:20]]
-            logger.info(f"[DS4] Connected #{self._connect_count}: "
-                  f"{device.name} @ {device.path}")
+            logger.info(f"[DS4] Connected #{self._connect_count}: {device.name} @ {device.path}")
             logger.info(f"[DS4] Axes: {abs_info}")
             logger.info(f"[DS4] Keys: {key_names}")
         except Exception:
@@ -271,12 +266,10 @@ class DS4Controller:
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
                     if not self._device_alive():
-                        logger.warning(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
-                              f"and device gone — disconnecting")
+                        logger.warning(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) and device gone — disconnecting")
                         self._disconnect()
                     else:
-                        logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) "
-                              f"but device still present — resetting timer")
+                        logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) but device still present — resetting timer")
                         self._last_event_time = time.monotonic()
                 time.sleep(DS4_WATCHDOG_INTERVAL)
 
@@ -436,9 +429,13 @@ class DS4Controller:
                 angle = CRANE_ARM_CLOSED if self._crane_arm_closed else CRANE_ARM_OPEN
                 self._smooth_crane(SERVO_CRANE_ARM, angle)
                 logger.info(f"[DS4] Crane arm -> {'closed' if self._crane_arm_closed else 'open'} ({angle})")
+                if self._shared_state:
+                    self._shared_state.crane_arm_closed = self._crane_arm_closed
         elif code in (ecodes.BTN_EAST, ecodes.BTN_B):
             if self._servos:
                 self._cycle_crane_grip()
+                if self._shared_state:
+                    self._shared_state.crane_grip_position = CRANE_GRIP_LABELS[self._crane_grip_index]
         elif code == ecodes.BTN_TL:
             self._toggle_headlights()
         elif code == ecodes.BTN_TR:
@@ -451,6 +448,9 @@ class DS4Controller:
                 self._crane_arm_closed = False
                 self._crane_grip_index = 2
                 self._crane_grip_direction = -1
+                if self._shared_state:
+                    self._shared_state.crane_arm_closed = False
+                    self._shared_state.crane_grip_position = "high"
         elif code in (ecodes.BTN_START, ecodes.BTN_SELECT):
             self._toggle_police_turbo()
 

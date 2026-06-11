@@ -230,13 +230,16 @@
               <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="collapsible-body open" id="claw-body">
-              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm (squeeze/release)</div>
+              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm (grab/release)</div>
               <div class="btn-group" id="crane-arm-group">
-                <button class="gbtn" id="crane-arm-btn" style="background:#1a73e8;color:#fff">Grab</button>
+                <button class="gbtn crane-arm-btn" id="crane-arm-open" data-action="arm_open">Release</button>
+                <button class="gbtn crane-arm-btn" id="crane-arm-close" data-action="arm_close">Grab</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (10)</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (190°)</span></div>
               <div class="btn-group" id="crane-grip-group">
-                <button class="gbtn" id="crane-grip-btn" style="background:#34a853;color:#fff">High</button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-high" data-action="grip_high">High</button>
               </div>
             </div>
           </div>
@@ -272,6 +275,7 @@
             <div class="servo-grid" id="servo-grid"></div>
             <div class="servo-home-row">
               <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
+              <button class="btn-sm btn-primary" id="servo-save-limits">Save Limits</button>
             </div>
           </div>
         </div>
@@ -328,14 +332,14 @@
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main">Headlight</button>
             </div>
-            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600">Turn Signals</div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600;text-align:center">Turn Signals</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">
               <button class="headlight-btn off" id="hl-left-signal" style="font-size:.75rem">&#9664; Left</button>
-              <button class="headlight-btn off" id="hl-right-signal" style="font-size:.75rem">Right &#9654;</button>
               <button class="headlight-btn off" id="hl-both-signal" style="font-size:.75rem">Stop Both</button>
+              <button class="headlight-btn off" id="hl-right-signal" style="font-size:.75rem">Right &#9654;</button>
             </div>
-            <div style="margin-top:6px;font-size:.75rem;color:#5f6368">
-              <div style="display:flex;gap:12px">
+            <div style="margin-top:6px;font-size:.75rem;color:#5f6368;text-align:center">
+              <div style="display:flex;gap:12px;justify-content:center">
                 <span>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
                 <span>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
               </div>
@@ -419,7 +423,16 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         <span class="console-title">Log Console</span>
         <span class="console-line-count" id="console-line-count">0 lines</span>
-        <span class="console-line-count" id="console-log-counts"></span>
+      </div>
+      <div class="console-toolbar-center">
+        <button class="log-filter-btn log-filter-info active" data-level="info" title="INFO"><span class="log-filter-label">[i]</span> <span class="log-filter-count" id="log-count-info">0</span></button>
+        <button class="log-filter-btn log-filter-warn active" data-level="warn" title="WARNING"><span class="log-filter-label">[w]</span> <span class="log-filter-count" id="log-count-warn">0</span></button>
+        <button class="log-filter-btn log-filter-error active" data-level="error" title="ERROR"><span class="log-filter-label">[e]</span> <span class="log-filter-count" id="log-count-error">0</span></button>
+        <button class="log-filter-btn log-filter-debug active" data-level="debug" title="DEBUG"><span class="log-filter-label">[d]</span> <span class="log-filter-count" id="log-count-debug">0</span></button>
+        <select id="log-sort-select" class="log-sort-select" title="Sort order">
+          <option value="time">By Time</option>
+          <option value="level">By Level</option>
+        </select>
       </div>
       <div class="console-toolbar-right">
         <label class="console-autoscroll-label"><input type="checkbox" id="console-autoscroll" checked> Auto-scroll</label>

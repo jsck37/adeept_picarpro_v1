@@ -10,13 +10,6 @@ import os
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Ultrasonic sensor — set to False if the HC-SR04 module is not installed.
-# When disabled, ultrasonic-dependent features (radar, auto-obstacle, keepDistance)
-# will gracefully skip initialization.
-# ---------------------------------------------------------------------------
-ULTRASONIC_ENABLED = True
-
-# ---------------------------------------------------------------------------
 # Logging — if True, the server writes a rotating log file to logs/server.txt
 # (up to 100 MB, retained 7 days, compressed). If False, logs go to stderr.
 # ---------------------------------------------------------------------------
@@ -97,20 +90,35 @@ SERVO_CRANE_GRIP = 5
 #   can apply CRANE_ARM_OPEN and CRANE_GRIP_HIGH respectively.
 # ---------------------------------------------------------------------------
 SERVO_INIT_ANGLES = {
-    0: 90,   # steering — centre
-    1: 90,   # camera pan — centre
-    2: 90,   # camera tilt — centre
-    3: 90,   # unused
-    4: 90,   # unused
-    5: None, # crane grip — defaults to CRANE_GRIP_HIGH (raised)
-    6: None, # crane arm  — defaults to CRANE_ARM_OPEN (claw open)
+    0: 90,
+    1: 90,
+    2: 90,
+    3: 90,
+    4: 90,
+    5: None,
+    6: None,
+}
+
+# ---------------------------------------------------------------------------
+# Servo angle limits — per-channel min/max angle clamping.
+#   Each servo's movement range is clamped to these limits in
+#   ServoController.set_angle(). Can be overridden at runtime via
+#   the 'servo_set_limits' WebSocket command and persisted to servo_cal.json.
+# ---------------------------------------------------------------------------
+SERVO_LIMITS = {
+    0: {"min": 30, "max": 150},
+    1: {"min": 0, "max": 180},
+    2: {"min": 0, "max": 180},
+    3: {"min": 0, "max": 180},
+    4: {"min": 0, "max": 180},
+    5: {"min": 0, "max": 190},
+    6: {"min": 0, "max": 180},
 }
 
 # ---------------------------------------------------------------------------
 # Crane arm (channel 6) — claw open / close angles
 #   CRANE_ARM_OPEN   = 80   — claw fully open  (relaxed spring).
 #   CRANE_ARM_CLOSED = 150  — claw fully closed (gripping object).
-#   The arm only does open/close toggling, controlled by a single button.
 # ---------------------------------------------------------------------------
 CRANE_ARM_OPEN = 80
 CRANE_ARM_CLOSED = 150
@@ -120,16 +128,6 @@ CRANE_ARM_CLOSED = 150
 #   CRANE_GRIP_LOW  = 0    — arm fully lowered (picking up objects).
 #   CRANE_GRIP_MID  = 135  — arm at middle     (carrying position).
 #   CRANE_GRIP_HIGH = 190  — arm fully raised   (default / safe position).
-#
-#   Because grip is controlled by a single button (gamepad ▢ / web UI),
-#   it cycles through positions: low -> mid -> high -> mid -> low -> ...
-#   The direction reverses at each endpoint so every press moves
-#   to the next adjacent position.
-#
-#   NOTE: CRANE_GRIP_HIGH = 190 exceeds the standard 180-degree range,
-#   but the servo hardware and PCA9685 driver support it with the
-#   configured actuation_range. The ServoController.set_angle() clamp
-#   has been extended to allow up to 190 for grip positions.
 # ---------------------------------------------------------------------------
 CRANE_GRIP_LOW = 0
 CRANE_GRIP_MID = 135
@@ -144,7 +142,6 @@ BUZZER_PASSIVE = True
 
 # ---------------------------------------------------------------------------
 # HC-SR04 ultrasonic sensor — trigger / echo GPIO pins and max range (meters)
-# Only effective when ULTRASONIC_ENABLED = True.
 # ---------------------------------------------------------------------------
 ULTRASONIC_TRIGGER = 11
 ULTRASONIC_ECHO = 8
@@ -177,8 +174,6 @@ LINE_RIGHT_PIN = 20
 
 # ---------------------------------------------------------------------------
 # Camera settings — resolution, frame rate, JPEG quality, and flip options.
-# CAMERA_FLIP_HORIZONTAL / CAMERA_FLIP_VERTICAL — set True to mirror/flip
-# the image if the camera ribbon cable is inserted upside-down.
 # ---------------------------------------------------------------------------
 CAMERA_RESOLUTION = (640, 480)
 CAMERA_FPS = 45
@@ -188,9 +183,6 @@ CAMERA_FLIP_VERTICAL = False
 
 # ---------------------------------------------------------------------------
 # Computer Vision — line-following parameters
-#   CV_LINE_POS_1 / POS_2 — Y-coordinates (pixels from top) of two
-#     horizontal scan lines used to detect the centre of the black line.
-#   CV_LINE_THRESHOLD — binarisation threshold (0 = auto-Otsu).
 # ---------------------------------------------------------------------------
 CV_LINE_POS_1 = 440
 CV_LINE_POS_2 = 380
@@ -198,18 +190,12 @@ CV_LINE_THRESHOLD = 80
 
 # ---------------------------------------------------------------------------
 # CV line-following — speed and steering tuning
-#   CV_LINE_FOLLOW_SPEED      — base motor speed (0-100 %).
-#   CV_LINE_FOLLOW_STEER_GAIN — multiplier for steering correction.
 # ---------------------------------------------------------------------------
 CV_LINE_FOLLOW_SPEED = 35
 CV_LINE_FOLLOW_STEER_GAIN = 0.8
 
 # ---------------------------------------------------------------------------
 # Voice control — Sherpa-NCNN offline speech recognition
-#   VOICE_MODEL_PATH  — directory containing the NCNN model files.
-#   VOICE_ALSA_DEVICE — ALSA PCM device name for the microphone.
-#   VOICE_OUTPUT_FILE — temporary file where sherpa-ncnn writes
-#     recognised text; the server polls this file for new commands.
 # ---------------------------------------------------------------------------
 VOICE_MODEL_PATH = "/opt/sherpa-ncnn/model"
 VOICE_ALSA_DEVICE = "default"
@@ -217,18 +203,14 @@ VOICE_OUTPUT_FILE = "/tmp/picarpro_voice.txt"
 
 # ---------------------------------------------------------------------------
 # DualShock 4 / gamepad configuration
-#   DS4_ENABLED           — master switch; set False to disable gamepad.
 #   DS4_DEVICE_NAME       — substring to match in evdev device names.
-#   DS4_DEADZONE          — axis dead zone (0..1); sticks below this
-#     threshold report zero, preventing drift.
+#   DS4_DEADZONE          — axis dead zone (0..1).
 #   DS4_STEER_SENSITIVITY — multiplier for steering response.
 #   DS4_CAM_SENSITIVITY   — multiplier for camera pan/tilt speed.
-#   DS4_HEARTBEAT_TIMEOUT — seconds without any event before the
-#     watchdog declares the controller disconnected.
+#   DS4_HEARTBEAT_TIMEOUT — seconds without any event before disconnect.
 #   DS4_WATCHDOG_INTERVAL — how often the watchdog thread checks.
 #   DS4_READ_TIMEOUT      — select() timeout when reading events.
 # ---------------------------------------------------------------------------
-DS4_ENABLED = True
 DS4_DEVICE_NAME = "Wireless Controller"
 DS4_DEADZONE = 0.12
 DS4_STEER_SENSITIVITY = 1.0
@@ -239,13 +221,6 @@ DS4_READ_TIMEOUT = 2.0
 
 # ---------------------------------------------------------------------------
 # DS4 — axis inversion and speed tuning
-#   DS4_INVERT_LY / DS4_INVERT_RY — flip left/right stick Y axis.
-#     Useful if the controller is mounted upside-down.
-#   DS4_SPEED_MULT — multiplier applied to base speed when driving
-#     with the left stick (allows speeds > 100 % for short bursts).
-#   DS4_CRANE_STEP — degrees per step when smoothly moving crane servos.
-#   DS4_STEER_RANGE — maximum steering angle offset from centre (90 deg).
-#     90 +/- 60 => steering sweeps 30..150 degrees.
 # ---------------------------------------------------------------------------
 DS4_INVERT_LY = False
 DS4_INVERT_RY = False
@@ -261,9 +236,6 @@ FLASK_PORT = 5000
 
 # ---------------------------------------------------------------------------
 # WiFi Hotspot — fallback AP when no known WiFi is available.
-#   Only works on Bookworm+ (Debian 12+) with NetworkManager.
-#   The setup script creates a systemd service that auto-starts the
-#   hotspot if the Pi cannot connect to any saved WiFi network.
 # ---------------------------------------------------------------------------
 HOTSPOT_SSID = "Adeept_Robot"
 HOTSPOT_PASSWORD = "12345678"
@@ -271,14 +243,11 @@ HOTSPOT_IP = "10.42.0.1"
 
 # ---------------------------------------------------------------------------
 # Flask secret key — used for session signing.
-# Override via environment variable PICARPRO_SECRET_KEY in production.
 # ---------------------------------------------------------------------------
 SECRET_KEY = os.environ.get('PICARPRO_SECRET_KEY', 'picarpro')
 
 # ---------------------------------------------------------------------------
 # Steering angle map — maps direction commands to servo angles.
-# 90 = centre, 150 = full left, 30 = full right.
-# Used by both the web UI and WebSocket command handler.
 # ---------------------------------------------------------------------------
 STEER_MAP = {
     'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
@@ -293,9 +262,6 @@ OLED_SCROLL_TEXT = "modded by turik with <3 from 8241117 "
 
 # ---------------------------------------------------------------------------
 # Motion defaults
-#   DEFAULT_SPEED  — initial motor speed (0-100 %).
-#   TURN_RADIUS_MIN / MAX — clamping range for the differential steering
-#     radius parameter (0.2 = tight turn, 1.0 = gentle curve).
 # ---------------------------------------------------------------------------
 DEFAULT_SPEED = 50
 TURN_RADIUS_MIN = 0.2
