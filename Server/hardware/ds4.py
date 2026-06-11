@@ -498,6 +498,9 @@ class DS4Controller:
         if not self._motors or not self._servos:
             return
 
+        if self._shared_state and self._shared_state.web_active:
+            return
+
         lx, ly = self._lx, self._ly
 
         if self._turbo_active:
@@ -593,24 +596,24 @@ class DS4Controller:
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
 
-        STEP = 2
-
         if abs(rx) >= DS4_DEADZONE:
             current_pan = self._servos.get_angle(SERVO_CAM_PAN)
+            step = max(1, int(abs(rx) * 6 * DS4_CAM_SENSITIVITY))
             if rx > 0:
-                new_pan = min(180, current_pan + STEP)
+                new_pan = min(180, current_pan + step)
             else:
-                new_pan = max(0, current_pan - STEP)
+                new_pan = max(0, current_pan - step)
             if new_pan != current_pan:
                 self._servos.set_angle(SERVO_CAM_PAN, new_pan)
                 self._cam_pan = new_pan
 
         if abs(ry) >= DS4_DEADZONE:
             current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
+            step = max(1, int(abs(ry) * 5 * DS4_CAM_SENSITIVITY))
             if ry > 0:
-                new_tilt = min(180, current_tilt + STEP)
+                new_tilt = min(180, current_tilt + step)
             else:
-                new_tilt = max(0, current_tilt - STEP)
+                new_tilt = max(0, current_tilt - step)
             if new_tilt != current_tilt:
                 self._servos.set_angle(SERVO_CAM_TILT, new_tilt)
                 self._cam_tilt = new_tilt
@@ -662,10 +665,14 @@ class DS4Controller:
     def _start_left_blinker(self):
         if self._left_blinking:
             self._left_blinking = False
+            if self._shared_state:
+                self._shared_state.left_blinker = False
             if self._switches and self._switches._initialized:
                 self._switches.off(0)
             return
         self._left_blinking = True
+        if self._shared_state:
+            self._shared_state.left_blinker = True
 
         def _blink():
             while self._left_blinking and self._connected and self._running:
@@ -685,10 +692,14 @@ class DS4Controller:
     def _start_right_blinker(self):
         if self._right_blinking:
             self._right_blinking = False
+            if self._shared_state:
+                self._shared_state.right_blinker = False
             if self._switches and self._switches._initialized:
                 self._switches.off(1)
             return
         self._right_blinking = True
+        if self._shared_state:
+            self._shared_state.right_blinker = True
 
         def _blink():
             while self._right_blinking and self._connected and self._running:

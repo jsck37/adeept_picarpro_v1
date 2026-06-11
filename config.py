@@ -14,7 +14,7 @@ import os
 # When disabled, ultrasonic-dependent features (radar, auto-obstacle, keepDistance)
 # will gracefully skip initialization.
 # ---------------------------------------------------------------------------
-ULTRASONIC_ENABLED = False
+ULTRASONIC_ENABLED = True
 
 # ---------------------------------------------------------------------------
 # Logging — if True, the server writes a rotating log file to logs/server.txt
@@ -163,6 +163,12 @@ LED_BRIGHTNESS = 255
 SWITCH_PINS = [6, 13]
 
 # ---------------------------------------------------------------------------
+# Robot-hat headlight — GPIO pin for the main front headlight.
+# This is a simple ON/OFF light connected to pin 1 on the robot-hat board.
+# ---------------------------------------------------------------------------
+HEADLIGHT_PIN = 5
+
+# ---------------------------------------------------------------------------
 # IR line-tracking sensors — GPIO pins for left / right infrared detectors.
 # Active LOW: sensor outputs 0 when over a dark line, 1 on white surface.
 # ---------------------------------------------------------------------------
@@ -226,7 +232,7 @@ DS4_ENABLED = True
 DS4_DEVICE_NAME = "Wireless Controller"
 DS4_DEADZONE = 0.12
 DS4_STEER_SENSITIVITY = 1.0
-DS4_CAM_SENSITIVITY = 0.3
+DS4_CAM_SENSITIVITY = 1.2
 DS4_HEARTBEAT_TIMEOUT = 10.0
 DS4_WATCHDOG_INTERVAL = 3.0
 DS4_READ_TIMEOUT = 2.0

@@ -34,6 +34,9 @@ class SharedState:
         self.switches = self.oled = self.buzzer = self.mpu6050 = None
         self.autonomous = self.voice = self.camera = self.ds4 = None
         self.ws_clients = set()
+        self.left_blinker = False
+        self.right_blinker = False
+        self.web_active = False
 
     def init_camera(self):
         if not self.camera:
@@ -72,6 +75,11 @@ class SharedState:
                 "ds4": self.ds4.connected if self.ds4 else False,
                 "voice": self.voice._initialized if self.voice else False,
             },
+            "headlight": self.switches.headlight_state if self.switches and self.switches._initialized else False,
+            "left_blinker": self.left_blinker,
+            "right_blinker": self.right_blinker,
+            "ir_left": (self.autonomous.get_ir_values()[0] if self.autonomous else None),
+            "ir_right": (self.autonomous.get_ir_values()[1] if self.autonomous else None),
             "ds4": self.ds4.get_status() if self.ds4 else None,
             "voice": {
                 "available": self.voice._initialized if self.voice else False,

@@ -100,6 +100,52 @@ def process_command(state, data):
             (state.switches.on if st else state.switches.off)(sid)
             r = {'ok': True}
 
+    elif cmd == 'headlight':
+        action = p.get('action', 'toggle')
+        if state.switches and state.switches._initialized:
+            if action == 'on':
+                state.switches.headlight_on()
+            elif action == 'off':
+                state.switches.headlight_off()
+            else:
+                state.switches.headlight_toggle()
+            r = {'ok': True, 'headlight': state.switches.headlight_state}
+        else:
+            r['error'] = 'Switch module not available'
+
+    elif cmd == 'blinker':
+        side = p.get('side', '')
+        active = p.get('active', True)
+        if side == 'left':
+            state.left_blinker = active
+            if state.switches and state.switches._initialized:
+                if active:
+                    state.switches.on(0)
+                else:
+                    state.switches.off(0)
+            r = {'ok': True, 'left_blinker': state.left_blinker}
+        elif side == 'right':
+            state.right_blinker = active
+            if state.switches and state.switches._initialized:
+                if active:
+                    state.switches.on(1)
+                else:
+                    state.switches.off(1)
+            r = {'ok': True, 'right_blinker': state.right_blinker}
+        elif side == 'both_off':
+            state.left_blinker = False
+            state.right_blinker = False
+            if state.switches and state.switches._initialized:
+                state.switches.off(0)
+                state.switches.off(1)
+            r = {'ok': True, 'left_blinker': False, 'right_blinker': False}
+        else:
+            r['error'] = 'Unknown blinker side'
+
+    elif cmd == 'web_active':
+        state.web_active = p.get('active', True)
+        r = {'ok': True, 'web_active': state.web_active}
+
     elif cmd == 'cv_mode':
         mode_map = {
             'none': CV_NONE,

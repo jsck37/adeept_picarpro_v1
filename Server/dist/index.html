@@ -95,6 +95,13 @@
               <button class="gbtn" data-auto="keepDistance">Distance</button>
               <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
+            <div style="margin-top:8px;font-size:.75rem;color:#5f6368">
+              <div style="font-weight:600;margin-bottom:2px">IR Line Sensors</div>
+              <div style="display:flex;gap:12px">
+                <span>Left: <b id="ir-left-val">--</b></span>
+                <span>Right: <b id="ir-right-val">--</b></span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -311,16 +318,35 @@
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Headlights<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Module not found</span>
+            Headlights &amp; Signals<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Module not found</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="hl-body">
           <div id="hl-controls">
-            <div class="headlight-row">
-              <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
-              <button class="headlight-btn off" id="hl-both" data-port="both">Both</button>
-              <button class="headlight-btn off" id="hl-right" data-port="2">Right</button>
+            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Main Headlight (robot-hat)</div>
+            <div class="headlight-row" style="margin-bottom:10px">
+              <button class="headlight-btn off" id="hl-main">Headlight</button>
+            </div>
+            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600">Turn Signals</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="headlight-btn off" id="hl-left-signal" style="font-size:.75rem">&#9664; Left</button>
+              <button class="headlight-btn off" id="hl-right-signal" style="font-size:.75rem">Right &#9654;</button>
+              <button class="headlight-btn off" id="hl-both-signal" style="font-size:.75rem">Stop Both</button>
+            </div>
+            <div style="margin-top:6px;font-size:.75rem;color:#5f6368">
+              <div style="display:flex;gap:12px">
+                <span>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
+                <span>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
+              </div>
+            </div>
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid #e0e0e0">
+              <div style="font-size:.75rem;color:#5f6368;font-weight:600">Side Lights</div>
+              <div class="headlight-row" style="margin-top:6px">
+                <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
+                <button class="headlight-btn off" id="hl-both" data-port="both">Both</button>
+                <button class="headlight-btn off" id="hl-right" data-port="2">Right</button>
+              </div>
             </div>
           </div>
         </div>

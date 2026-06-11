@@ -121,11 +121,19 @@ class AutonomousController:
         if not self._ir_available:
             return False, False
         try:
-            left  = not self._ir_left.value
-            right = not self._ir_right.value
+            left  = not self._ir_right.value
+            right = not self._ir_left.value
             return left, right
         except Exception:
             return False, False
+
+    def get_ir_values(self):
+        if not self._ir_available:
+            return None, None
+        try:
+            return self._ir_left.value, self._ir_right.value
+        except Exception:
+            return None, None
 
     def _radar_scan(self):
         if not ULTRASONIC_ENABLED:
@@ -368,9 +376,11 @@ class AutonomousController:
         self.servos.set_angle(SERVO_CAM_TILT, 90)
         self.servos.set_angle(SERVO_STEERING, 90)
 
+        self.motors.stop()
+        logger.info("[Auto] Hand tracking: WHEELS DISABLED — camera tracking only")
+
         PAN_STEP = 4
         TILT_STEP = 3
-        STEER_STEP = 5
         DEADZONE = 0.06
         SMOOTH_ALPHA = 0.5
 
@@ -386,9 +396,6 @@ class AutonomousController:
             if area == 0:
                 time_since_seen = now - self._hand_last_seen
                 if time_since_seen > HAND_LOST_TIMEOUT:
-                    self.motors.stop()
-                    self.servos.set_angle(SERVO_STEERING, 90)
-                elif time_since_seen > HAND_REMEMBER:
                     pass
                 return False
 
@@ -432,39 +439,11 @@ class AutonomousController:
             self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
             self.servos.set_angle(SERVO_CAM_TILT, self._hand_tilt)
 
-            if self._hand_pan < 30 or self._hand_pan > 150:
-                if self._hand_pan < 30:
-                    steer_angle = max(30, 90 - STEER_STEP * 3)
-                    self.motors.move(25, 'forward', 'left', 0.35)
-                else:
-                    steer_angle = min(150, 90 + STEER_STEP * 3)
-                    self.motors.move(25, 'forward', 'right', 0.35)
-                self.servos.set_angle(SERVO_STEERING, steer_angle)
-
-                if self._hand_pan < 30:
-                    self._hand_pan += STEER_STEP
-                else:
-                    self._hand_pan -= STEER_STEP
-                self._hand_pan = max(0, min(180, self._hand_pan))
-                self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
-            else:
-                if abs(offset_x) > 0.25:
-                    if offset_x < 0:
-                        steer_angle = max(30, 90 - int(abs(offset_x) * STEER_STEP * 4))
-                        self.motors.move(20, 'forward', 'left', 0.35)
-                    else:
-                        steer_angle = min(150, 90 + int(abs(offset_x) * STEER_STEP * 4))
-                        self.motors.move(20, 'forward', 'right', 0.35)
-                    self.servos.set_angle(SERVO_STEERING, steer_angle)
-                else:
-                    self.motors.stop()
-                    self.servos.set_angle(SERVO_STEERING, 90)
-
             return False
 
         self._camera.cv_thread.on_hand_found = on_hand
 
-        logger.info("[Auto] Hand tracking started — shake hand to stop")
+        logger.info("[Auto] Hand tracking started (wheels disabled, camera only) — shake hand to stop")
 
         try:
             while self._active and self._hand_shake_count == 0:

@@ -3,20 +3,23 @@ var servoDefs = [
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
   { id: 6, name: 'Crane Arm', min: 0,  max: 180, init: 80 },
-  { id: 5, name: 'Crane Grip', min: 0, max: 180, init: 10 },
+  { id: 5, name: 'Crane Grip', min: 0, max: 190, init: 190 },
 ];
 
-var hlLeft = false;
-var hlRight = false;
+var hlMainOn = false;
+var hlLeftSignal = false;
+var hlRightSignal = false;
+var consoleWarnCount = 0;
+var consoleErrorCount = 0;
 var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 
 var craneArmClosed = false;
 var craneGripPositions = [
-  { label: 'Low',  angle: 120, action: 'grip_low'  },
-  { label: 'Mid',  angle: 65,  action: 'grip_mid'  },
-  { label: 'High', angle: 10,  action: 'grip_high' }
+  { label: 'Low',  angle: 0,   action: 'grip_low'  },
+  { label: 'Mid',  angle: 135, action: 'grip_mid'  },
+  { label: 'High', angle: 190, action: 'grip_high' }
 ];
 var craneGripIndex = 2;
 var craneGripDirection = -1;
@@ -137,6 +140,12 @@ function wsConnect() {
 
 function sendCommand(cmd, params) {
   params = params || {};
+  if (cmd === 'move' || cmd === 'speed') {
+    var webActiveParams = Object.assign({}, params);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({cmd: 'web_active', params: {active: true}}));
+    }
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({cmd: cmd, params: params}));
   } else {
@@ -145,7 +154,7 @@ function sendCommand(cmd, params) {
       'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
-      'voice': '/cmd/voice',
+      'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -214,6 +223,36 @@ function updateStatus(d) {
     document.getElementById('mpu-pitch').textContent = mpu.pitch.toFixed(1);
   } else {
     document.getElementById('sb-imu').textContent = 'N/A';
+  }
+  if (d.ir_left !== undefined && d.ir_left !== null) {
+    document.getElementById('ir-left-val').textContent = d.ir_left ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-left-val').style.color = d.ir_left ? '#ea4335' : '#34a853';
+  } else {
+    document.getElementById('ir-left-val').textContent = 'N/A';
+    document.getElementById('ir-left-val').style.color = '#9aa0a6';
+  }
+  if (d.ir_right !== undefined && d.ir_right !== null) {
+    document.getElementById('ir-right-val').textContent = d.ir_right ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-right-val').style.color = d.ir_right ? '#ea4335' : '#34a853';
+  } else {
+    document.getElementById('ir-right-val').textContent = 'N/A';
+    document.getElementById('ir-right-val').style.color = '#9aa0a6';
+  }
+  if (d.headlight !== undefined) {
+    hlMainOn = d.headlight;
+    document.getElementById('hl-main').className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+  }
+  if (d.left_blinker !== undefined) {
+    hlLeftSignal = d.left_blinker;
+    document.getElementById('hl-left-signal').className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+    var leftStatusEl = document.getElementById('blinker-left-status');
+    if (leftStatusEl) { leftStatusEl.textContent = hlLeftSignal ? 'ON' : 'OFF'; leftStatusEl.style.color = hlLeftSignal ? '#fdd663' : '#9aa0a6'; }
+  }
+  if (d.right_blinker !== undefined) {
+    hlRightSignal = d.right_blinker;
+    document.getElementById('hl-right-signal').className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
+    var rightStatusEl = document.getElementById('blinker-right-status');
+    if (rightStatusEl) { rightStatusEl.textContent = hlRightSignal ? 'ON' : 'OFF'; rightStatusEl.style.color = hlRightSignal ? '#fdd663' : '#9aa0a6'; }
   }
   var ds4 = d.ds4;
   if (ds4) {
@@ -605,6 +644,8 @@ document.getElementById('servo-home').addEventListener('click', function() {
   camJoystickKnob.classList.add('spring-back');
   camJoystickKnob.style.transform = 'translate(-50%, -50%)';
   camJoystickLabel.textContent = 'Camera \u2014 Arrows';
+  var gripSlider = servoGrid.querySelector('[data-servo="5"]');
+  if (gripSlider) { gripSlider.value = 190; document.getElementById('sv-5').textContent = '190\u00B0'; }
   setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); camJoystickKnob.classList.remove('dragging'); }, 300);
 });
 
@@ -681,20 +722,57 @@ document.addEventListener('pointercancel', function() {
 });
 
 function updateHeadlightUI() {
+  var hlLeft = false, hlRight = false;
   document.getElementById('hl-left').className = 'headlight-btn ' + (hlLeft ? 'on' : 'off');
   document.getElementById('hl-right').className = 'headlight-btn ' + (hlRight ? 'on' : 'off');
   document.getElementById('hl-both').className = 'headlight-btn ' + (hlLeft && hlRight ? 'on' : 'off');
+  document.getElementById('hl-main').className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+  document.getElementById('hl-left-signal').className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+  document.getElementById('hl-right-signal').className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
 }
 
+document.getElementById('hl-main').addEventListener('click', function() {
+  hlMainOn = !hlMainOn;
+  sendCommand('headlight', { action: hlMainOn ? 'on' : 'off' });
+  updateHeadlightUI();
+});
+
+document.getElementById('hl-left-signal').addEventListener('click', function() {
+  hlLeftSignal = !hlLeftSignal;
+  sendCommand('blinker', { side: 'left', active: hlLeftSignal });
+  updateHeadlightUI();
+});
+
+document.getElementById('hl-right-signal').addEventListener('click', function() {
+  hlRightSignal = !hlRightSignal;
+  sendCommand('blinker', { side: 'right', active: hlRightSignal });
+  updateHeadlightUI();
+});
+
+document.getElementById('hl-both-signal').addEventListener('click', function() {
+  hlLeftSignal = false;
+  hlRightSignal = false;
+  sendCommand('blinker', { side: 'both_off' });
+  updateHeadlightUI();
+});
+
 document.getElementById('hl-left').addEventListener('click', function() {
-  hlLeft = !hlLeft; sendCommand('switch', { id: 0, state: hlLeft }); updateHeadlightUI();
+  var currentState = this.classList.contains('on');
+  sendCommand('switch', { id: 0, state: !currentState });
+  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
 });
 document.getElementById('hl-right').addEventListener('click', function() {
-  hlRight = !hlRight; sendCommand('switch', { id: 1, state: hlRight }); updateHeadlightUI();
+  var currentState = this.classList.contains('on');
+  sendCommand('switch', { id: 1, state: !currentState });
+  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
 });
 document.getElementById('hl-both').addEventListener('click', function() {
-  var ns = !(hlLeft && hlRight); hlLeft = ns; hlRight = ns;
-  sendCommand('switch', { id: 0, state: hlLeft }); sendCommand('switch', { id: 1, state: hlRight }); updateHeadlightUI();
+  var bothOn = document.getElementById('hl-left').classList.contains('on') && document.getElementById('hl-right').classList.contains('on');
+  var ns = !bothOn;
+  sendCommand('switch', { id: 0, state: ns }); sendCommand('switch', { id: 1, state: ns });
+  document.getElementById('hl-left').className = 'headlight-btn ' + (ns ? 'on' : 'off');
+  document.getElementById('hl-right').className = 'headlight-btn ' + (ns ? 'on' : 'off');
+  this.className = 'headlight-btn ' + (ns ? 'on' : 'off');
 });
 
 function hexToRgb(hex) {
@@ -1013,14 +1091,16 @@ function appendConsoleLine(text, ts) {
     text = d.toLocaleTimeString() + ' ' + text;
   }
   line.textContent = text;
-  if (text.indexOf('[ERROR]') !== -1 || text.indexOf('[error]') !== -1) line.classList.add('log-error');
-  else if (text.indexOf('[WARN') !== -1 || text.indexOf('[warn') !== -1) line.classList.add('log-warn');
+  if (text.indexOf('[ERROR]') !== -1 || text.indexOf('[error]') !== -1) { line.classList.add('log-error'); consoleErrorCount++; }
+  else if (text.indexOf('[WARN') !== -1 || text.indexOf('[warn') !== -1) { line.classList.add('log-warn'); consoleWarnCount++; }
   else if (text.indexOf('[DEBUG]') !== -1 || text.indexOf('[debug]') !== -1) line.classList.add('log-debug');
   else if (text.indexOf('[INFO]') !== -1 || text.indexOf('[info]') !== -1) line.classList.add('log-info');
   output.appendChild(line);
   consoleLineCount++;
   var countEl = document.getElementById('console-line-count');
   if (countEl) countEl.textContent = consoleLineCount + ' lines';
+  var countsEl = document.getElementById('console-log-counts');
+  if (countsEl) countsEl.textContent = '[w] - ' + consoleWarnCount + ', [e] - ' + consoleErrorCount;
   if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
 }
 
@@ -1032,8 +1112,12 @@ document.getElementById('console-clear-btn').addEventListener('click', function(
   var output = document.getElementById('console-output');
   output.innerHTML = '';
   consoleLineCount = 0;
+  consoleWarnCount = 0;
+  consoleErrorCount = 0;
   var countEl = document.getElementById('console-line-count');
   if (countEl) countEl.textContent = '0 lines';
+  var countsEl = document.getElementById('console-log-counts');
+  if (countsEl) countsEl.textContent = '[w] - 0, [e] - 0';
   sendCommand('clear_log', {});
 });
 

@@ -117,4 +117,32 @@ def create_command_blueprint(state):
         r = process_command(state, {'cmd': 'voice', 'params': d})
         return jsonify(r)
 
+    @bp.route("/headlight", methods=["POST"])
+    def cmd_headlight():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'headlight', 'params': d})
+        return jsonify(r)
+
+    @bp.route("/blinker", methods=["POST"])
+    def cmd_blinker():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'blinker', 'params': d})
+        return jsonify(r)
+
+    @bp.route("/switch", methods=["POST"])
+    def cmd_switch():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'switch', 'params': d})
+        return jsonify(r)
+
+    @bp.route("/auto", methods=["POST"])
+    def cmd_auto():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'auto', 'params': d})
+        return jsonify(r)
+
     return bp
