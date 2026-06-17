@@ -2,7 +2,7 @@ import threading
 import time
 from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
-    LINE_LEFT_PIN, LINE_RIGHT_PIN,
+    LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION,
 )
@@ -10,6 +10,15 @@ from Server.logger import logger
 
 
 class AutonomousController:
+    """High-level autonomous modes (radar scan, line tracking, hand
+    tracking, distance hold, automatic obstacle avoidance).
+
+    The IR line tracker now uses all three sensors — left, middle,
+    right — matching the original Adeept PiCar-Pro wiring (GPIO 19,
+    16, 20).  The previous two-sensor implementation produced
+    unreliable steering because it could not tell "still on the line"
+    from "drifting off the line".
+    """
 
     def __init__(self, motors, servos, ultrasonic):
         self.motors = motors
@@ -26,21 +35,24 @@ class AutonomousController:
         self._current_mode = "none"
         self._radar_data = []
 
-        self._ir_left = None
-        self._ir_right = None
+        # --- IR line sensors (3) -------------------------------------
+        self._ir_left = self._ir_middle = self._ir_right = None
         self._ir_available = False
         try:
             from gpiozero import InputDevice
-            self._ir_left = InputDevice(LINE_LEFT_PIN)
-            self._ir_right = InputDevice(LINE_RIGHT_PIN)
+            self._ir_left   = InputDevice(LINE_LEFT_PIN)
+            self._ir_middle = InputDevice(LINE_MIDDLE_PIN)
+            self._ir_right  = InputDevice(LINE_RIGHT_PIN)
             self._ir_available = True
-            logger.info("[Auto] IR line sensors initialized (L=GPIO%d, R=GPIO%d)"
-                        % (LINE_LEFT_PIN, LINE_RIGHT_PIN))
+            logger.info("[Auto] IR line sensors OK "
+                        f"(L=GPIO{LINE_LEFT_PIN}, M=GPIO{LINE_MIDDLE_PIN}, "
+                        f"R=GPIO{LINE_RIGHT_PIN})")
         except Exception as e:
             logger.error(f"[Auto] IR sensors failed: {e}")
 
         self._camera = None
 
+        # Hand-tracking state (only used in trackHand mode).
         self._hand_pan = 90
         self._hand_tilt = 90
         self._hand_smooth_x = 0.0
@@ -86,13 +98,9 @@ class AutonomousController:
             if not self._ir_available:
                 logger.warning("[Auto] Cannot start trackLine: IR sensors not available")
                 return False, "Line tracker not available"
-        if mode == "trackLineCV":
+        if mode in ("trackLineCV", "trackHand"):
             if not self._camera:
-                logger.warning("[Auto] Cannot start trackLineCV: camera not available")
-                return False, "Camera not available"
-        if mode == "trackHand":
-            if not self._camera:
-                logger.warning("[Auto] Cannot start trackHand: camera not available")
+                logger.warning(f"[Auto] Cannot start {mode}: camera not available")
                 return False, "Camera not available"
 
         self.stop()
@@ -119,31 +127,45 @@ class AutonomousController:
     def get_radar_data(self):
         return self._radar_data
 
+    # ------------------------------------------------------------------
+    # IR sensor helpers
+    # ------------------------------------------------------------------
     def _read_ir(self):
+        """Return (left_on_line, middle_on_line, right_on_line).
+
+        Active-LOW sensors: ``value == 0`` means "over a dark line".
+        We return ``True`` when the sensor *sees* a line so the rest of
+        the code reads naturally.
+        """
         if not self._ir_available:
-            return False, False
+            return False, False, False
         try:
-            left  = not self._ir_right.value
-            right = not self._ir_left.value
-            return left, right
+            return (
+                not self._ir_left.value,
+                not self._ir_middle.value,
+                not self._ir_right.value,
+            )
         except Exception:
-            return False, False
+            return False, False, False
 
     def get_ir_values(self):
+        """Raw sensor values (0 = line, 1 = floor) for the status API."""
         if not self._ir_available:
-            return None, None
+            return None, None, None
         try:
-            return self._ir_left.value, self._ir_right.value
+            return self._ir_left.value, self._ir_middle.value, self._ir_right.value
         except Exception:
-            return None, None
+            return None, None, None
 
+    # ------------------------------------------------------------------
+    # Modes
+    # ------------------------------------------------------------------
     def _radar_scan(self):
         if not self._ultra_ok():
             self.stop()
             return
         self._radar_data = []
         scan_servo = SERVO_STEERING
-
         for angle_offset in range(-60, 61, 5):
             if not self._active:
                 break
@@ -151,7 +173,6 @@ class AutonomousController:
             time.sleep(0.1)
             distance = self.ultrasonic.get_last_distance()
             self._radar_data.append({'angle': angle_offset, 'distance': distance})
-
         self.servos.move_angle(scan_servo, 0)
         self.stop()
 
@@ -160,7 +181,6 @@ class AutonomousController:
             self.stop()
             return
         scan_servo = SERVO_STEERING
-
         while self._active:
             distance = self.ultrasonic.get_last_distance()
             if distance < 15:
@@ -187,21 +207,41 @@ class AutonomousController:
                 time.sleep(0.1)
 
     def _track_line(self):
+        """IR-only line follower (3 sensors), ported from the original
+        Adeept ``Functions.trackLineProcessing`` logic.
+
+        Truth table (1 = sensor sees line):
+            middle  left  right  -> action
+              1      *      *    -> go straight (or minor trim)
+              0      1      0    -> turn left
+              0      0      1    -> turn right
+              0      0      0    -> straight (line lost, drift forward)
+              0      1      1    -> straight (intersection / wide line)
+        """
         if not self._ir_available:
             logger.warning("[Auto] Line tracker sensors not available")
             self.stop()
             return
 
+        speed = 35
         while self._active:
-            left, right = self._read_ir()
+            left, middle, right = self._read_ir()
 
-            if left and right:
-                self.motors.move(35, 'forward', 'no', 0.5)
+            if middle:
+                # Mostly on the line — keep going, with a tiny trim if
+                # one side has lost it.
+                if left and not right:
+                    self.motors.move(speed, 'forward', 'left', 0.4)
+                elif right and not left:
+                    self.motors.move(speed, 'forward', 'right', 0.4)
+                else:
+                    self.motors.move(speed, 'forward', 'no', 0.5)
             elif left and not right:
-                self.motors.move(25, 'forward', 'left', 0.4)
+                self.motors.move(speed - 10, 'forward', 'left', 0.4)
             elif right and not left:
-                self.motors.move(25, 'forward', 'right', 0.4)
+                self.motors.move(speed - 10, 'forward', 'right', 0.4)
             else:
+                # Both off (or both on — treat as straight).
                 self.motors.move(15, 'forward', 'no', 0.5)
 
             time.sleep(0.05)
@@ -223,26 +263,21 @@ class AutonomousController:
         self._camera.set_cv_mode(CV_LINE)
 
         frame_w = CAMERA_RESOLUTION[0]
-        frame_h = CAMERA_RESOLUTION[1]
         centre_x = frame_w / 2.0
         speed = CV_LINE_FOLLOW_SPEED
         steer_gain = CV_LINE_FOLLOW_STEER_GAIN
 
         ir_available = self._ir_available
-        if ir_available:
-            logger.info(f"[Auto] CV line follow started (speed={speed}, gain={steer_gain}, IR sensors ON)")
-        else:
-            logger.info(f"[Auto] CV line follow started (speed={speed}, gain={steer_gain}, IR sensors OFF)")
+        logger.info(f"[Auto] CV line follow started "
+                    f"(speed={speed}, gain={steer_gain}, IR={'ON' if ir_available else 'OFF'})")
 
         IR_STEER_BIAS    = 0.25
         IR_SPEED_PENALTY = 0.3
+        SMOOTH_ALPHA     = 0.4
 
         smooth_offset = 0.0
-        SMOOTH_ALPHA  = 0.4
-
         line_lost_count = 0
         last_known_offset = 0.0
-
         cv_line_pos = [0, 0]
         cv_line_found = False
 
@@ -255,23 +290,26 @@ class AutonomousController:
 
         while self._active:
             try:
-                ir_left, ir_right = self._read_ir()
+                ir_left, ir_middle, ir_right = self._read_ir()
+
+                # Combine IR left/right into a single bias signal.
+                ir_offset = 0.0
+                if ir_available:
+                    if ir_left and not ir_right:
+                        ir_offset = -1.0
+                    elif ir_right and not ir_left:
+                        ir_offset = 1.0
 
                 if cv_line_found:
                     p1, p2 = cv_line_pos
-                    line_centre = (p1 + p2) / 2.0 if (p1 > 0 and p2 > 0) else (p1 if p1 > 0 else p2)
-                    raw_offset = (line_centre - centre_x) / centre_x if centre_x > 0 else 0.0
+                    line_centre = (p1 + p2) / 2.0 if (p1 > 0 and p2 > 0) \
+                        else (p1 if p1 > 0 else p2)
+                    raw_offset = (line_centre - centre_x) / centre_x \
+                        if centre_x > 0 else 0.0
 
                     line_lost_count = 0
                     smooth_offset = SMOOTH_ALPHA * raw_offset + (1 - SMOOTH_ALPHA) * smooth_offset
                     last_known_offset = smooth_offset
-
-                    ir_offset = 0.0
-                    if ir_available:
-                        if ir_left and not ir_right:
-                            ir_offset = -1.0
-                        elif ir_right and not ir_left:
-                            ir_offset = 1.0
 
                     if ir_offset != 0.0:
                         fused_offset = smooth_offset + ir_offset * IR_STEER_BIAS
@@ -297,10 +335,8 @@ class AutonomousController:
                                          max(0.2, 0.5 - fused_offset * 0.3))
                     else:
                         self.motors.move(actual_speed, 'forward', 'no', 0.5)
-
                 else:
                     line_lost_count += 1
-
                     if ir_available and (ir_left or ir_right):
                         if ir_left and not ir_right:
                             self.motors.move(20, 'forward', 'left', 0.3)
@@ -327,7 +363,6 @@ class AutonomousController:
                         self.servos.set_angle(SERVO_STEERING, 90)
 
                 time.sleep(0.03)
-
             except Exception as e:
                 logger.error(f"[Auto] CV line error: {e}")
                 time.sleep(0.1)
@@ -385,19 +420,14 @@ class AutonomousController:
         TILT_STEP = 3
         DEADZONE = 0.06
         SMOOTH_ALPHA = 0.5
-
         SHAKE_WINDOW = 1.5
         SHAKE_THRESHOLD = 5
-
         HAND_LOST_TIMEOUT = 2.0
-        HAND_REMEMBER = 0.5
 
         def on_hand(pos, area):
             now = time.time()
-
             if area == 0:
-                time_since_seen = now - self._hand_last_seen
-                if time_since_seen > HAND_LOST_TIMEOUT:
+                if now - self._hand_last_seen > HAND_LOST_TIMEOUT:
                     pass
                 return False
 
@@ -414,7 +444,8 @@ class AutonomousController:
             offset_y = self._hand_smooth_y
 
             self._hand_history.append((now, offset_x))
-            self._hand_history = [(t, ox) for t, ox in self._hand_history if now - t < SHAKE_WINDOW]
+            self._hand_history = [(t, ox) for t, ox in self._hand_history
+                                  if now - t < SHAKE_WINDOW]
             reversals = 0
             if len(self._hand_history) > 2:
                 prev_dir = None
@@ -440,11 +471,9 @@ class AutonomousController:
 
             self.servos.set_angle(SERVO_CAM_PAN, self._hand_pan)
             self.servos.set_angle(SERVO_CAM_TILT, self._hand_tilt)
-
             return False
 
         self._camera.cv_thread.on_hand_found = on_hand
-
         logger.info("[Auto] Hand tracking started (wheels disabled, camera only) — shake hand to stop")
 
         try:
@@ -463,7 +492,7 @@ class AutonomousController:
         self.stop()
         self._running = False
         self._flag.set()
-        for sensor in (self._ir_left, self._ir_right):
+        for sensor in (self._ir_left, self._ir_middle, self._ir_right):
             if sensor:
                 try:
                     sensor.close()

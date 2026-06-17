@@ -28,6 +28,10 @@
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
+<div id="low-voltage-banner" style="display:none;background:#ea4335;color:#fff;padding:8px 16px;font-weight:600;text-align:center;font-size:.9rem;animation:vblink 1s infinite">
+  Low voltage warning Please check your power supply
+</div>
+
 <header class="header">
   <div class="header-logo">
     <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
@@ -99,6 +103,7 @@
               <div style="font-weight:600;margin-bottom:2px">IR Line Sensors</div>
               <div style="display:flex;gap:12px">
                 <span>Left: <b id="ir-left-val">--</b></span>
+                <span>Middle: <b id="ir-middle-val">--</b></span>
                 <span>Right: <b id="ir-right-val">--</b></span>
               </div>
             </div>

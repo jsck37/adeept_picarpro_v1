@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import asyncio, os, select, signal, sys, threading, time
+import asyncio, os, select, sys, threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

@@ -130,6 +130,7 @@ class SimOLEDDisplay:
         self._initialized = True
         self._lines = ["PiCar Pro [SIM]", "Starting...", "", ""]
         self._scroll_text = ""
+        self._low_voltage = False
         self._running = True
         logger.info("[Sim:OLED] OK")
 
@@ -139,6 +140,11 @@ class SimOLEDDisplay:
 
     def set_scroll_text(self, text):
         self._scroll_text = text
+
+    def set_low_voltage(self, active: bool):
+        if active != self._low_voltage:
+            self._low_voltage = active
+            logger.warning(f"[Sim:OLED] Low-voltage warning: {'ON' if active else 'OFF'}")
 
     def shutdown(self):
         self._running = False

@@ -5,12 +5,11 @@ import os, signal, subprocess, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
-    FLASK_PORT, WEBSOCKET_PORT, HOTSPOT_SSID, HOTSPOT_IP,
-    OLED_SCROLL_TEXT, SERVO_COUNT,
+    FLASK_PORT, HOTSPOT_SSID, HOTSPOT_IP, SERVO_COUNT,
 )
 from Server.logger import logger
 from Server.state import SharedState, load_servo_cal
-from Server.network import get_ip, start_redirect_server, oled_loop
+from Server.network import get_ip, oled_loop
 
 
 BREATH_COLOR = (0, 100, 255)
@@ -50,7 +49,6 @@ def wait_for_wifi(oled, leds):
         leds.set_mode('off', (0, 0, 0))
 
     if oled and oled._initialized:
-        oled.set_scroll_text(OLED_SCROLL_TEXT)
         ip = get_ip()
         oled.set_lines([f"{ip}:{FLASK_PORT}", "WiFi connected!", "", ""])
 

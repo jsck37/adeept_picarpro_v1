@@ -22,8 +22,15 @@ loguru
 # Vision / Video
 numpy
 pillow
+opencv-python-headless
+picamera2
 
-# IMU Sensor — robot_hat (Adeept RobotHat) или smbus2 (fallback)
+# IMU sensor — primary (same library the original Adeept examples use).
+# Falls back to a built-in smbus2 driver if this package is unavailable.
+mpu6050
+
+# I2C backends (used as fallback for MPU6050 and as the main backend on
+# machines without the external mpu6050 package).
 robot-hat
 smbus2
 

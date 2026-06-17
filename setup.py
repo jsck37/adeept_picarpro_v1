@@ -332,10 +332,10 @@ def stage_4_pip_packages(debian_ver):
         ("Web Server",
          f"sudo -H pip3 install {pip_flag} flask websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip3 install {pip_flag} numpy pillow"),
+         f"sudo -H pip3 install {pip_flag} numpy pillow opencv-python-headless"),
         ("IMU Sensor / I2C Backend",
          f"sudo -H pip3 install {pip_flag} "
-         "robot-hat smbus2"),
+         "mpu6050 robot-hat smbus2"),
         ("DS4 Controller",
          f"sudo -H pip3 install {pip_flag} evdev"),
     ]

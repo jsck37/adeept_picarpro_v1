@@ -1,7 +1,12 @@
-import time
+import re, subprocess, time
 
 
 class SystemInfo:
+
+    # Cache of the last dmesg under-voltage check.
+    _last_voltage_check_ts = 0.0
+    _last_voltage_check_result = False
+    _VOLTAGE_CACHE_TTL = 1.5
 
     @staticmethod
     def get_cpu_temp():
@@ -69,12 +74,10 @@ class SystemInfo:
 
             total_mb = round(total / 1024)
             used_mb = round(used / 1024)
-            total_gb = round(total / (1024 * 1024), 2)
-            used_gb = round(used / (1024 * 1024), 2)
 
             return {
-                'total': total_gb,
-                'used': used_gb,
+                'total': round(total / (1024 * 1024), 2),
+                'used': round(used / (1024 * 1024), 2),
                 'percent': percent,
                 'total_mb': total_mb,
                 'used_mb': used_mb,
@@ -83,10 +86,101 @@ class SystemInfo:
             return {'total': 0, 'used': 0, 'percent': 0,
                     'total_mb': 0, 'used_mb': 0}
 
+    # ------------------------------------------------------------------
+    # Voltage / low-voltage detection
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _check_dmesg_under_voltage() -> bool:
+        """Returns True if dmesg shows a recent under-voltage event.
+
+        The Raspberry Pi firmware logs `Under-voltage detected!` to the
+        kernel ring buffer whenever the 5V rail drops below ~4.65V — this
+        is exactly the same source the desktop "Low voltage warning"
+        notification listens to.
+        """
+        try:
+            result = subprocess.run(
+                ['dmesg', '--ctime', '--color=never'],
+                capture_output=True, text=True, timeout=2.0,
+            )
+            if result.returncode != 0:
+                return False
+            # Only the last few hundred chars matter; if a warning was
+            # recently logged (or is still pending) it'll be there.
+            tail = result.stdout[-4096:]
+            return ('Under-voltage detected' in tail
+                    or 'under-voltage detected' in tail.lower())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _check_vcgencmd_under_voltage() -> bool:
+        """Fallback: read `vcgencmd measure_volts core` and threshold it.
+
+        The BCM2835/2837/2712 core rail is normally ~1.2V — if it sags
+        below the configured threshold the Pi is almost certainly
+        under-volted on the 5V rail.
+        """
+        try:
+            from config import LOW_VOLTAGE_THRESHOLD_V
+        except Exception:
+            LOW_VOLTAGE_THRESHOLD_V = 1.2
+        try:
+            result = subprocess.run(
+                ['vcgencmd', 'measure_volts', 'core'],
+                capture_output=True, text=True, timeout=2.0,
+            )
+            if result.returncode != 0:
+                return False
+            m = re.search(r'volt=([0-9.]+)V', result.stdout)
+            if not m:
+                return False
+            return float(m.group(1)) < LOW_VOLTAGE_THRESHOLD_V
+        except Exception:
+            return False
+
+    @staticmethod
+    def is_low_voltage() -> bool:
+        """Cached, single-source-of-truth low-voltage check.
+
+        Resolution order (controlled by ``VOLTAGE_CHECK_SOURCE`` in
+        ``config.py``):
+
+          * 'dmesg'    -> only dmesg scan
+          * 'vcgencmd' -> only vcgencmd measurement
+          * 'auto'     -> dmesg first; if dmesg is unavailable, fall
+                          back to vcgencmd.
+        """
+        now = time.monotonic()
+        if (now - SystemInfo._last_voltage_check_ts
+                < SystemInfo._VOLTAGE_CACHE_TTL):
+            return SystemInfo._last_voltage_check_result
+
+        try:
+            from config import VOLTAGE_CHECK_SOURCE
+            source = (VOLTAGE_CHECK_SOURCE or 'auto').lower()
+        except Exception:
+            source = 'auto'
+
+        result = False
+        if source == 'dmesg':
+            result = SystemInfo._check_dmesg_under_voltage()
+        elif source == 'vcgencmd':
+            result = SystemInfo._check_vcgencmd_under_voltage()
+        else:  # 'auto'
+            result = SystemInfo._check_dmesg_under_voltage()
+            if not result:
+                result = SystemInfo._check_vcgencmd_under_voltage()
+
+        SystemInfo._last_voltage_check_ts = now
+        SystemInfo._last_voltage_check_result = result
+        return result
+
     @staticmethod
     def get_all():
         return {
             'cpu_temp': SystemInfo.get_cpu_temp(),
             'cpu_usage': SystemInfo.get_cpu_usage(),
             'ram': SystemInfo.get_ram_info(),
+            'low_voltage': SystemInfo.is_low_voltage(),
         }

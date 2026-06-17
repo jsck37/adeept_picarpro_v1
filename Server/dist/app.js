@@ -235,12 +235,23 @@ function updateStatus(d) {
     document.getElementById('ir-left-val').textContent = 'N/A';
     document.getElementById('ir-left-val').style.color = '#9aa0a6';
   }
+  if (d.ir_middle !== undefined && d.ir_middle !== null) {
+    document.getElementById('ir-middle-val').textContent = d.ir_middle ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-middle-val').style.color = d.ir_middle ? '#ea4335' : '#34a853';
+  } else {
+    document.getElementById('ir-middle-val').textContent = 'N/A';
+    document.getElementById('ir-middle-val').style.color = '#9aa0a6';
+  }
   if (d.ir_right !== undefined && d.ir_right !== null) {
     document.getElementById('ir-right-val').textContent = d.ir_right ? 'LINE' : 'CLEAR';
     document.getElementById('ir-right-val').style.color = d.ir_right ? '#ea4335' : '#34a853';
   } else {
     document.getElementById('ir-right-val').textContent = 'N/A';
     document.getElementById('ir-right-val').style.color = '#9aa0a6';
+  }
+  var lvBanner = document.getElementById('low-voltage-banner');
+  if (lvBanner) {
+    lvBanner.style.display = d.low_voltage ? 'block' : 'none';
   }
   if (d.headlight !== undefined) {
     hlMainOn = d.headlight;

@@ -16,6 +16,7 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .status-bar .conn-dot{width:8px;height:8px;border-radius:50%;background:#34a853;animation:pulse-dot 2s infinite;flex-shrink:0}
 .status-bar .conn-dot.offline{background:#ea4335;animation:none}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes vblink{0%,100%{opacity:1}50%{opacity:.45}}
 @media(max-width:700px){.status-bar{padding:8px 12px;gap:6px 10px}.status-bar .sb-value{font-size:.85rem}.status-bar .sb-sep{display:none}}
 
 .header{background:#fff;border-bottom:1px solid #e0e0e0;padding:0 20px;display:flex;align-items:center;height:44px;box-shadow:0 1px 3px rgba(0,0,0,.08)}

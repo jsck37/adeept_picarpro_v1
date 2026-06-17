@@ -80,12 +80,19 @@ def start_redirect_server(port=80, target_port=None):
 
 def oled_loop(state):
     ip, port = get_ip(), FLASK_PORT
+    from Server.utils.system_info import SystemInfo
+    from config import VOLTAGE_CHECK_INTERVAL_S
     while state.running:
         try:
-            from Server.utils.system_info import SystemInfo
             info = SystemInfo.get_all()
             ram = info['ram']
-            if state.oled:
+            low_v = info.get('low_voltage', False)
+
+            # Toggle the OLED low-voltage warning — when active, the OLED
+            # module replaces the bottom line with the blinking warning
+            # text instead of the normal project tag / scrolling text.
+            if state.oled and state.oled._initialized:
+                state.oled.set_low_voltage(low_v)
                 state.oled.set_lines([
                     f"{ip}:{port}",
                     f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%",
@@ -93,4 +100,4 @@ def oled_loop(state):
                 ])
         except Exception:
             pass
-        time.sleep(1.5)
+        time.sleep(max(1.0, min(VOLTAGE_CHECK_INTERVAL_S, 5.0)))

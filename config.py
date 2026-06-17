@@ -176,11 +176,13 @@ SWITCH_PINS = [6, 13]
 HEADLIGHT_PIN = 5
 
 # ---------------------------------------------------------------------------
-# IR line-tracking sensors — GPIO pins for left / right infrared detectors.
+# IR line-tracking sensors — GPIO pins for left / middle / right infrared
+# detectors (matches the original Adeept PiCar-Pro wiring).
 # Active LOW: sensor outputs 0 when over a dark line, 1 on white surface.
 # ---------------------------------------------------------------------------
-LINE_LEFT_PIN = 19
-LINE_RIGHT_PIN = 20
+LINE_LEFT_PIN   = 19
+LINE_MIDDLE_PIN = 16
+LINE_RIGHT_PIN  = 20
 
 # ---------------------------------------------------------------------------
 # Camera settings — resolution, frame rate, JPEG quality, and flip options.
@@ -266,9 +268,23 @@ STEER_MAP = {
 }
 
 # ---------------------------------------------------------------------------
-# OLED scroll text — message that scrolls on the bottom line of the display.
+# OLED low-voltage warning — message shown on the OLED when the Raspberry Pi
+# firmware reports an under-voltage condition (the same source the desktop
+# "Low voltage warning" notification uses). The text replaces the bottom
+# line of the display while the warning is active.
 # ---------------------------------------------------------------------------
-OLED_SCROLL_TEXT = "modded by turik with <3 from 8241117 "
+OLED_LOW_VOLTAGE_TEXT = "Low voltage warning Please check your power supply"
+
+# ---------------------------------------------------------------------------
+# Voltage monitoring — how the low-voltage state is detected.
+#   'dmesg'     — scan the kernel ring buffer for 'Under-voltage' events
+#                (default; matches the desktop warning).
+#   'vcgencmd'  — use `vcgencmd measure_volts core` and threshold it.
+#   'auto'      — try 'dmesg' first, fall back to 'vcgencmd'.
+# ---------------------------------------------------------------------------
+VOLTAGE_CHECK_SOURCE = 'auto'
+LOW_VOLTAGE_THRESHOLD_V = 1.2   # only used when source == 'vcgencmd' (core rail)
+VOLTAGE_CHECK_INTERVAL_S = 2.0  # how often oled_loop rechecks the voltage
 
 # ---------------------------------------------------------------------------
 # Motion defaults
@@ -276,3 +292,6 @@ OLED_SCROLL_TEXT = "modded by turik with <3 from 8241117 "
 DEFAULT_SPEED = 50
 TURN_RADIUS_MIN = 0.2
 TURN_RADIUS_MAX = 1.0
+
+# Backward-compat alias kept for any code that still references the old name.
+OLED_SCROLL_TEXT = OLED_LOW_VOLTAGE_TEXT
