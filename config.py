@@ -10,6 +10,16 @@ import os
 # =============================================================================
 
 # ---------------------------------------------------------------------------
+# Simulation mode — set to True when running on a non-Raspberry Pi machine
+# (e.g. your laptop) to test the web panel without real hardware.
+#   Activation:  python3 boot.py --sim
+#   Or env var:  PICARPRO_SIM=1 python3 boot.py
+# When enabled, all hardware modules are replaced with lightweight stubs,
+# WiFi wait is skipped, and simulated sensor data is provided.
+# ---------------------------------------------------------------------------
+SIM_MODE = os.environ.get('PICARPRO_SIM', '').strip() in ('1', 'true', 'yes')
+
+# ---------------------------------------------------------------------------
 # Logging — if True, the server writes a rotating log file to logs/server.txt
 # (up to 100 MB, retained 7 days, compressed). If False, logs go to stderr.
 # ---------------------------------------------------------------------------

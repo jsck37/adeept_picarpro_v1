@@ -14,7 +14,6 @@ from Server.network import get_ip, start_redirect_server, oled_loop
 
 
 BREATH_COLOR = (0, 100, 255)
-BREATH_SPEED = 0.02
 
 
 def is_wifi_connected():
@@ -34,8 +33,6 @@ def is_wifi_connected():
 
 
 def wait_for_wifi(oled, leds):
-    boot_msg = f"Please connect to the access point {HOTSPOT_SSID} and open the web link {HOTSPOT_IP}:{FLASK_PORT}"
-
     if oled and oled._initialized:
         oled.set_lines([f"AP: {HOTSPOT_SSID}", f"{HOTSPOT_IP}:{FLASK_PORT}", "Waiting WiFi...", ""])
 
@@ -58,6 +55,45 @@ def wait_for_wifi(oled, leds):
         oled.set_lines([f"{ip}:{FLASK_PORT}", "WiFi connected!", "", ""])
 
 
+def init_hardware_sim():
+    from Server.hardware.sim_hardware import (
+        SimServoController, SimMotorController, SimLEDController,
+        SimOLEDDisplay, SimBuzzerController, SimSwitchController,
+        SimUltrasonicSensor, SimMPU6050Controller, SimDS4Controller,
+    )
+
+    state = SharedState()
+    state.oled = SimOLEDDisplay()
+    state.leds = SimLEDController()
+
+    logger.info("[Boot] SIM MODE — skipping WiFi wait")
+    logger.info("[Boot] Initializing simulated hardware...")
+
+    state.motors = SimMotorController()
+    state.servos = SimServoController()
+    state.switches = SimSwitchController()
+    state.buzzer = SimBuzzerController()
+    state.ultrasonic = SimUltrasonicSensor()
+    state.mpu6050 = SimMPU6050Controller()
+    state.ds4 = SimDS4Controller()
+
+    cal = load_servo_cal()
+    for i, a in enumerate(cal):
+        if 0 <= i < SERVO_COUNT and state.servos:
+            state.servos.set_init_angle(i, a)
+    if state.servos:
+        try:
+            state.servos.move_init()
+        except Exception:
+            pass
+
+    state.autonomous = _try_init('Autonomous', lambda: __import__('Server.functions.autonomous', fromlist=['AutonomousController']).AutonomousController(state.motors, state.servos, state.ultrasonic))
+    state.voice = None
+
+    logger.info("[Boot] Simulated hardware initialization complete")
+    return state
+
+
 def init_hardware():
     state = SharedState()
 
@@ -75,7 +111,6 @@ def init_hardware():
     state.switches = _try_init('Switches', lambda: __import__('Server.hardware.switch', fromlist=['SwitchController']).SwitchController())
     state.buzzer = _try_init('Buzzer', lambda: __import__('Server.hardware.buzzer', fromlist=['BuzzerController']).BuzzerController())
     state.ultrasonic = _try_init('Ultrasonic', lambda: __import__('Server.hardware.ultrasonic', fromlist=['UltrasonicSensor']).UltrasonicSensor())
-
     state.mpu6050 = _try_init('MPU6050', lambda: __import__('Server.hardware.mpu6050', fromlist=['MPU6050Controller']).MPU6050Controller())
 
     try:
@@ -118,15 +153,24 @@ def _try_init(name, factory):
 
 
 def main():
+    from config import SIM_MODE
+
     logger.info("=" * 50)
-    logger.info("  PiCar Pro v1 — Boot Sequence")
+    if SIM_MODE:
+        logger.info("  PiCar Pro v1 — Boot Sequence [SIM MODE]")
+    else:
+        logger.info("  PiCar Pro v1 — Boot Sequence")
     logger.info("=" * 50)
 
-    state = init_hardware()
+    if SIM_MODE:
+        state = init_hardware_sim()
+    else:
+        state = init_hardware()
 
     ip = get_ip()
     if state.oled and state.oled._initialized:
-        state.oled.set_lines([f"{ip}:{FLASK_PORT}", "Starting server...", "", ""])
+        label = "SIM" if SIM_MODE else ""
+        state.oled.set_lines([f"{ip}:{FLASK_PORT} {label}", "Starting server...", "", ""])
     threading.Thread(target=oled_loop, args=(state,), daemon=True).start()
 
     signal.signal(signal.SIGINT, lambda s, f: (state.shutdown_hardware(), sys.exit(0)))
