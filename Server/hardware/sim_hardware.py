@@ -176,6 +176,7 @@ class SimSwitchController:
         self._initialized = True
         self._states = [False, False]
         self._headlight_on = False
+        self._blink_active = [False, False]
         logger.info("[Sim:Switch] 2 switches + headlight OK")
 
     def on(self, i):
@@ -190,6 +191,13 @@ class SimSwitchController:
         if 0 <= i < len(self._states):
             return self._states[i]
         return False
+
+    def set_blinker(self, side, active):
+        idx = 0 if side == 'left' else 1 if side == 'right' else -1
+        if 0 <= idx < len(self._blink_active):
+            self._blink_active[idx] = active
+            if not active:
+                self._states[idx] = False
 
     def headlight_on(self):
         self._headlight_on = True

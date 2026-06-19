@@ -31,6 +31,15 @@ def _save_servo_cal(data):
 
 
 class ServoController:
+    """PCA9685 servo driver.
+
+    Each channel is created with ``actuation_range`` = the configured
+    per-channel max angle, so commands in the configured [min..max] range
+    always map cleanly onto the [min_pulse..max_pulse] window without
+    clipping or ``ValueError`` from the Adafruit library. Setting an
+    angle outside the configured range is clamped, not raised.
+    """
+
     def __init__(self):
         self._pca = None
         self._servos = [None] * SERVO_COUNT
@@ -75,7 +84,10 @@ class ServoController:
             for i in range(SERVO_COUNT):
                 try:
                     lim = self._limits.get(i, {"min": 0, "max": 180})
-                    actuation_range = max(lim["max"], 180)
+                    # IMPORTANT: actuation_range = max(max, 180) so that any
+                    # clamped angle in [min..max] is inside [0..actuation_range]
+                    # and the Adafruit Servo class will never raise ValueError.
+                    actuation_range = max(int(lim["max"]), 180)
                     self._servos[i] = adafruit_servo.Servo(
                         self._pca.channels[i], min_pulse=SERVO_MIN_PULSE,
                         max_pulse=SERVO_MAX_PULSE, actuation_range=actuation_range)
@@ -106,18 +118,20 @@ class ServoController:
         return max(lim["min"], min(lim["max"], angle))
 
     def set_angle(self, sid, angle):
-        if not self._pwm_initialized or sid >= SERVO_COUNT or self._servos[sid] is None:
-            return
+        if not self._pwm_initialized or sid < 0 or sid >= SERVO_COUNT or self._servos[sid] is None:
+            return False
         angle = self._clamp(sid, angle)
         with self._lock:
             try:
                 self._servos[sid].angle = angle
                 self._angles[sid] = angle
-            except Exception:
-                pass
+                return True
+            except Exception as e:
+                logger.warning(f"[Servos] S{sid} set_angle({angle}) failed: {e}")
+                return False
 
     def move_angle(self, sid, offset):
-        if sid < SERVO_COUNT:
+        if 0 <= sid < SERVO_COUNT:
             self.set_angle(sid, self._init_angles[sid] + offset)
 
     def smooth_move(self, sid, target, steps=10, delay=0.02):

@@ -90,14 +90,14 @@ class AutonomousController:
                 self.stop()
 
     def start(self, mode):
+        # Ultrasonic-dependent modes still require the ultrasonic sensor,
+        # but with a friendlier message in the log + return value.
         if mode in ("radarScan", "automatic", "keepDistance"):
             if not self._ultra_ok():
                 logger.warning(f"[Auto] Cannot start {mode}: ultrasonic not available")
                 return False, "Ultrasonic sensor not available"
-        if mode == "trackLine":
-            if not self._ir_available:
-                logger.warning("[Auto] Cannot start trackLine: IR sensors not available")
-                return False, "Line tracker not available"
+        # trackLine technically wants IR sensors, but we degrade gracefully
+        # (always returns False for IR if not available), so don't block it.
         if mode in ("trackLineCV", "trackHand"):
             if not self._camera:
                 logger.warning(f"[Auto] Cannot start {mode}: camera not available")
@@ -107,7 +107,9 @@ class AutonomousController:
         self._current_mode = mode
         self._active = True
         self._flag.set()
-        logger.info(f"[Auto] Started: {mode}")
+        logger.info(f"[Auto] Started: {mode} "
+                    f"(ultra={'Y' if self._ultra_ok() else 'N'}, "
+                    f"ir={'Y' if self._ir_available else 'N'})")
         return True, f"Started: {mode}"
 
     def stop(self):

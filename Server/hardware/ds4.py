@@ -23,6 +23,13 @@ from config import (
 CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
 CRANE_GRIP_LABELS = ['low', 'mid', 'high']
 
+# Resolve trigger-button codes safely — these exist on modern evdev but
+# older versions may not define them. Fall back to None so the dispatch
+# in _btn_press can skip them cleanly. We can't use `getattr(ecodes, ...)`
+# at module load because evdev may not be installed.
+_BTN_TL2 = getattr(ecodes, 'BTN_TL2', None) if HAS_EVDEV else None
+_BTN_TR2 = getattr(ecodes, 'BTN_TR2', None) if HAS_EVDEV else None
+
 
 def _ensure_hid_sony():
     try:
@@ -86,6 +93,8 @@ class DS4Controller:
 
         self._dpad_left_pressed = False
         self._dpad_right_pressed = False
+        self._dpad_up_pressed = False
+        self._dpad_down_pressed = False
 
     def start(self, motors, servos, leds, buzzer, switches,
               speed=DEFAULT_SPEED, shared_state=None, autonomous=None):
@@ -354,10 +363,12 @@ class DS4Controller:
             raw = self._norm_axis(value, code)
             self._ry = -raw if not DS4_INVERT_RY else raw
             self._apply_pan_tilt()
-        elif code == ecodes.ABS_Z:
+        elif code in (ecodes.ABS_Z, ecodes.ABS_BRAKE):
+            # DS4 over hid-sony exposes L2 as ABS_Z or ABS_BRAKE depending
+            # on driver version. Normalise to a 0..1 trigger value.
             self._l2 = self._norm_trigger(value, code)
             self._apply_turbo()
-        elif code == ecodes.ABS_RZ:
+        elif code in (ecodes.ABS_RZ, ecodes.ABS_GAS):
             self._r2 = self._norm_trigger(value, code)
             self._apply_turbo()
         elif code == ecodes.ABS_HAT0X:
@@ -437,10 +448,19 @@ class DS4Controller:
                 if self._shared_state:
                     self._shared_state.crane_grip_position = CRANE_GRIP_LABELS[self._crane_grip_index]
         elif code == ecodes.BTN_TL:
+            # L1 -> toggle the side lights (SWITCH_PINS[0,1]).
             self._toggle_headlights()
         elif code == ecodes.BTN_TR:
             if self._buzzer:
                 self._buzzer.beep()
+        elif code == ecodes.BTN_TL2 if _BTN_TL2 is not None else False:
+            # Some DS4 driver variants also emit BTN_TL2/TR2 on trigger press.
+            # Treat as turbo trigger.
+            self._l2 = 1.0
+            self._apply_turbo()
+        elif code == ecodes.BTN_TR2 if _BTN_TR2 is not None else False:
+            self._r2 = 1.0
+            self._apply_turbo()
         elif code == ecodes.BTN_MODE:
             if self._servos:
                 self._servos.move_init()
@@ -451,8 +471,12 @@ class DS4Controller:
                 if self._shared_state:
                     self._shared_state.crane_arm_closed = False
                     self._shared_state.crane_grip_position = "high"
-        elif code in (ecodes.BTN_START, ecodes.BTN_SELECT):
+        elif code == ecodes.BTN_START:
+            # Options button: Police light + Turbo (100%) + single-motor turn.
             self._toggle_police_turbo()
+        elif code == ecodes.BTN_SELECT:
+            # Share button: just toggle police lights (no turbo).
+            self._toggle_police_only()
 
     def _smooth_crane(self, servo_id, target_angle, step=DS4_CRANE_STEP, delay=0.03):
         if not self._servos:
@@ -619,10 +643,21 @@ class DS4Controller:
                 self._cam_tilt = new_tilt
 
     def _apply_dpad(self):
-        if self._hat_y < 0:
-            self._toggle_headlights()
-        elif self._hat_y > 0:
+        # Dpad Up -> toggle the robot-hat main headlight (HEADLIGHT_PIN=5).
+        #   Edge-triggered: only fires when the hat transitions to the "up"
+        #   position, not while held.
+        # Dpad Down -> toggle rainbow (edge-triggered).
+        if self._hat_y < 0 and not self._dpad_up_pressed:
+            self._dpad_up_pressed = True
+            self._toggle_headlight_main()
+        elif self._hat_y >= 0:
+            self._dpad_up_pressed = False
+
+        if self._hat_y > 0 and not self._dpad_down_pressed:
+            self._dpad_down_pressed = True
             self._toggle_rainbow()
+        elif self._hat_y <= 0:
+            self._dpad_down_pressed = False
 
         if self._hat_x < 0 and not self._dpad_left_pressed:
             self._dpad_left_pressed = True
@@ -636,7 +671,19 @@ class DS4Controller:
         elif self._hat_x <= 0:
             self._dpad_right_pressed = False
 
+    def _toggle_headlight_main(self):
+        """Toggle the robot-hat main headlight (the dedicated HEADLIGHT_PIN
+        channel, exposed via SwitchController.headlight_on/off)."""
+        if self._switches and self._switches._initialized:
+            on_now = self._switches.headlight_toggle()
+            self._headlights_on = on_now
+            if self._shared_state is not None:
+                # mirror the state on the shared state so the web panel sees it
+                pass
+            logger.info(f"[DS4] Headlight (robot-hat pin) -> {'ON' if on_now else 'OFF'}")
+
     def _toggle_headlights(self):
+        """Legacy helper: toggles both SWITCH_PINS[0,1] (side lights)."""
         if self._switches and self._switches._initialized:
             self._headlights_on = not self._headlights_on
             (self._switches.on if self._headlights_on else self._switches.off)(0)
@@ -652,15 +699,36 @@ class DS4Controller:
             self._leds.set_mode('off', (0, 0, 0))
 
     def _toggle_police_turbo(self):
+        """Options button: Police light + 100% speed + single-motor turns."""
         self._police_turbo_on = not self._police_turbo_on
         if self._police_turbo_on:
             if self._leds:
                 self._leds.set_mode('police', (255, 0, 0))
-            logger.info("[DS4] Police Turbo ON — speed 100%, single-motor turns")
+            logger.info("[DS4] Police Turbo ON — 100% speed, single-motor turns")
         else:
             if self._leds:
                 self._leds.set_mode('off', (0, 0, 0))
             logger.info("[DS4] Police Turbo OFF")
+        # Re-apply current move so the new turbo state takes effect immediately.
+        self._apply_move()
+
+    def _toggle_police_only(self):
+        """Share button: just toggle police light pattern (no turbo)."""
+        if self._leds:
+            if self._police_turbo_on:
+                # If turbo is on, share turns everything off.
+                self._police_turbo_on = False
+                self._leds.set_mode('off', (0, 0, 0))
+                logger.info("[DS4] Police light OFF (turbo was on)")
+            else:
+                # Toggle standalone police pattern.
+                self._police_only_on = not getattr(self, '_police_only_on', False)
+                if self._police_only_on:
+                    self._leds.set_mode('police', (255, 0, 0))
+                    logger.info("[DS4] Police light ON (no turbo)")
+                else:
+                    self._leds.set_mode('off', (0, 0, 0))
+                    logger.info("[DS4] Police light OFF")
 
     def _start_left_blinker(self):
         if self._left_blinking:

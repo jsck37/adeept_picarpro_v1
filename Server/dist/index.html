@@ -79,6 +79,28 @@
             <button class="cv-btn" data-cv="findlineCV">CV Line</button>
             <button class="cv-btn" data-cv="trackHand">Hand</button>
           </div>
+          <div id="hand-color-row" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #e0e0e0">
+            <div style="font-size:.75rem;color:#5f6368;font-weight:600;margin-bottom:4px">Hand color preset</div>
+            <div class="btn-group" id="hand-color-group">
+              <button class="gbtn active" data-hand-preset="skin">Skin</button>
+              <button class="gbtn" data-hand-preset="red">Red</button>
+              <button class="gbtn" data-hand-preset="green">Green</button>
+              <button class="gbtn" data-hand-preset="blue">Blue</button>
+              <button class="gbtn" data-hand-preset="yellow">Yellow</button>
+            </div>
+            <details style="margin-top:6px">
+              <summary style="font-size:.72rem;color:#5f6368;cursor:pointer">Custom HSV (advanced)</summary>
+              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center;font-size:.7rem;color:#5f6368;margin-top:6px">
+                <span>H low</span><input type="range" id="hand-h-low" min="0" max="179" value="0"><span id="hand-h-low-val">0</span>
+                <span>S low</span><input type="range" id="hand-s-low" min="0" max="255" value="30"><span id="hand-s-low-val">30</span>
+                <span>V low</span><input type="range" id="hand-v-low" min="0" max="255" value="50"><span id="hand-v-low-val">50</span>
+                <span>H high</span><input type="range" id="hand-h-high" min="0" max="179" value="25"><span id="hand-h-high-val">25</span>
+                <span>S high</span><input type="range" id="hand-s-high" min="0" max="255" value="255"><span id="hand-s-high-val">255</span>
+                <span>V high</span><input type="range" id="hand-v-high" min="0" max="255" value="255"><span id="hand-v-high-val">255</span>
+              </div>
+              <button class="btn-sm btn-primary" id="hand-color-apply" style="margin-top:6px">Apply custom</button>
+            </details>
+          </div>
         </div>
       </div>
 
@@ -245,6 +267,11 @@
                 <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
                 <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
                 <button class="gbtn crane-grip-btn active" id="crane-grip-high" data-action="grip_high">High</button>
+              </div>
+              <div class="slider-row" style="margin-top:6px">
+                <label>Grip</label>
+                <input type="range" id="crane-grip-slider" min="0" max="190" value="190">
+                <span class="val" id="crane-grip-slider-val">190°</span>
               </div>
             </div>
           </div>

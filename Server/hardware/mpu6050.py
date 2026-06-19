@@ -198,7 +198,7 @@ class MPU6050Controller:
             logger.info(f"[MPU6050] OK at 0x{addr:02X} (external mpu6050 library)")
             return True
         except Exception as e:
-            logger.debug(f"[MPU6050] ext_pkg @0x{addr:02X} failed: {e}")
+            logger.info(f"[MPU6050] ext_pkg @0x{addr:02X} failed: {e}")
             self._ext = None
             return False
 
@@ -207,6 +207,7 @@ class MPU6050Controller:
             bus = _SMBusWrapper(addr, I2C_BUS)
             who = bus.read_byte_data(REG_WHO_AM_I)
             if who not in WHO_AM_I_VALUES:
+                logger.info(f"[MPU6050] @0x{addr:02X} WHO_AM_I=0x{who:02X} — not an MPU6050")
                 bus.close()
                 return False
             bus.write_byte_data(REG_PWR_MGMT_1, 0x00)   # wake up
@@ -227,7 +228,7 @@ class MPU6050Controller:
                         f"(WHO_AM_I=0x{who:02X}, backend={_I2C_BACKEND})")
             return True
         except Exception as e:
-            logger.debug(f"[MPU6050] raw @0x{addr:02X} failed: {e}")
+            logger.info(f"[MPU6050] raw @0x{addr:02X} failed: {e}")
             return False
 
     # ---- read loops ----------------------------------------------------
@@ -281,17 +282,28 @@ class MPU6050Controller:
 
     # ---- recovery ------------------------------------------------------
     def _retry_loop(self):
-        for retry in range(1, 6):
+        """Keep retrying every 15s indefinitely. The sensor might come
+        online later (e.g. due to a slow I2C bus reset, hot-plug, etc.).
+        Once we successfully connect, this thread exits."""
+        retry = 0
+        while self._running and not self.initialized:
+            retry += 1
+            time.sleep(15 if retry > 5 else 5)
             if not self._running or self.initialized:
                 return
-            time.sleep(5)
-            logger.info(f"[MPU6050] Retry #{retry}/5...")
+            logger.info(f"[MPU6050] Retry #{retry}...")
             for addr in POSSIBLE_ADDRS:
                 if _I2C_BACKEND == "ext_pkg" and self._try_ext(addr):
                     return
                 if self._try_raw(addr):
                     return
-        logger.error("[MPU6050] Not found after 5 retries — giving up")
+            # Also scan the bus periodically (in case the address changed).
+            found_addr, _ = find_mpu6050_on_bus()
+            if found_addr:
+                if _I2C_BACKEND == "ext_pkg" and self._try_ext(found_addr):
+                    return
+                if self._try_raw(found_addr):
+                    return
 
     def _reinit(self):
         self.initialized = False

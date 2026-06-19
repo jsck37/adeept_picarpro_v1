@@ -238,15 +238,58 @@ def _btctl_simple(*args, timeout=10):
         return ""
 
 
-def _scan_devices(scan_time=3):
+def _hcitool_scan(scan_time=8):
+    """Fallback: use ``hcitool scan`` if bluetoothctl returns nothing.
+
+    hcitool is a simpler, lower-level tool that performs a classic BR/EDR
+    inquiry scan and dumps MAC + name pairs. It is sometimes more reliable
+    than bluetoothctl's interactive scan, especially on weak Pi setups
+    where the bluetoothctl interactive session gets stuck.
+    """
+    devices = []
+    try:
+        result = subprocess.run(
+            ['hcitool', 'scan', '--length=' + str(max(1, min(scan_time, 16)))],
+            capture_output=True, text=True, timeout=scan_time + 5,
+            stdin=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                m = re.match(r'([0-9A-Fa-f:]{17})\s+(.*)', line)
+                if m:
+                    mac = m.group(1).upper()
+                    name = m.group(2).strip()
+                    devices.append({"name": name, "mac": mac})
+    except Exception as e:
+        logger.warning(f"[BT] hcitool scan failed: {e}")
+    return devices
+
+
+def _bluetoothctl_scan(scan_time=6):
+    """Scan via bluetoothctl interactive session (longer scan time + retry)."""
     _load_hid_sony()
 
     session = _get_session()
-    session._send('power on', wait=0.3)
+    session._send('power on', wait=0.5)
+
+    # Flush any pending output so we get a clean state.
+    try:
+        import select as sel
+        while True:
+            r, _, _ = sel.select([session._proc.stdout], [], [], 0.1)
+            if not r:
+                break
+            try:
+                session._proc.stdout.readline()
+            except Exception:
+                break
+    except Exception:
+        pass
 
     session._send('scan on', wait=0)
     time.sleep(scan_time)
-    session._send('scan off', wait=0.5)
+    session._send('scan off', wait=1.0)
 
     output = session.send_and_read('devices', timeout=5)
 
@@ -262,6 +305,26 @@ def _scan_devices(scan_time=3):
                 seen.add(mac)
                 devices.append({"name": name, "mac": mac})
     return devices
+
+
+def _scan_devices(scan_time=6):
+    """Scan for nearby Bluetooth devices using two backends.
+
+    Strategy:
+      1. Try bluetoothctl interactive scan (gives both BLE + BR/EDR).
+      2. If it returns nothing, fall back to hcitool scan.
+
+    This is more reliable than just bluetoothctl alone, which can hang
+    silently on weak setups.
+    """
+    # First: bluetoothctl scan
+    devices = _bluetoothctl_scan(scan_time=scan_time)
+    if devices:
+        return devices
+
+    # Second: hcitool fallback
+    logger.info("[BT] bluetoothctl scan returned nothing — trying hcitool")
+    return _hcitool_scan(scan_time=max(scan_time, 8))
 
 
 def _is_gamepad(name):

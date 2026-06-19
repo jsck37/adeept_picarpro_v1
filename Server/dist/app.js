@@ -156,6 +156,7 @@ function sendCommand(cmd, params) {
       'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
       'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
+      'hand_color': '/cmd/hand_color',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -361,22 +362,66 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     btn.classList.add('active');
     var mode = btn.dataset.cv;
     var badge = document.getElementById('cv-badge');
+    var handRow = document.getElementById('hand-color-row');
     if (mode === 'findlineCV') {
       badge.textContent = 'CV: Line Follow';
       badge.classList.toggle('visible', true);
       sendCommand('auto', { func: 'trackLineCV' });
+      if (handRow) handRow.style.display = 'none';
     } else if (mode === 'trackHand') {
       badge.textContent = 'CV: Hand Track';
       badge.classList.toggle('visible', true);
       sendCommand('auto', { func: 'trackHand' });
+      if (handRow) handRow.style.display = '';
     } else {
       badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
       badge.classList.toggle('visible', mode !== 'none');
       if (mode !== 'none') sendCommand('auto', { func: 'stop' });
       sendCommand('cv_mode', { mode: mode });
+      if (handRow) handRow.style.display = 'none';
     }
   });
 });
+
+// Hand color presets
+document.querySelectorAll('#hand-color-group .gbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#hand-color-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    sendCommand('hand_color', { preset: btn.dataset.handPreset });
+  });
+});
+
+// Hand color custom HSV sliders
+function bindHandSlider(id, valId) {
+  var el = document.getElementById(id);
+  var valEl = document.getElementById(valId);
+  if (!el || !valEl) return;
+  el.addEventListener('input', function() { valEl.textContent = el.value; });
+}
+bindHandSlider('hand-h-low',  'hand-h-low-val');
+bindHandSlider('hand-s-low',  'hand-s-low-val');
+bindHandSlider('hand-v-low',  'hand-v-low-val');
+bindHandSlider('hand-h-high', 'hand-h-high-val');
+bindHandSlider('hand-s-high', 'hand-s-high-val');
+bindHandSlider('hand-v-high', 'hand-v-high-val');
+
+var handColorApply = document.getElementById('hand-color-apply');
+if (handColorApply) {
+  handColorApply.addEventListener('click', function() {
+    sendCommand('hand_color', {
+      h_low:  parseInt(document.getElementById('hand-h-low').value),
+      s_low:  parseInt(document.getElementById('hand-s-low').value),
+      v_low:  parseInt(document.getElementById('hand-v-low').value),
+      h_high: parseInt(document.getElementById('hand-h-high').value),
+      s_high: parseInt(document.getElementById('hand-s-high').value),
+      v_high: parseInt(document.getElementById('hand-v-high').value),
+    });
+    // Clear active preset since we're going custom.
+    document.querySelectorAll('#hand-color-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    toast('Custom hand color applied', 'success');
+  });
+}
 
 var speedSlider = document.getElementById('speed-slider');
 var speedVal = document.getElementById('speed-val');
@@ -943,8 +988,32 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     else if (action === 'grip_high') craneGripPosition = 'high';
     sendCommand('crane', { action: action });
     updateCraneGripUI();
+    // sync slider
+    var slider = document.getElementById('crane-grip-slider');
+    var sliderVal = document.getElementById('crane-grip-slider-val');
+    var angleMap = { low: 0, mid: 135, high: 190 };
+    if (slider && angleMap[craneGripPosition] !== undefined) {
+      slider.value = angleMap[craneGripPosition];
+      if (sliderVal) sliderVal.textContent = angleMap[craneGripPosition] + '\u00B0';
+    }
   });
 });
+
+var craneGripSlider = document.getElementById('crane-grip-slider');
+var craneGripSliderVal = document.getElementById('crane-grip-slider-val');
+if (craneGripSlider) {
+  craneGripSlider.addEventListener('input', function() {
+    if (craneGripSliderVal) craneGripSliderVal.textContent = craneGripSlider.value + '\u00B0';
+  });
+  craneGripSlider.addEventListener('change', function() {
+    sendCommand('crane', { action: 'grip_angle', angle: parseInt(craneGripSlider.value) });
+    // clear the active state on the preset buttons since it's now custom
+    document.querySelectorAll('.crane-grip-btn').forEach(function(b) { b.classList.remove('active'); });
+    var label = document.getElementById('crane-grip-label');
+    if (label) label.textContent = 'Custom (' + craneGripSlider.value + '\u00B0)';
+    craneGripPosition = 'custom';
+  });
+}
 
 updateCraneArmUI();
 updateCraneGripUI();

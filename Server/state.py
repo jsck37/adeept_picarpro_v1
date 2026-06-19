@@ -44,8 +44,12 @@ class SharedState:
 
     def init_camera(self):
         if not self.camera:
-            from Server.camera.camera_opencv import Camera
-            self.camera = Camera()
+            try:
+                from Server.camera.camera_opencv import Camera
+                self.camera = Camera.get_instance()
+            except Exception as e:
+                from Server.logger import logger
+                logger.error(f"[State] init_camera failed: {e}")
 
     def get_status(self):
         info = SystemInfo.get_all()
@@ -77,6 +81,7 @@ class SharedState:
                 "oled": self.oled._initialized if self.oled else False,
                 "camera": self.camera is not None,
                 "crane": True,
+                "autonomous": self.autonomous is not None,
                 "ds4": self.ds4.connected if self.ds4 else False,
                 "voice": self.voice._initialized if self.voice else False,
             },

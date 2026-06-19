@@ -1,13 +1,29 @@
-import re, subprocess, time
+import subprocess, threading, time
 
 
 class SystemInfo:
+    """System info: CPU temp / CPU usage / RAM / low-voltage detection.
 
-    # Cache of the last dmesg under-voltage check.
+    The low-voltage detector follows the Raspberry Pi firmware's
+    `Under-voltage detected!` events from the kernel ring buffer.
+    A background thread tails ``dmesg --follow`` and only counts
+    events that arrive *while this process is running* — old dmesg
+    history is NOT considered, so the OLED banner won't get stuck on
+    from a brief sag that happened before the server started.
+    """
+
+    _voltage_state = False
+    _voltage_last_event_ts = 0.0
+    _voltage_lock = threading.Lock()
+    _voltage_thread = None
+    _voltage_started = False
+    _VOLTAGE_HOLD_S = 8.0   # how long the warning stays on after the last event
+    _VOLTAGE_CACHE_TTL = 1.0
     _last_voltage_check_ts = 0.0
-    _last_voltage_check_result = False
-    _VOLTAGE_CACHE_TTL = 1.5
 
+    # ------------------------------------------------------------------
+    # CPU
+    # ------------------------------------------------------------------
     @staticmethod
     def get_cpu_temp():
         try:
@@ -87,94 +103,80 @@ class SystemInfo:
                     'total_mb': 0, 'used_mb': 0}
 
     # ------------------------------------------------------------------
-    # Voltage / low-voltage detection
+    # Low-voltage detection
     # ------------------------------------------------------------------
     @staticmethod
-    def _check_dmesg_under_voltage() -> bool:
-        """Returns True if dmesg shows a recent under-voltage event.
+    def _start_voltage_watcher():
+        """Launch a background thread that tails ``dmesg --follow``.
 
-        The Raspberry Pi firmware logs `Under-voltage detected!` to the
-        kernel ring buffer whenever the 5V rail drops below ~4.65V — this
-        is exactly the same source the desktop "Low voltage warning"
-        notification listens to.
+        Only events observed while this process is running are counted;
+        old dmesg history is explicitly *not* consulted. This prevents
+        a single brief sag at boot from keeping the warning banner on
+        forever.
         """
-        try:
-            result = subprocess.run(
-                ['dmesg', '--ctime', '--color=never'],
-                capture_output=True, text=True, timeout=2.0,
-            )
-            if result.returncode != 0:
-                return False
-            # Only the last few hundred chars matter; if a warning was
-            # recently logged (or is still pending) it'll be there.
-            tail = result.stdout[-4096:]
-            return ('Under-voltage detected' in tail
-                    or 'under-voltage detected' in tail.lower())
-        except Exception:
-            return False
+        if SystemInfo._voltage_started:
+            return
+        SystemInfo._voltage_started = True
 
-    @staticmethod
-    def _check_vcgencmd_under_voltage() -> bool:
-        """Fallback: read `vcgencmd measure_volts core` and threshold it.
+        def _watch():
+            try:
+                # `dmesg --follow` (Debian 12+) streams new entries.
+                # `--color=never` so we get plain text.
+                # On older kernels without --follow, fall back to polling
+                # `dmesg | tail` and compare timestamps.
+                proc = subprocess.Popen(
+                    ['dmesg', '--follow', '--color=never'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    bufsize=1,
+                )
+                for line in proc.stdout:
+                    if ('Under-voltage detected' in line
+                            or 'under-voltage detected' in line.lower()):
+                        with SystemInfo._voltage_lock:
+                            SystemInfo._voltage_state = True
+                            SystemInfo._voltage_last_event_ts = time.monotonic()
+            except Exception:
+                # Fall back: poll every 5s.
+                SystemInfo._voltage_started = False  # allow restart
 
-        The BCM2835/2837/2712 core rail is normally ~1.2V — if it sags
-        below the configured threshold the Pi is almost certainly
-        under-volted on the 5V rail.
-        """
-        try:
-            from config import LOW_VOLTAGE_THRESHOLD_V
-        except Exception:
-            LOW_VOLTAGE_THRESHOLD_V = 1.2
-        try:
-            result = subprocess.run(
-                ['vcgencmd', 'measure_volts', 'core'],
-                capture_output=True, text=True, timeout=2.0,
-            )
-            if result.returncode != 0:
-                return False
-            m = re.search(r'volt=([0-9.]+)V', result.stdout)
-            if not m:
-                return False
-            return float(m.group(1)) < LOW_VOLTAGE_THRESHOLD_V
-        except Exception:
-            return False
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+        SystemInfo._voltage_thread = t
+
+        # Also start a small janitor that clears the flag after the hold
+        # window has elapsed with no new events.
+        def _janitor():
+            while True:
+                time.sleep(2.0)
+                with SystemInfo._voltage_lock:
+                    if SystemInfo._voltage_state:
+                        age = time.monotonic() - SystemInfo._voltage_last_event_ts
+                        if age > SystemInfo._VOLTAGE_HOLD_S:
+                            SystemInfo._voltage_state = False
+
+        threading.Thread(target=_janitor, daemon=True).start()
 
     @staticmethod
     def is_low_voltage() -> bool:
-        """Cached, single-source-of-truth low-voltage check.
+        # Lazily start the watcher the first time this is called.
+        if not SystemInfo._voltage_started:
+            try:
+                SystemInfo._start_voltage_watcher()
+            except Exception:
+                pass
 
-        Resolution order (controlled by ``VOLTAGE_CHECK_SOURCE`` in
-        ``config.py``):
-
-          * 'dmesg'    -> only dmesg scan
-          * 'vcgencmd' -> only vcgencmd measurement
-          * 'auto'     -> dmesg first; if dmesg is unavailable, fall
-                          back to vcgencmd.
-        """
+        # Cheap cache so callers can hit this every second without
+        # worrying about lock contention.
         now = time.monotonic()
         if (now - SystemInfo._last_voltage_check_ts
                 < SystemInfo._VOLTAGE_CACHE_TTL):
-            return SystemInfo._last_voltage_check_result
-
-        try:
-            from config import VOLTAGE_CHECK_SOURCE
-            source = (VOLTAGE_CHECK_SOURCE or 'auto').lower()
-        except Exception:
-            source = 'auto'
-
-        result = False
-        if source == 'dmesg':
-            result = SystemInfo._check_dmesg_under_voltage()
-        elif source == 'vcgencmd':
-            result = SystemInfo._check_vcgencmd_under_voltage()
-        else:  # 'auto'
-            result = SystemInfo._check_dmesg_under_voltage()
-            if not result:
-                result = SystemInfo._check_vcgencmd_under_voltage()
-
+            return SystemInfo._voltage_state
         SystemInfo._last_voltage_check_ts = now
-        SystemInfo._last_voltage_check_result = result
-        return result
+
+        with SystemInfo._voltage_lock:
+            return SystemInfo._voltage_state
 
     @staticmethod
     def get_all():

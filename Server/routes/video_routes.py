@@ -1,6 +1,5 @@
 import time
 from flask import Blueprint, Response
-from Server.camera.camera_opencv import Camera
 
 
 def create_video_blueprint(state):
@@ -12,7 +11,7 @@ def create_video_blueprint(state):
 
         def gen():
             while state.running:
-                frame = Camera.get_frame()
+                frame = state.camera.get_frame() if state.camera else None
                 if frame:
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 else:

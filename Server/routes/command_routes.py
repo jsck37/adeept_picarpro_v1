@@ -110,6 +110,13 @@ def create_command_blueprint(state):
             return jsonify({"ok": True})
         return jsonify({"ok": False}), 400
 
+    @bp.route("/hand_color", methods=["POST"])
+    def cmd_hand_color():
+        from Server.commands import process_command
+        d = request.get_json(silent=True) or {}
+        r = process_command(state, {'cmd': 'hand_color', 'params': d})
+        return jsonify(r)
+
     @bp.route("/voice", methods=["POST"])
     def cmd_voice():
         from Server.commands import process_command

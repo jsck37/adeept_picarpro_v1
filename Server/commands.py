@@ -114,6 +114,17 @@ def process_command(state, data):
             if grip_state is not None:
                 state.crane_grip_position = grip_state
             r = {'ok': True, 'action': act}
+        elif act == 'grip_angle':
+            # Direct grip-tilt angle (slider control). 0..190 by default.
+            try:
+                angle = int(p.get('angle', 90))
+            except Exception:
+                angle = 90
+            state.servos.set_angle(SERVO_CRANE_GRIP, angle)
+            state.crane_grip_position = 'custom'
+            r = {'ok': True, 'action': 'grip_angle', 'angle': angle}
+        else:
+            r['error'] = f'Unknown crane action: {act}'
 
     elif cmd == 'switch':
         sid, st = int(p.get('id', 0)), p.get('state', False)
@@ -140,26 +151,27 @@ def process_command(state, data):
         active = p.get('active', True)
         if side == 'left':
             state.left_blinker = active
+            state.right_blinker = False
+            # Stop the right blinker thread if running, start/stop left.
             if state.switches and state.switches._initialized:
-                if active:
-                    state.switches.on(0)
-                else:
-                    state.switches.off(0)
-            r = {'ok': True, 'left_blinker': state.left_blinker}
+                state.switches.set_blinker('right', False)
+                state.switches.set_blinker('left', active)
+            r = {'ok': True, 'left_blinker': state.left_blinker,
+                 'right_blinker': state.right_blinker}
         elif side == 'right':
             state.right_blinker = active
+            state.left_blinker = False
             if state.switches and state.switches._initialized:
-                if active:
-                    state.switches.on(1)
-                else:
-                    state.switches.off(1)
-            r = {'ok': True, 'right_blinker': state.right_blinker}
+                state.switches.set_blinker('left', False)
+                state.switches.set_blinker('right', active)
+            r = {'ok': True, 'left_blinker': state.left_blinker,
+                 'right_blinker': state.right_blinker}
         elif side == 'both_off':
             state.left_blinker = False
             state.right_blinker = False
             if state.switches and state.switches._initialized:
-                state.switches.off(0)
-                state.switches.off(1)
+                state.switches.set_blinker('left', False)
+                state.switches.set_blinker('right', False)
             r = {'ok': True, 'left_blinker': False, 'right_blinker': False}
         else:
             r['error'] = 'Unknown blinker side'
@@ -179,6 +191,53 @@ def process_command(state, data):
             state.init_camera()
             state.camera.set_cv_mode(cv)
             r = {'ok': True, 'mode': p.get('mode')}
+
+    elif cmd == 'hand_color':
+        # Set the HSV range used by the OpenCV hand tracker.
+        # Accepts either:
+        #   {h_low, s_low, v_low, h_high, s_high, v_high}  -- full range
+        #   {preset: 'skin'|'red'|'green'|'blue'}          -- named preset
+        state.init_camera()
+        if not state.camera:
+            r['error'] = 'Camera not available'
+        else:
+            preset = p.get('preset')
+            presets = {
+                # Default skin-tone (works for most hands in daylight).
+                'skin':  {'h_low': 0,   's_low': 30,  'v_low': 50,
+                          'h_high': 25,  's_high': 255, 'v_high': 255},
+                # Bright red object (e.g. a red glove).
+                'red':   {'h_low': 0,   's_low': 100, 'v_low': 80,
+                          'h_high': 10,  's_high': 255, 'v_high': 255},
+                # Green object.
+                'green': {'h_low': 35,  's_low': 80,  'v_low': 50,
+                          'h_high': 85,  's_high': 255, 'v_high': 255},
+                # Blue object.
+                'blue':  {'h_low': 95,  's_low': 80,  'v_low': 50,
+                          'h_high': 135, 's_high': 255, 'v_high': 255},
+                # Yellow object.
+                'yellow':{'h_low': 20,  's_low': 80,  'v_low': 80,
+                          'h_high': 35,  's_high': 255, 'v_high': 255},
+            }
+            if preset and preset in presets:
+                c = presets[preset]
+            else:
+                try:
+                    c = {
+                        'h_low':  int(p.get('h_low',  0)),
+                        's_low':  int(p.get('s_low',  30)),
+                        'v_low':  int(p.get('v_low',  50)),
+                        'h_high': int(p.get('h_high', 25)),
+                        's_high': int(p.get('s_high', 255)),
+                        'v_high': int(p.get('v_high', 255)),
+                    }
+                except Exception:
+                    c = presets['skin']
+            state.camera.set_hand_color(
+                c['h_low'], c['s_low'], c['v_low'],
+                c['h_high'], c['s_high'], c['v_high'],
+            )
+            r = {'ok': True, 'color': c}
 
     elif cmd == 'i2c_scan':
         from Server.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
