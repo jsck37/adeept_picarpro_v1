@@ -1,17 +1,16 @@
+from Server.logger import logger
+from Server.camera.camera_opencv import CV_NONE, CV_LINE, CV_HAND
 from config import (
     SERVO_COUNT, SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
     CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     SWITCH_PINS, DEFAULT_SPEED, STEER_MAP,
 )
-from Server.camera.camera_opencv import CV_NONE, CV_LINE, CV_HAND
-from Server.state import load_servo_cal, save_servo_cal
-from Server.utils.log_buffer import log_buffer
 
 
-def process_command(state, data):
+def process(state, data):
     cmd = data.get('cmd', '')
-    p = data.get('params', {})
+    p = data.get('params', {}) or {}
     r = {'ok': False, 'cmd': cmd}
 
     if cmd == 'move':
@@ -28,8 +27,9 @@ def process_command(state, data):
             state.motors.move(state.speed, 'backward', d.split('_')[1], 0.3)
         elif d == 'stop':
             state.motors.stop()
-        state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
-        r = {'ok': True, 'cmd': cmd, 'dir': d, 'steer': STEER_MAP.get(d, 90)}
+        if state.servos:
+            state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
+        r = {'ok': True, 'dir': d}
 
     elif cmd == 'speed':
         try:
@@ -40,40 +40,27 @@ def process_command(state, data):
 
     elif cmd == 'servo':
         sid, ang = int(p.get('id', 0)), int(p.get('angle', 90))
-        if 0 <= sid < SERVO_COUNT:
-            state.servos.set_angle(sid, ang)
-            r = {'ok': True, 'id': sid, 'angle': ang}
+        if 0 <= sid < SERVO_COUNT and state.servos:
+            ok = state.servos.set_angle(sid, ang)
+            r = {'ok': ok, 'id': sid, 'angle': ang}
 
-    elif cmd == 'servo_calibrate':
-        sid, ang = int(p.get('id', 0)), int(p.get('angle', 90))
-        if 0 <= sid < SERVO_COUNT:
-            state.servos.set_init_angle(sid, ang)
-            cal = load_servo_cal()
-            cal[sid] = ang
-            save_servo_cal(cal)
-            r = {'ok': True, 'id': sid, 'init_angle': ang}
+    elif cmd == 'servo_home':
+        if state.servos:
+            state.servos.move_init()
+            state.crane_arm_closed = False
+            state.crane_grip_position = 'high'
+            r = {'ok': True}
+
+    elif cmd == 'servo_get_limits':
+        r = {'ok': True, 'limits': state.servos.get_limits() if state.servos else {}}
 
     elif cmd == 'servo_set_limits':
         sid = int(p.get('id', 0))
-        min_ang = int(p.get('min', 0))
-        max_ang = int(p.get('max', 180))
-        if 0 <= sid < SERVO_COUNT:
-            if state.servos.set_limits(sid, min_ang, max_ang):
-                r = {'ok': True, 'id': sid, 'min': min_ang, 'max': max_ang}
-            else:
-                r['error'] = 'Failed to set limits'
-        else:
-            r['error'] = 'Invalid servo id'
-
-    elif cmd == 'servo_get_limits':
-        limits = state.servos.get_limits() if state.servos else {}
-        r = {'ok': True, 'limits': limits}
-
-    elif cmd == 'servo_home':
-        state.servos.move_init()
-        state.crane_arm_closed = False
-        state.crane_grip_position = "high"
-        r = {'ok': True}
+        mn = int(p.get('min', 0))
+        mx = int(p.get('max', 180))
+        if 0 <= sid < SERVO_COUNT and state.servos:
+            ok = state.servos.set_limits(sid, mn, mx)
+            r = {'ok': ok, 'id': sid, 'min': mn, 'max': mx}
 
     elif cmd == 'led':
         mode = p.get('mode', 'off')
@@ -83,19 +70,22 @@ def process_command(state, data):
                 color = tuple(max(0, min(255, int(c))) for c in color[:3])
             except Exception:
                 color = (255, 0, 0)
-            state.leds.set_mode(mode, color)
+            if state.leds:
+                state.leds.set_mode(mode, color)
+            state.led_mode = mode
+            state.led_color = color
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(
-            p.get('melody', 'beep'))
-        if key:
+        key = {'beep': 'beep', 'birthday': 'happy_birthday'}.get(p.get('melody', 'beep'))
+        if key and state.buzzer:
             state.buzzer.play_melody(key)
             r = {'ok': True}
 
     elif cmd == 'buzzer_stop':
-        state.buzzer.stop()
-        r = {'ok': True}
+        if state.buzzer:
+            state.buzzer.stop()
+            r = {'ok': True}
 
     elif cmd == 'crane':
         act = p.get('action', '')
@@ -106,29 +96,26 @@ def process_command(state, data):
             'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID, None, 'mid'),
             'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH, None, 'high'),
         }
-        if act in actions:
-            servo_id, angle, arm_state, grip_state = actions[act]
-            state.servos.set_angle(servo_id, angle)
+        if act in actions and state.servos:
+            sid, angle, arm_state, grip_state = actions[act]
+            state.servos.set_angle(sid, angle)
             if arm_state is not None:
                 state.crane_arm_closed = arm_state
             if grip_state is not None:
                 state.crane_grip_position = grip_state
             r = {'ok': True, 'action': act}
-        elif act == 'grip_angle':
-            # Direct grip-tilt angle (slider control). 0..190 by default.
+        elif act == 'grip_angle' and state.servos:
             try:
                 angle = int(p.get('angle', 90))
             except Exception:
                 angle = 90
             state.servos.set_angle(SERVO_CRANE_GRIP, angle)
             state.crane_grip_position = 'custom'
-            r = {'ok': True, 'action': 'grip_angle', 'angle': angle}
-        else:
-            r['error'] = f'Unknown crane action: {act}'
+            r = {'ok': True, 'angle': angle}
 
     elif cmd == 'switch':
         sid, st = int(p.get('id', 0)), p.get('state', False)
-        mx = len(SWITCH_PINS) if state.switches._initialized else 0
+        mx = len(SWITCH_PINS) if (state.switches and state.switches._initialized) else 0
         if 0 <= sid < mx:
             (state.switches.on if st else state.switches.off)(sid)
             r = {'ok': True}
@@ -143,124 +130,84 @@ def process_command(state, data):
             else:
                 state.switches.headlight_toggle()
             r = {'ok': True, 'headlight': state.switches.headlight_state}
-        else:
-            r['error'] = 'Switch module not available'
 
     elif cmd == 'blinker':
         side = p.get('side', '')
         active = p.get('active', True)
-        if side == 'left':
-            state.left_blinker = active
-            state.right_blinker = False
-            # Stop the right blinker thread if running, start/stop left.
-            if state.switches and state.switches._initialized:
+        if state.switches and state.switches._initialized:
+            if side == 'left':
+                state.left_blinker = active
+                state.right_blinker = False
                 state.switches.set_blinker('right', False)
                 state.switches.set_blinker('left', active)
-            r = {'ok': True, 'left_blinker': state.left_blinker,
-                 'right_blinker': state.right_blinker}
-        elif side == 'right':
-            state.right_blinker = active
-            state.left_blinker = False
-            if state.switches and state.switches._initialized:
+                r = {'ok': True, 'left': state.left_blinker, 'right': state.right_blinker}
+            elif side == 'right':
+                state.right_blinker = active
+                state.left_blinker = False
                 state.switches.set_blinker('left', False)
                 state.switches.set_blinker('right', active)
-            r = {'ok': True, 'left_blinker': state.left_blinker,
-                 'right_blinker': state.right_blinker}
-        elif side == 'both_off':
-            state.left_blinker = False
-            state.right_blinker = False
-            if state.switches and state.switches._initialized:
+                r = {'ok': True, 'left': state.left_blinker, 'right': state.right_blinker}
+            elif side == 'both_off':
+                state.left_blinker = False
+                state.right_blinker = False
                 state.switches.set_blinker('left', False)
                 state.switches.set_blinker('right', False)
-            r = {'ok': True, 'left_blinker': False, 'right_blinker': False}
-        else:
-            r['error'] = 'Unknown blinker side'
+                r = {'ok': True, 'left': False, 'right': False}
 
     elif cmd == 'web_active':
         state.web_active = p.get('active', True)
         r = {'ok': True, 'web_active': state.web_active}
 
     elif cmd == 'cv_mode':
-        mode_map = {
-            'none': CV_NONE,
-            'findlineCV': CV_LINE,
-            'trackHand': CV_HAND,
-        }
-        cv = mode_map.get(p.get('mode', 'none'))
-        if cv is not None:
+        mode_map = {'none': CV_NONE, 'findlineCV': CV_LINE, 'trackHand': CV_HAND}
+        m = mode_map.get(p.get('mode', 'none'))
+        if m is not None:
             state.init_camera()
-            state.camera.set_cv_mode(cv)
-            r = {'ok': True, 'mode': p.get('mode')}
+            if state.camera:
+                state.camera.set_cv_mode(m)
+                r = {'ok': True, 'mode': p.get('mode')}
 
     elif cmd == 'hand_color':
-        # Set the HSV range used by the OpenCV hand tracker.
-        # Accepts either:
-        #   {h_low, s_low, v_low, h_high, s_high, v_high}  -- full range
-        #   {preset: 'skin'|'red'|'green'|'blue'}          -- named preset
         state.init_camera()
         if not state.camera:
             r['error'] = 'Camera not available'
         else:
-            preset = p.get('preset')
             presets = {
-                # Default skin-tone (works for most hands in daylight).
-                'skin':  {'h_low': 0,   's_low': 30,  'v_low': 50,
-                          'h_high': 25,  's_high': 255, 'v_high': 255},
-                # Bright red object (e.g. a red glove).
-                'red':   {'h_low': 0,   's_low': 100, 'v_low': 80,
-                          'h_high': 10,  's_high': 255, 'v_high': 255},
-                # Green object.
-                'green': {'h_low': 35,  's_low': 80,  'v_low': 50,
-                          'h_high': 85,  's_high': 255, 'v_high': 255},
-                # Blue object.
-                'blue':  {'h_low': 95,  's_low': 80,  'v_low': 50,
-                          'h_high': 135, 's_high': 255, 'v_high': 255},
-                # Yellow object.
-                'yellow':{'h_low': 20,  's_low': 80,  'v_low': 80,
-                          'h_high': 35,  's_high': 255, 'v_high': 255},
+                'skin': (0, 30, 50, 25, 255, 255),
+                'red': (0, 100, 80, 10, 255, 255),
+                'green': (35, 80, 50, 85, 255, 255),
+                'blue': (95, 80, 50, 135, 255, 255),
+                'yellow': (20, 80, 80, 35, 255, 255),
             }
+            preset = p.get('preset')
             if preset and preset in presets:
                 c = presets[preset]
             else:
                 try:
-                    c = {
-                        'h_low':  int(p.get('h_low',  0)),
-                        's_low':  int(p.get('s_low',  30)),
-                        'v_low':  int(p.get('v_low',  50)),
-                        'h_high': int(p.get('h_high', 25)),
-                        's_high': int(p.get('s_high', 255)),
-                        'v_high': int(p.get('v_high', 255)),
-                    }
+                    c = (int(p.get('h_low', 0)), int(p.get('s_low', 30)),
+                         int(p.get('v_low', 50)), int(p.get('h_high', 25)),
+                         int(p.get('s_high', 255)), int(p.get('v_high', 255)))
                 except Exception:
                     c = presets['skin']
-            state.camera.set_hand_color(
-                c['h_low'], c['s_low'], c['v_low'],
-                c['h_high'], c['s_high'], c['v_high'],
-            )
-            r = {'ok': True, 'color': c}
+            state.camera.set_hand_color(*c)
+            r = {'ok': True, 'color': list(c)}
 
     elif cmd == 'i2c_scan':
         from Server.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
         devs = i2c_scan()
         addr, who = find_mpu6050_on_bus()
-        r = {
-            'ok': True,
-            'devices': [f'0x{a:02X}' for a in devs],
-            'mpu6050_found': addr is not None,
-            'mpu6050_addr': f'0x{addr:02X}' if addr else None,
-            'mpu6050_who_am_i': f'0x{who:02X}' if who else None,
-        }
+        r = {'ok': True,
+             'devices': [f'0x{a:02X}' for a in devs],
+             'mpu6050_found': addr is not None,
+             'mpu6050_addr': f'0x{addr:02X}' if addr else None,
+             'mpu6050_who_am_i': f'0x{who:02X}' if who else None}
 
     elif cmd == 'auto':
         func = p.get('func', 'stop')
-        valid_funcs = ('radarScan', 'automatic', 'trackLine',
-                       'trackLineCV', 'trackHand', 'keepDistance', 'stop')
-        if func in valid_funcs:
-            if func == 'trackLineCV':
-                state.init_camera()
-                if state.camera:
-                    state.autonomous.set_camera(state.camera)
-            if func == 'trackHand':
+        valid = ('radarScan', 'automatic', 'trackLine', 'trackLineCV',
+                 'trackHand', 'keepDistance', 'stop')
+        if func in valid:
+            if func in ('trackLineCV', 'trackHand'):
                 state.init_camera()
                 if state.camera:
                     state.autonomous.set_camera(state.camera)
@@ -269,25 +216,28 @@ def process_command(state, data):
             else:
                 state.autonomous.start(func)
             r = {'ok': True, 'func': func}
-        else:
-            r['error'] = f'Unknown auto function: {func}'
-
-    elif cmd == 'get_info':
-        r = {'ok': True}
-        r.update(state.get_status())
 
     elif cmd == 'ds4_status':
         r = {'ok': True}
         r.update(state.ds4.get_status() if state.ds4 else {'connected': False})
 
-    elif cmd == 'get_log':
-        after = p.get('after_ts', 0.0)
-        lines = log_buffer.get_lines_since(after_ts=after, max_lines=500)
-        r = {'ok': True, 'lines': [[ts, txt] for ts, txt in lines]}
+    elif cmd == 'bt_scan':
+        from Server.routes.bluetooth_routes import scan_devices
+        r = {'ok': True, 'devices': scan_devices()}
 
-    elif cmd == 'clear_log':
-        with log_buffer._lock:
-            log_buffer._lines.clear()
+    elif cmd == 'bt_connect':
+        from Server.routes.bluetooth_routes import pair_and_connect
+        mac = p.get('mac', '').strip()
+        if mac:
+            ok, msg = pair_and_connect(mac, state.ds4)
+            r = {'ok': ok, 'message': msg}
+        else:
+            r['error'] = 'MAC required'
+
+    elif cmd == 'bt_disconnect':
+        from Server.routes.bluetooth_routes import disconnect_device
+        mac = p.get('mac', '').strip()
+        disconnect_device(mac)
         r = {'ok': True}
 
     elif cmd == 'voice':
@@ -299,9 +249,16 @@ def process_command(state, data):
             elif action == 'stop':
                 state.voice.stop()
                 r = {'ok': True, 'action': 'stop'}
-            else:
-                r['error'] = f'Unknown voice action: {action}'
-        else:
-            r['error'] = 'Voice control not available'
+
+    elif cmd == 'get_log':
+        from Server.logger import log_buffer
+        after = p.get('after_ts', 0.0)
+        lines = log_buffer.get_lines_since(after_ts=after, max_lines=500)
+        r = {'ok': True, 'lines': [[ts, txt] for ts, txt in lines]}
+
+    elif cmd == 'clear_log':
+        from Server.logger import log_buffer
+        log_buffer.clear()
+        r = {'ok': True}
 
     return r

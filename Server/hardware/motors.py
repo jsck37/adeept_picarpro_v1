@@ -1,62 +1,91 @@
 import threading
+from Server.logger import logger
 from config import (
     MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
     MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2,
-    DEFAULT_SPEED, TURN_RADIUS_MIN, TURN_RADIUS_MAX,
+    MOTOR_PWM_FREQ, DEFAULT_SPEED,
+    TURN_RADIUS_MIN, TURN_RADIUS_MAX,
 )
-from Server.logger import logger
+
+try:
+    import RPi.GPIO as GPIO
+    _HAS_GPIO = True
+except ImportError:
+    _HAS_GPIO = False
+    GPIO = None
+
 
 class MotorController:
     def __init__(self):
         self._speed = DEFAULT_SPEED
-        self._initialized = False
         self._lock = threading.Lock()
-        self._init_motors()
-
-    def _init_motors(self):
+        self._pwm_a = None
+        self._pwm_b = None
+        self._initialized = False
+        if not _HAS_GPIO:
+            logger.warning('[Motors] RPi.GPIO not available')
+            return
         try:
-            from gpiozero import Motor
-            self._motor_a = Motor(forward=MOTOR_A_IN1, backward=MOTOR_A_IN2, enable=MOTOR_A_EN, pwm=True)
-            self._motor_b = Motor(forward=MOTOR_B_IN1, backward=MOTOR_B_IN2, enable=MOTOR_B_EN, pwm=True)
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            for pin in (MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
+                        MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2):
+                GPIO.setup(pin, GPIO.OUT)
+            self._pwm_a = GPIO.PWM(MOTOR_A_EN, MOTOR_PWM_FREQ)
+            self._pwm_b = GPIO.PWM(MOTOR_B_EN, MOTOR_PWM_FREQ)
+            self._pwm_a.start(0)
+            self._pwm_b.start(0)
             self._initialized = True
-            logger.info("[Motors] OK")
+            logger.info(f'[Motors] OK — PWM @ {MOTOR_PWM_FREQ} Hz')
         except Exception as e:
-            logger.error(f"[Motors] Failed: {e}")
+            logger.error(f'[Motors] init failed: {e}')
+
+    def _set_side(self, in1, in2, pwm, forward, power):
+        if not _HAS_GPIO or not self._initialized:
+            return
+        if forward:
+            GPIO.output(in1, GPIO.HIGH)
+            GPIO.output(in2, GPIO.LOW)
+        else:
+            GPIO.output(in1, GPIO.LOW)
+            GPIO.output(in2, GPIO.HIGH)
+        pwm.ChangeDutyCycle(max(0.0, min(100.0, power * 100.0)))
 
     def move(self, speed=None, direction='forward', turn='no', radius=0.5):
         if not self._initialized:
             return
-        speed = speed if speed is not None else self._speed
+        speed = self._speed if speed is None else speed
         speed = max(0, min(100, speed))
         self._speed = speed
         radius = max(TURN_RADIUS_MIN, min(TURN_RADIUS_MAX, radius))
         s = speed / 100.0
-
         if turn == 'no':
-            left = s
-            right = s
+            left = right = s
         elif turn == 'left':
-            inner_min = 0.3
-            left = max(s * inner_min, s * (1 - radius))
+            left = max(s * 0.3, s * (1 - radius))
             right = s
         else:
-            inner_min = 0.3
             left = s
-            right = max(s * inner_min, s * (1 - radius))
-
-        if direction == 'forward':
-            self._motor_a.forward(right)
-            self._motor_b.forward(left)
-        elif direction == 'backward':
-            self._motor_a.backward(right)
-            self._motor_b.backward(left)
-        else:
+            right = max(s * 0.3, s * (1 - radius))
+        forward = (direction == 'forward')
+        backward = (direction == 'backward')
+        if not (forward or backward):
             self.stop()
+            return
+        with self._lock:
+            self._set_side(MOTOR_A_IN1, MOTOR_A_IN2, self._pwm_a, forward, right)
+            self._set_side(MOTOR_B_IN1, MOTOR_B_IN2, self._pwm_b, forward, left)
 
     def stop(self):
-        if self._initialized:
-            self._motor_a.stop()
-            self._motor_b.stop()
+        if not self._initialized:
+            return
+        with self._lock:
+            self._pwm_a.ChangeDutyCycle(0)
+            self._pwm_b.ChangeDutyCycle(0)
+            GPIO.output(MOTOR_A_IN1, GPIO.LOW)
+            GPIO.output(MOTOR_A_IN2, GPIO.LOW)
+            GPIO.output(MOTOR_B_IN1, GPIO.LOW)
+            GPIO.output(MOTOR_B_IN2, GPIO.LOW)
 
     @property
     def speed(self):
@@ -68,3 +97,10 @@ class MotorController:
 
     def shutdown(self):
         self.stop()
+        for pwm in (self._pwm_a, self._pwm_b):
+            if pwm:
+                try:
+                    pwm.stop()
+                except Exception:
+                    pass
+        logger.info('[Motors] shutdown')

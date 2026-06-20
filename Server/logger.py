@@ -1,89 +1,91 @@
-import os, sys, logging
-from loguru import logger
+import os, sys, threading, time
+from collections import deque
+from loguru import logger as _log
 
 
-def _get_log_file():
-    try:
-        from config import log_file as lf
-        return lf
-    except Exception:
-        return False
+class LogBuffer:
+    def __init__(self, maxlen=2000):
+        self._lines = deque(maxlen=maxlen)
+        self._lock = threading.Lock()
+        self._subscribers = []
+
+    def write(self, text):
+        if not text:
+            return
+        ts = time.time()
+        for line in text.splitlines():
+            stripped = line.rstrip()
+            if not stripped:
+                continue
+            with self._lock:
+                self._lines.append((ts, stripped))
+                subs = list(self._subscribers)
+            for cb in subs:
+                try:
+                    cb(ts, stripped)
+                except Exception:
+                    pass
+
+    def get_lines(self, last_n=200):
+        with self._lock:
+            return list(self._lines)[-last_n:]
+
+    def get_lines_since(self, after_ts=0.0, max_lines=500):
+        with self._lock:
+            result = []
+            for ts, text in reversed(self._lines):
+                if ts <= after_ts:
+                    break
+                result.append((ts, text))
+                if len(result) >= max_lines:
+                    break
+            result.reverse()
+            return result
+
+    def subscribe(self, cb):
+        with self._lock:
+            self._subscribers.append(cb)
+
+    def unsubscribe(self, cb):
+        with self._lock:
+            try:
+                self._subscribers.remove(cb)
+            except ValueError:
+                pass
+
+    def clear(self):
+        with self._lock:
+            self._lines.clear()
 
 
-class InterceptHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-        frame, depth = logging.currentframe(), 2
-        while frame.f_back and depth > 0:
-            frame = frame.f_back
-            depth -= 1
-        logger.bind(name=record.name).opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
-
-
-logger.remove()
-
-logger.level('ERROR',   color='<red><bold>')
-logger.level('WARNING', color='<yellow><bold>')
-logger.level('INFO',    color='<cyan><bold>')
+log_buffer = LogBuffer()
 
 
 def _logbuffer_sink(message):
     try:
-        from Server.utils.log_buffer import log_buffer
-        record = message.record
-        level_name = record['level'].name
-        text = record['message']
-        ts = record['time']
-        ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') + f'.{ts.microsecond // 1000:03d}'
-        line = record['line']
-        fname = record['file'].name
-        log_buffer.write(f'{ts_str} | {level_name: <8} | {line}:{fname} {text}')
+        rec = message.record
+        ts = rec['time']
+        ts_str = ts.strftime('%H:%M:%S.') + f'{ts.microsecond // 1000:03d}'
+        level = rec['level'].name
+        text = rec['message']
+        line_no = rec['line']
+        fname = rec['file'].name
+        log_buffer.write(f'{ts_str} | {level:<7} | {line_no}:{fname} {text}')
     except Exception:
         pass
 
 
-logger.add(
-    sink=_logbuffer_sink,
-    format="{message}",
-    filter=lambda record: record['level'].no >= 20,
-    level="INFO",
+_log.remove()
+_log.level('ERROR', color='<red><bold>')
+_log.level('WARNING', color='<yellow><bold>')
+_log.level('INFO', color='<cyan><bold>')
+
+_log.add(_logbuffer_sink, format='{message}', level='INFO')
+
+_log.add(
+    sys.stderr,
+    format='<white>{time:HH:mm:ss.SSS}</white> | <level>{level:<7}</level> | <green>{line}</green>:<green>{file}</green> - <white>{message}</white>',
+    level='INFO',
 )
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
-if _get_log_file():
-    LOG_FILE = f"{project_root}/logs/server.txt"
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-
-    logger.add(
-        sink=LOG_FILE,
-        format=(
-            "{time:YYYY-MM-DD HH:mm:ss.SSS} "
-            "| {level: <8} "
-            "| {line}:{file} "
-            "- {message}"
-        ),
-        rotation="100 MB",
-        retention="7 days",
-        compression="zip",
-        serialize=False,
-        encoding="utf8",
-        level="DEBUG",
-    )
-else:
-    logger.add(
-        sink=sys.stderr,
-        format=(
-            "<white>{time:YYYY-MM-DD HH:mm:ss.SSS}</white> "
-            "| <level>{level: <8}</level> "
-            "| <green><b>{line}</b></green>:"
-            "<green><b><u>{file}</u></b></green> "
-            "- <white>{message}</white>"
-        ),
-        level="INFO",
-    )
-
-logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+logger = _log

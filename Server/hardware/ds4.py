@@ -7,6 +7,8 @@ try:
     HAS_EVDEV = True
 except ImportError:
     HAS_EVDEV = False
+    evdev = None
+    ecodes = None
 
 from config import (
     DS4_DEVICE_NAME, DS4_DEADZONE,
@@ -23,17 +25,13 @@ from config import (
 CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
 CRANE_GRIP_LABELS = ['low', 'mid', 'high']
 
-# Resolve trigger-button codes safely — these exist on modern evdev but
-# older versions may not define them. Fall back to None so the dispatch
-# in _btn_press can skip them cleanly. We can't use `getattr(ecodes, ...)`
-# at module load because evdev may not be installed.
 _BTN_TL2 = getattr(ecodes, 'BTN_TL2', None) if HAS_EVDEV else None
 _BTN_TR2 = getattr(ecodes, 'BTN_TR2', None) if HAS_EVDEV else None
 
 
 def _ensure_hid_sony():
     try:
-        with open('/proc/modules', 'r') as f:
+        with open('/proc/modules') as f:
             for line in f:
                 if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
                     return
@@ -42,15 +40,11 @@ def _ensure_hid_sony():
     try:
         subprocess.run(['modprobe', 'hid-sony'],
                        capture_output=True, text=True, timeout=5)
-        logger.info("[DS4] Loaded hid-sony kernel module")
-    except FileNotFoundError:
-        logger.warning("[DS4] modprobe not found — if DS4 keys don't respond, run: sudo modprobe hid-sony")
-    except Exception as e:
-        logger.warning(f"[DS4] Could not load hid-sony: {e}")
+    except Exception:
+        pass
 
 
 class DS4Controller:
-
     def __init__(self):
         self._running = False
         self._connected = False
@@ -60,12 +54,10 @@ class DS4Controller:
         self._axis_ranges = {}
         self._last_event_time = 0.0
         self._connect_count = 0
-
         self._lx = self._ly = self._rx = self._ry = 0.0
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
         self._btn_state = {}
-
         self._motors = self._servos = self._leds = None
         self._buzzer = self._switches = self._shared_state = None
         self._autonomous = None
@@ -76,21 +68,13 @@ class DS4Controller:
         self._crane_grip_index = 2
         self._crane_grip_direction = -1
         self._lock = threading.Lock()
-
         self._left_blinking = False
         self._right_blinking = False
-        self._left_blink_thread = None
-        self._right_blink_thread = None
-
         self._auto_mode_active = False
-
         self._turbo_active = False
         self._police_turbo_on = False
-
         self._rainbow_on = False
-
         self._rescan_flag = threading.Event()
-
         self._dpad_left_pressed = False
         self._dpad_right_pressed = False
         self._dpad_up_pressed = False
@@ -99,19 +83,21 @@ class DS4Controller:
     def start(self, motors, servos, leds, buzzer, switches,
               speed=DEFAULT_SPEED, shared_state=None, autonomous=None):
         if not HAS_EVDEV:
-            logger.warning("[DS4] evdev not installed, skipping gamepad")
+            logger.warning('[DS4] evdev not installed')
             return
-        self._motors, self._servos, self._leds = motors, servos, leds
-        self._buzzer, self._switches = buzzer, switches
-        self._speed, self._shared_state = speed, shared_state
+        self._motors = motors
+        self._servos = servos
+        self._leds = leds
+        self._buzzer = buzzer
+        self._switches = switches
+        self._speed = speed
+        self._shared_state = shared_state
         self._autonomous = autonomous
         self._running = True
-
         _ensure_hid_sony()
-
         self._watchdog_thread = threading.Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
-        logger.info("[DS4] Searching for controller...")
+        logger.info('[DS4] searching for controller...')
 
     def stop(self):
         self._running = False
@@ -122,122 +108,75 @@ class DS4Controller:
         return self._connected
 
     def get_status(self):
-        grip_label = CRANE_GRIP_LABELS[self._crane_grip_index] if 0 <= self._crane_grip_index < len(CRANE_GRIP_LABELS) else 'unknown'
+        grip = CRANE_GRIP_LABELS[self._crane_grip_index] \
+            if 0 <= self._crane_grip_index < len(CRANE_GRIP_LABELS) else 'unknown'
         return {
             'connected': self._connected,
             'speed': self._speed,
-            'lx': round(self._lx, 2),
-            'ly': round(self._ly, 2),
-            'rx': round(self._rx, 2),
-            'ry': round(self._ry, 2),
+            'lx': round(self._lx, 2), 'ly': round(self._ly, 2),
+            'rx': round(self._rx, 2), 'ry': round(self._ry, 2),
             'connect_count': self._connect_count,
             'turbo': self._turbo_active,
             'rainbow': self._rainbow_on,
             'police_turbo': self._police_turbo_on,
             'crane_arm_closed': self._crane_arm_closed,
-            'crane_grip': grip_label,
+            'crane_grip': grip,
         }
 
     def trigger_rescan(self):
         self._rescan_flag.set()
-        logger.info("[DS4] Rescan triggered")
 
     def _find_device(self):
         if not HAS_EVDEV:
             return None
         try:
             paths = evdev.list_devices()
-            if not paths:
-                logger.debug("[DS4] No evdev devices found")
-                return None
-            devices = []
+            candidates = []
             for p in paths:
                 try:
-                    devices.append(InputDevice(p))
+                    dev = InputDevice(p)
                 except OSError:
                     continue
-
-            candidates = []
-            for dev in devices:
                 name = dev.name.lower()
-                if (DS4_DEVICE_NAME.lower() in name
-                        or 'dualshock' in name
-                        or 'sony interactive' in name
-                        or 'playstation' in name):
+                if (DS4_DEVICE_NAME.lower() in name or 'dualshock' in name
+                        or 'sony interactive' in name or 'playstation' in name):
                     candidates.append(dev)
-
             if not candidates:
-                logger.debug(f"[DS4] No DS4 candidates among {len(devices)} devices. Names: {[d.name for d in devices]}")
                 return None
             if len(candidates) == 1:
-                logger.info(f"[DS4] Single candidate: {candidates[0].name} @ {candidates[0].path}")
                 return candidates[0]
-
             for dev in candidates:
                 caps = dev.capabilities(absinfo=True)
                 keys = caps.get(ecodes.EV_KEY, [])
                 if ecodes.BTN_SOUTH in keys or ecodes.BTN_A in keys:
-                    logger.info(f"[DS4] Selected main gamepad: {dev.name} @ {dev.path}")
                     return dev
-
-            for dev in candidates:
-                caps = dev.capabilities(absinfo=True)
-                if any(c == ecodes.ABS_X for c, _ in caps.get(ecodes.EV_ABS, [])):
-                    logger.info(f"[DS4] Fallback selected: {dev.name} @ {dev.path}")
-                    return dev
-
-            logger.info(f"[DS4] Using first candidate: {candidates[0].name}")
             return candidates[0]
         except Exception as e:
-            logger.error(f"[DS4] Search error: {e}")
+            logger.error(f'[DS4] search error: {e}')
             return None
-
-    def _device_alive(self):
-        if not self._device:
-            return False
-        try:
-            fd = self._device.fd
-            if fd is None or fd < 0:
-                return False
-            if not os.path.exists(self._device.path):
-                return False
-            return True
-        except Exception:
-            return False
 
     def _connect(self, device):
         try:
             device.grab()
-        except Exception as e:
-            logger.warning(f"[DS4] Grab failed (non-fatal): {e}")
-
+        except Exception:
+            pass
         self._device = device
         self._connected = True
         self._axis_ranges = {}
         self._last_event_time = time.monotonic()
         self._connect_count += 1
-
         try:
             caps = device.capabilities(absinfo=True)
             for code, info in caps.get(ecodes.EV_ABS, []):
                 self._axis_ranges[code] = (info.min, info.max)
-            abs_info = {
-                ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}'
-                for k, v in self._axis_ranges.items()
-            }
-            keys = caps.get(ecodes.EV_KEY, [])
-            key_names = [ecodes.KEY.get(k, ecodes.BTN.get(k, hex(k))) for k in keys[:20]]
-            logger.info(f"[DS4] Connected #{self._connect_count}: {device.name} @ {device.path}")
-            logger.info(f"[DS4] Axes: {abs_info}")
-            logger.info(f"[DS4] Keys: {key_names}")
+            logger.info(f'[DS4] connected #{self._connect_count}: {device.name} @ {device.path}')
         except Exception:
-            logger.info(f"[DS4] Connected #{self._connect_count}: {device.name}")
-
+            logger.info(f'[DS4] connected #{self._connect_count}: {device.name}')
         self._thread = threading.Thread(target=self._event_loop, daemon=True)
         self._thread.start()
 
     def _disconnect(self):
-        was_connected = self._connected
+        was = self._connected
         self._connected = False
         if self._device:
             try:
@@ -260,8 +199,8 @@ class DS4Controller:
         self._turbo_active = False
         self._left_blinking = False
         self._right_blinking = False
-        if was_connected:
-            logger.warning("[DS4] Disconnected — will auto-reconnect when available")
+        if was:
+            logger.warning('[DS4] disconnected — will auto-reconnect')
 
     def _watchdog(self):
         while self._running:
@@ -274,11 +213,16 @@ class DS4Controller:
             else:
                 elapsed = time.monotonic() - self._last_event_time
                 if elapsed > DS4_HEARTBEAT_TIMEOUT:
-                    if not self._device_alive():
-                        logger.warning(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) and device gone — disconnecting")
+                    try:
+                        alive = (self._device is not None
+                                 and self._device.fd is not None
+                                 and self._device.fd >= 0
+                                 and os.path.exists(self._device.path))
+                    except Exception:
+                        alive = False
+                    if not alive:
                         self._disconnect()
                     else:
-                        logger.info(f"[DS4] Heartbeat timeout ({elapsed:.0f}s) but device still present — resetting timer")
                         self._last_event_time = time.monotonic()
                 time.sleep(DS4_WATCHDOG_INTERVAL)
 
@@ -287,14 +231,11 @@ class DS4Controller:
             try:
                 fd = self._device.fd
                 if fd is None:
-                    logger.warning("[DS4] File descriptor became None")
                     self._disconnect()
                     break
-
                 r, _, _ = select.select([fd], [], [], DS4_READ_TIMEOUT)
                 if not r:
                     continue
-
                 for ev in self._device.read():
                     self._last_event_time = time.monotonic()
                     if not self._running or not self._connected:
@@ -303,24 +244,15 @@ class DS4Controller:
                         self._on_axis(ev.code, ev.value)
                     elif ev.type == ecodes.EV_KEY:
                         self._on_key(ev.code, ev.value)
-
-            except OSError as e:
-                logger.error(f"[DS4] Device lost (OSError): {e}")
-                self._disconnect()
-                break
-            except ValueError as e:
-                logger.error(f"[DS4] Device lost (ValueError): {e}")
+            except OSError:
                 self._disconnect()
                 break
             except Exception as e:
-                err_str = str(e).lower()
-                if 'not open' in err_str or 'closed' in err_str or 'bad file' in err_str:
-                    logger.error(f"[DS4] Device lost: {e}")
+                err = str(e).lower()
+                if 'not open' in err or 'closed' in err or 'bad file' in err:
                     self._disconnect()
                     break
-                logger.warning(f"[DS4] Event read error (will retry): {e}")
                 time.sleep(0.05)
-
         if self._connected:
             self._disconnect()
 
@@ -364,8 +296,6 @@ class DS4Controller:
             self._ry = -raw if not DS4_INVERT_RY else raw
             self._apply_pan_tilt()
         elif code in (ecodes.ABS_Z, ecodes.ABS_BRAKE):
-            # DS4 over hid-sony exposes L2 as ABS_Z or ABS_BRAKE depending
-            # on driver version. Normalise to a 0..1 trigger value.
             self._l2 = self._norm_trigger(value, code)
             self._apply_turbo()
         elif code in (ecodes.ABS_RZ, ecodes.ABS_GAS):
@@ -384,13 +314,12 @@ class DS4Controller:
         if value and not was:
             self._btn_press(code)
 
-    def _stop_auto_mode_if_active(self):
+    def _stop_auto_if_active(self):
         if self._auto_mode_active and self._autonomous:
             try:
                 self._autonomous.stop()
-                logger.info("[DS4] Auto mode stopped by gamepad button")
-            except Exception as e:
-                logger.warning(f"[DS4] Error stopping auto mode: {e}")
+            except Exception:
+                pass
             self._auto_mode_active = False
 
     def _cycle_crane_grip(self):
@@ -399,66 +328,53 @@ class DS4Controller:
             self._crane_grip_direction = -1
         elif self._crane_grip_index <= 0:
             self._crane_grip_direction = 1
-        self._crane_grip_index = max(0, min(len(CRANE_GRIP_POSITIONS) - 1, self._crane_grip_index))
-        target_angle = CRANE_GRIP_POSITIONS[self._crane_grip_index]
+        self._crane_grip_index = max(0, min(len(CRANE_GRIP_POSITIONS) - 1,
+                                            self._crane_grip_index))
+        angle = CRANE_GRIP_POSITIONS[self._crane_grip_index]
         label = CRANE_GRIP_LABELS[self._crane_grip_index]
-        self._smooth_crane(SERVO_CRANE_GRIP, target_angle)
-        logger.info(f"[DS4] Crane grip -> {label} ({target_angle})")
+        self._smooth_crane(SERVO_CRANE_GRIP, angle)
+        if self._shared_state:
+            self._shared_state.crane_grip_position = label
 
     def _btn_press(self, code):
         if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):
             if self._autonomous and self._shared_state:
-                if hasattr(self._shared_state, 'camera') and self._shared_state.camera:
-                    self._autonomous._camera = self._shared_state.camera
-                elif hasattr(self._shared_state, 'init_camera'):
+                if not self._shared_state.camera:
                     self._shared_state.init_camera()
-                    if self._shared_state.camera:
-                        self._autonomous._camera = self._shared_state.camera
-                self._autonomous.start('trackLineCV')
-                self._auto_mode_active = True
-                logger.info("[DS4] Started CV line following mode")
+                if self._shared_state.camera:
+                    self._autonomous._camera = self._shared_state.camera
+                    self._autonomous.start('trackLineCV')
+                    self._auto_mode_active = True
             return
-
         if code in (ecodes.BTN_WEST, ecodes.BTN_X):
             if self._autonomous and self._shared_state:
-                if hasattr(self._shared_state, 'camera') and self._shared_state.camera:
-                    self._autonomous._camera = self._shared_state.camera
-                elif hasattr(self._shared_state, 'init_camera'):
+                if not self._shared_state.camera:
                     self._shared_state.init_camera()
-                    if self._shared_state.camera:
-                        self._autonomous._camera = self._shared_state.camera
-                self._autonomous.start('trackHand')
-                self._auto_mode_active = True
-                logger.info("[DS4] Started hand tracking mode")
+                if self._shared_state.camera:
+                    self._autonomous._camera = self._shared_state.camera
+                    self._autonomous.start('trackHand')
+                    self._auto_mode_active = True
             return
-
-        self._stop_auto_mode_if_active()
-
+        self._stop_auto_if_active()
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):
             if self._servos:
                 self._crane_arm_closed = not self._crane_arm_closed
                 angle = CRANE_ARM_CLOSED if self._crane_arm_closed else CRANE_ARM_OPEN
                 self._smooth_crane(SERVO_CRANE_ARM, angle)
-                logger.info(f"[DS4] Crane arm -> {'closed' if self._crane_arm_closed else 'open'} ({angle})")
                 if self._shared_state:
                     self._shared_state.crane_arm_closed = self._crane_arm_closed
         elif code in (ecodes.BTN_EAST, ecodes.BTN_B):
             if self._servos:
                 self._cycle_crane_grip()
-                if self._shared_state:
-                    self._shared_state.crane_grip_position = CRANE_GRIP_LABELS[self._crane_grip_index]
         elif code == ecodes.BTN_TL:
-            # L1 -> toggle the side lights (SWITCH_PINS[0,1]).
-            self._toggle_headlights()
+            self._toggle_side_lights()
         elif code == ecodes.BTN_TR:
             if self._buzzer:
                 self._buzzer.beep()
-        elif code == ecodes.BTN_TL2 if _BTN_TL2 is not None else False:
-            # Some DS4 driver variants also emit BTN_TL2/TR2 on trigger press.
-            # Treat as turbo trigger.
+        elif _BTN_TL2 is not None and code == _BTN_TL2:
             self._l2 = 1.0
             self._apply_turbo()
-        elif code == ecodes.BTN_TR2 if _BTN_TR2 is not None else False:
+        elif _BTN_TR2 is not None and code == _BTN_TR2:
             self._r2 = 1.0
             self._apply_turbo()
         elif code == ecodes.BTN_MODE:
@@ -470,66 +386,46 @@ class DS4Controller:
                 self._crane_grip_direction = -1
                 if self._shared_state:
                     self._shared_state.crane_arm_closed = False
-                    self._shared_state.crane_grip_position = "high"
+                    self._shared_state.crane_grip_position = 'high'
         elif code == ecodes.BTN_START:
-            # Options button: Police light + Turbo (100%) + single-motor turn.
             self._toggle_police_turbo()
         elif code == ecodes.BTN_SELECT:
-            # Share button: just toggle police lights (no turbo).
             self._toggle_police_only()
 
-    def _smooth_crane(self, servo_id, target_angle, step=DS4_CRANE_STEP, delay=0.03):
+    def _smooth_crane(self, sid, target, step=DS4_CRANE_STEP, delay=0.03):
         if not self._servos:
             return
-        current = self._servos.get_angle(servo_id)
-        diff = target_angle - current
+        current = self._servos.get_angle(sid)
+        diff = target - current
         if abs(diff) <= step:
-            self._servos.set_angle(servo_id, target_angle)
+            self._servos.set_angle(sid, target)
             return
-
         def _run():
             pos = current
             direction = 1 if diff > 0 else -1
             while self._connected and self._running:
                 pos += direction * step
-                if direction > 0 and pos >= target_angle:
-                    pos = target_angle
-                    self._servos.set_angle(servo_id, pos)
+                if (direction > 0 and pos >= target) or (direction < 0 and pos <= target):
+                    self._servos.set_angle(sid, target)
                     break
-                elif direction < 0 and pos <= target_angle:
-                    pos = target_angle
-                    self._servos.set_angle(servo_id, pos)
-                    break
-                self._servos.set_angle(servo_id, pos)
+                self._servos.set_angle(sid, pos)
                 time.sleep(delay)
-
         threading.Thread(target=_run, daemon=True).start()
 
     def _apply_turbo(self):
         turbo_on = (self._l2 > 0.5 or self._r2 > 0.5)
-
-        if turbo_on and not self._turbo_active:
-            self._turbo_active = True
-            logger.info("[DS4] TURBO BOOST ON! 100% speed, forward")
-        elif not turbo_on and self._turbo_active:
-            self._turbo_active = False
-            logger.info("[DS4] Turbo boost OFF")
-
-        if self._turbo_active:
+        self._turbo_active = turbo_on
+        if turbo_on:
             self._apply_move()
 
     def _apply_move(self):
         if not self._motors or not self._servos:
             return
-
         if self._shared_state and self._shared_state.web_active:
             return
-
         lx, ly = self._lx, self._ly
-
         if self._turbo_active:
-            with self._lock:
-                speed = 100
+            speed = 100
             d = 'forward'
         elif self._police_turbo_on:
             speed = 100
@@ -544,34 +440,28 @@ class DS4Controller:
                 self._servos.set_angle(SERVO_STEERING, 90)
                 return
             if self._shared_state:
-                with self._lock:
-                    self._speed = self._shared_state.speed
-            with self._lock:
-                speed = self._speed
+                self._speed = self._shared_state.speed
+            speed = self._speed
             d = 'forward' if ly >= 0 else 'backward'
-
         if abs(lx) < 0.1:
             turn, radius = 'no', 0.5
         elif lx > 0:
             turn, radius = 'right', max(0.2, 0.5 - lx * DS4_STEER_SENSITIVITY * 0.3)
         else:
             turn, radius = 'left', max(0.2, 0.5 + lx * DS4_STEER_SENSITIVITY * 0.3)
-
         if self._turbo_active or self._police_turbo_on:
             s = 100
         else:
             abs_ly = abs(ly)
             s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
             s = min(100, s)
-
         if s > 0:
             if self._police_turbo_on and turn != 'no':
                 self._motors_single_turn(s, d, turn)
             elif turn != 'no':
-                self.motors_move_with_forward_turn(s, d, turn, radius)
+                self._motors_move_with_turn(s, d, turn, radius)
             else:
                 self._motors.move(s, d, turn, radius)
-
         steer = max(30, min(150, 90 - int(lx * DS4_STEER_RANGE * DS4_STEER_SENSITIVITY)))
         self._servos.set_angle(SERVO_STEERING, steer)
 
@@ -580,91 +470,73 @@ class DS4Controller:
             return
         s = speed / 100.0
         if turn == 'left':
-            left, right = 0, s
+            left, right = 0.0, s
         else:
-            left, right = s, 0
-        if direction == 'forward':
-            self._motors._motor_a.forward(right)
-            self._motors._motor_b.forward(left)
-        elif direction == 'backward':
-            self._motors._motor_a.backward(right)
-            self._motors._motor_b.backward(left)
+            left, right = s, 0.0
+        forward = (direction == 'forward')
+        self._motors._set_side(self._motors._MOTOR_A_IN1 if hasattr(self._motors, '_MOTOR_A_IN1') else 26,
+                               self._motors._MOTOR_A_IN2 if hasattr(self._motors, '_MOTOR_A_IN2') else 21,
+                               self._motors._pwm_a, forward, right)
+        self._motors._set_side(self._motors._MOTOR_B_IN1 if hasattr(self._motors, '_MOTOR_B_IN1') else 27,
+                               self._motors._MOTOR_B_IN2 if hasattr(self._motors, '_MOTOR_B_IN2') else 18,
+                               self._motors._pwm_b, forward, left)
 
-    def motors_move_with_forward_turn(self, speed, direction, turn, radius):
+    def _motors_move_with_turn(self, speed, direction, turn, radius):
         if not self._motors or not self._motors._initialized:
             return
         s = speed / 100.0
         radius = max(0.2, min(1.0, radius))
-        inner_min = 0.3
         if turn == 'left':
-            left = max(s * inner_min, s * (1 - radius))
+            left = max(s * 0.3, s * (1 - radius))
             right = s
         else:
             left = s
-            right = max(s * inner_min, s * (1 - radius))
-
-        if direction == 'forward':
-            self._motors._motor_a.forward(right)
-            self._motors._motor_b.forward(left)
-        elif direction == 'backward':
-            self._motors._motor_a.backward(right)
-            self._motors._motor_b.backward(left)
-        else:
-            self._motors.stop()
+            right = max(s * 0.3, s * (1 - radius))
+        forward = (direction == 'forward')
+        self._motors._set_side(self._motors._MOTOR_A_IN1 if hasattr(self._motors, '_MOTOR_A_IN1') else 26,
+                               self._motors._MOTOR_A_IN2 if hasattr(self._motors, '_MOTOR_A_IN2') else 21,
+                               self._motors._pwm_a, forward, right)
+        self._motors._set_side(self._motors._MOTOR_B_IN1 if hasattr(self._motors, '_MOTOR_B_IN1') else 27,
+                               self._motors._MOTOR_B_IN2 if hasattr(self._motors, '_MOTOR_B_IN2') else 18,
+                               self._motors._pwm_b, forward, left)
 
     def _apply_pan_tilt(self):
         if not self._servos:
             return
         rx, ry = self._rx, self._ry
-
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
-
         if abs(rx) >= DS4_DEADZONE:
-            current_pan = self._servos.get_angle(SERVO_CAM_PAN)
+            cur = self._servos.get_angle(SERVO_CAM_PAN)
             step = max(1, int(abs(rx) * 6 * DS4_CAM_SENSITIVITY))
-            if rx > 0:
-                new_pan = min(180, current_pan + step)
-            else:
-                new_pan = max(0, current_pan - step)
-            if new_pan != current_pan:
-                self._servos.set_angle(SERVO_CAM_PAN, new_pan)
-                self._cam_pan = new_pan
-
+            new = min(180, cur + step) if rx > 0 else max(0, cur - step)
+            if new != cur:
+                self._servos.set_angle(SERVO_CAM_PAN, new)
+                self._cam_pan = new
         if abs(ry) >= DS4_DEADZONE:
-            current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
+            cur = self._servos.get_angle(SERVO_CAM_TILT)
             step = max(1, int(abs(ry) * 5 * DS4_CAM_SENSITIVITY))
-            if ry > 0:
-                new_tilt = min(180, current_tilt + step)
-            else:
-                new_tilt = max(0, current_tilt - step)
-            if new_tilt != current_tilt:
-                self._servos.set_angle(SERVO_CAM_TILT, new_tilt)
-                self._cam_tilt = new_tilt
+            new = min(180, cur + step) if ry > 0 else max(0, cur - step)
+            if new != cur:
+                self._servos.set_angle(SERVO_CAM_TILT, new)
+                self._cam_tilt = new
 
     def _apply_dpad(self):
-        # Dpad Up -> toggle the robot-hat main headlight (HEADLIGHT_PIN=5).
-        #   Edge-triggered: only fires when the hat transitions to the "up"
-        #   position, not while held.
-        # Dpad Down -> toggle rainbow (edge-triggered).
         if self._hat_y < 0 and not self._dpad_up_pressed:
             self._dpad_up_pressed = True
             self._toggle_headlight_main()
         elif self._hat_y >= 0:
             self._dpad_up_pressed = False
-
         if self._hat_y > 0 and not self._dpad_down_pressed:
             self._dpad_down_pressed = True
             self._toggle_rainbow()
         elif self._hat_y <= 0:
             self._dpad_down_pressed = False
-
         if self._hat_x < 0 and not self._dpad_left_pressed:
             self._dpad_left_pressed = True
             self._start_left_blinker()
         elif self._hat_x >= 0:
             self._dpad_left_pressed = False
-
         if self._hat_x > 0 and not self._dpad_right_pressed:
             self._dpad_right_pressed = True
             self._start_right_blinker()
@@ -672,18 +544,11 @@ class DS4Controller:
             self._dpad_right_pressed = False
 
     def _toggle_headlight_main(self):
-        """Toggle the robot-hat main headlight (the dedicated HEADLIGHT_PIN
-        channel, exposed via SwitchController.headlight_on/off)."""
         if self._switches and self._switches._initialized:
             on_now = self._switches.headlight_toggle()
             self._headlights_on = on_now
-            if self._shared_state is not None:
-                # mirror the state on the shared state so the web panel sees it
-                pass
-            logger.info(f"[DS4] Headlight (robot-hat pin) -> {'ON' if on_now else 'OFF'}")
 
-    def _toggle_headlights(self):
-        """Legacy helper: toggles both SWITCH_PINS[0,1] (side lights)."""
+    def _toggle_side_lights(self):
         if self._switches and self._switches._initialized:
             self._headlights_on = not self._headlights_on
             (self._switches.on if self._headlights_on else self._switches.off)(0)
@@ -695,40 +560,39 @@ class DS4Controller:
         self._rainbow_on = not self._rainbow_on
         if self._rainbow_on:
             self._leds.set_mode('rainbow', (255, 255, 255))
+            if self._shared_state:
+                self._shared_state.led_mode = 'rainbow'
+                self._shared_state.led_color = (255, 255, 255)
         else:
             self._leds.set_mode('off', (0, 0, 0))
+            if self._shared_state:
+                self._shared_state.led_mode = 'off'
 
     def _toggle_police_turbo(self):
-        """Options button: Police light + 100% speed + single-motor turns."""
         self._police_turbo_on = not self._police_turbo_on
         if self._police_turbo_on:
             if self._leds:
                 self._leds.set_mode('police', (255, 0, 0))
-            logger.info("[DS4] Police Turbo ON — 100% speed, single-motor turns")
+            if self._shared_state:
+                self._shared_state.led_mode = 'police'
         else:
             if self._leds:
                 self._leds.set_mode('off', (0, 0, 0))
-            logger.info("[DS4] Police Turbo OFF")
-        # Re-apply current move so the new turbo state takes effect immediately.
+            if self._shared_state:
+                self._shared_state.led_mode = 'off'
         self._apply_move()
 
     def _toggle_police_only(self):
-        """Share button: just toggle police light pattern (no turbo)."""
         if self._leds:
             if self._police_turbo_on:
-                # If turbo is on, share turns everything off.
                 self._police_turbo_on = False
                 self._leds.set_mode('off', (0, 0, 0))
-                logger.info("[DS4] Police light OFF (turbo was on)")
+                if self._shared_state:
+                    self._shared_state.led_mode = 'off'
             else:
-                # Toggle standalone police pattern.
-                self._police_only_on = not getattr(self, '_police_only_on', False)
-                if self._police_only_on:
-                    self._leds.set_mode('police', (255, 0, 0))
-                    logger.info("[DS4] Police light ON (no turbo)")
-                else:
-                    self._leds.set_mode('off', (0, 0, 0))
-                    logger.info("[DS4] Police light OFF")
+                self._leds.set_mode('police', (255, 0, 0))
+                if self._shared_state:
+                    self._shared_state.led_mode = 'police'
 
     def _start_left_blinker(self):
         if self._left_blinking:
@@ -736,26 +600,15 @@ class DS4Controller:
             if self._shared_state:
                 self._shared_state.left_blinker = False
             if self._switches and self._switches._initialized:
-                self._switches.off(0)
+                self._switches.set_blinker('left', False)
             return
         self._left_blinking = True
         if self._shared_state:
             self._shared_state.left_blinker = True
-
-        def _blink():
-            while self._left_blinking and self._connected and self._running:
-                if self._switches and self._switches._initialized:
-                    self._switches.on(0)
-                time.sleep(0.3)
-                if not self._left_blinking:
-                    break
-                if self._switches and self._switches._initialized:
-                    self._switches.off(0)
-                time.sleep(0.3)
-
-        self._left_blink_thread = threading.Thread(target=_blink, daemon=True)
-        self._left_blink_thread.start()
-        logger.info("[DS4] Left blinker ON")
+            self._shared_state.right_blinker = False
+        if self._switches and self._switches._initialized:
+            self._switches.set_blinker('right', False)
+            self._switches.set_blinker('left', True)
 
     def _start_right_blinker(self):
         if self._right_blinking:
@@ -763,26 +616,15 @@ class DS4Controller:
             if self._shared_state:
                 self._shared_state.right_blinker = False
             if self._switches and self._switches._initialized:
-                self._switches.off(1)
+                self._switches.set_blinker('right', False)
             return
         self._right_blinking = True
         if self._shared_state:
             self._shared_state.right_blinker = True
-
-        def _blink():
-            while self._right_blinking and self._connected and self._running:
-                if self._switches and self._switches._initialized:
-                    self._switches.on(1)
-                time.sleep(0.3)
-                if not self._right_blinking:
-                    break
-                if self._switches and self._switches._initialized:
-                    self._switches.off(1)
-                time.sleep(0.3)
-
-        self._right_blink_thread = threading.Thread(target=_blink, daemon=True)
-        self._right_blink_thread.start()
-        logger.info("[DS4] Right blinker ON")
+            self._shared_state.left_blinker = False
+        if self._switches and self._switches._initialized:
+            self._switches.set_blinker('left', False)
+            self._switches.set_blinker('right', True)
 
     def shutdown(self):
         self._left_blinking = False

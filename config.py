@@ -1,62 +1,49 @@
 import os
 
 # =============================================================================
-# PiCar Pro v1 — Configuration
+# PiCar-Pro v1 — Конфигурация
 # =============================================================================
-# Central configuration file for the Adeept PiCar-Pro robot.
-# All hardware pins, I2C addresses, servo channels, sensor settings,
-# camera parameters, DS4 gamepad options, and network defaults live here.
-# Import what you need:  from config import SERVO_STEERING, CRANE_ARM_OPEN
+# Это единственный файл с подробными комментариями.
+# Все остальные файлы проекта идут без комментариев.
+#
+# Здесь集中ены все настройки железа: пины, I2C-адреса, каналы сервоприводов,
+# параметры камеры, настройки геймпада DS4, сетевые порты и т.д.
+#
+# Импортируйте то, что нужно:  from config import SERVO_STEERING, CRANE_ARM_OPEN
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Simulation mode — set to True when running on a non-Raspberry Pi machine
-# (e.g. your laptop) to test the web panel without real hardware.
-#   Activation:  python3 boot.py --sim
-#   Or env var:  PICARPRO_SIM=1 python3 boot.py
-# When enabled, all hardware modules are replaced with lightweight stubs,
-# WiFi wait is skipped, and simulated sensor data is provided.
-# ---------------------------------------------------------------------------
-SIM_MODE = os.environ.get('PICARPRO_SIM', '').strip() in ('1', 'true', 'yes')
-
-# ---------------------------------------------------------------------------
-# Logging — if True, the server writes a rotating log file to logs/server.txt
-# (up to 100 MB, retained 7 days, compressed). If False, logs go to stderr.
-# ---------------------------------------------------------------------------
-log_file = False
-
-# ---------------------------------------------------------------------------
-# I2C bus number — almost always 1 on Raspberry Pi 3B+ / 4 / 5.
-# Used by PCA9685 (servos), OLED, and MPU6050.
+# I2C шина — на Raspberry Pi 3B+ / 4 / 5 это шина №1 (пины GPIO2=SDA, GPIO3=SCL)
+# Используется: PCA9685 (сервоприводы), SSD1306 (OLED), MPU6050 (IMU)
 # ---------------------------------------------------------------------------
 I2C_BUS = 1
 
 # ---------------------------------------------------------------------------
-# PCA9685 — 16-channel PWM / servo driver
-#   Address on the I2C bus (default 0x40 with A0-A5 solder jumpers open).
-#   Frequency for standard analog servos: 50 Hz (20 ms period).
+# PCA9685 — 16-канальный PWM-драйвер для сервоприводов
+#   Адрес на шине I2C (по умолчанию 0x40, если перемычки A0-A5 не замкнуты)
+#   Частота для стандартных аналоговых сервоприводов: 50 Гц (период 20 мс)
 # ---------------------------------------------------------------------------
 PCA9685_SERVO_ADDR = 0x40
 PCA9685_SERVO_FREQ = 50
 
 # ---------------------------------------------------------------------------
-# SSD1306 OLED — 128x64 monochrome display on I2C
+# SSD1306 OLED — 128x64 монохромный дисплей на I2C
 # ---------------------------------------------------------------------------
 OLED_I2C_ADDR = 0x3C
 OLED_WIDTH = 128
 OLED_HEIGHT = 64
 
 # ---------------------------------------------------------------------------
-# MPU6050 — 6-axis IMU (accelerometer + gyroscope)
-# Default I2C address 0x68 (0x69 if AD0 pin is high).
-# The driver auto-scans both addresses on startup.
+# MPU6050 — 6-осевой IMU (акселерометр + гироскоп)
+# Адрес по умолчанию 0x68 (0x69 если пин AD0 подтянут к высокому уровню)
+# Драйвер автоматически сканирует оба адреса при запуске
 # ---------------------------------------------------------------------------
 MPU6050_ADDR = 0x68
 
 # ---------------------------------------------------------------------------
-# L298N motor driver — GPIO pins
-#   Motor A = right side, Motor B = left side.
-#   EN = PWM enable (speed control), IN1/IN2 = direction.
+# L298N мотор-драйвер — GPIO пины
+#   Мотор A = правая сторона, Мотор B = левая сторона
+#   EN = PWM (управление скоростью), IN1/IN2 = направление
 # ---------------------------------------------------------------------------
 MOTOR_A_EN = 4
 MOTOR_A_IN1 = 26
@@ -64,13 +51,14 @@ MOTOR_A_IN2 = 21
 MOTOR_B_EN = 17
 MOTOR_B_IN1 = 27
 MOTOR_B_IN2 = 18
+MOTOR_PWM_FREQ = 1000
 
 # ---------------------------------------------------------------------------
-# Servo parameters — global limits for all PCA9685 channels
-#   SERVO_COUNT       — how many servo channels are active (0..6).
-#   SERVO_MIN_PULSE   — minimum pulse width in microseconds (500 us = 0 deg).
-#   SERVO_MAX_PULSE   — maximum pulse width in microseconds (2400 us = 180 deg).
-#   SERVO_INIT_ANGLE  — default angle when no specific init is set (90 deg).
+# Параметры сервоприводов — глобальные ограничения для всех каналов PCA9685
+#   SERVO_COUNT       — сколько каналов активно (0..6)
+#   SERVO_MIN_PULSE   — минимальная длительность импульса в микросекундах (500 мкс = 0°)
+#   SERVO_MAX_PULSE   — максимальная длительность импульса в микросекундах (2400 мкс = 180°)
+#   SERVO_INIT_ANGLE  — угол по умолчанию когда нет специального (90° = центр)
 # ---------------------------------------------------------------------------
 SERVO_COUNT = 7
 SERVO_MIN_PULSE = 500
@@ -78,14 +66,14 @@ SERVO_MAX_PULSE = 2400
 SERVO_INIT_ANGLE = 90
 
 # ---------------------------------------------------------------------------
-# Servo channel mapping — which PCA9685 channel does what
-#   0 = front-wheel steering
-#   1 = camera pan  (left-right)
-#   2 = camera tilt (up-down)
-#   3 = unused
-#   4 = unused
-#   5 = crane grip  (tilt angle: low / mid / high)
-#   6 = crane arm   (open / close the claw)
+# Маппинг каналов сервоприводов — какой канал PCA9685 за что отвечает
+#   0 = рулевое управление (передние колёса)
+#   1 = панорама камеры   (влево-вправо)
+#   2 = наклон камеры     (вверх-вниз)
+#   3 = не используется
+#   4 = не используется
+#   5 = наклон клешни     (low / mid / high)
+#   6 = клешня            (open / close)
 # ---------------------------------------------------------------------------
 SERVO_STEERING = 0
 SERVO_CAM_PAN = 1
@@ -94,10 +82,11 @@ SERVO_CRANE_ARM = 6
 SERVO_CRANE_GRIP = 5
 
 # ---------------------------------------------------------------------------
-# Servo initial angles — per-channel overrides.
-#   None = use a specialised default (see below), 90 = centre.
-#   Channels 5 & 6 are set to None so that ServoController._init_pca9685()
-#   can apply CRANE_ARM_OPEN and CRANE_GRIP_HIGH respectively.
+# Начальные углы сервоприводов — поканальные переопределения
+#   None = использовать специальное значение по умолчанию (см. ниже)
+#   90 = центр
+# Каналы 5 и 6 установлены в None, чтобы ServoController применил
+# CRANE_ARM_OPEN и CRANE_GRIP_HIGH соответственно
 # ---------------------------------------------------------------------------
 SERVO_INIT_ANGLES = {
     0: 90,
@@ -110,10 +99,10 @@ SERVO_INIT_ANGLES = {
 }
 
 # ---------------------------------------------------------------------------
-# Servo angle limits — per-channel min/max angle clamping.
-#   Each servo's movement range is clamped to these limits in
-#   ServoController.set_angle(). Can be overridden at runtime via
-#   the 'servo_set_limits' WebSocket command and persisted to servo_cal.json.
+# Ограничения углов сервоприводов — поканальное ограничение min/max
+# Каждый сервопривод ограничивается этими значениями в ServoController.set_angle()
+# Может быть переопределён во время выполнения через WebSocket-команду
+# 'servo_set_limits' и сохранён в servo_cal.json
 # ---------------------------------------------------------------------------
 SERVO_LIMITS = {
     0: {"min": 30, "max": 150},
@@ -126,102 +115,105 @@ SERVO_LIMITS = {
 }
 
 # ---------------------------------------------------------------------------
-# Crane arm (channel 6) — claw open / close angles
-#   CRANE_ARM_OPEN   = 80   — claw fully open  (relaxed spring).
-#   CRANE_ARM_CLOSED = 150  — claw fully closed (gripping object).
+# Клешня (канал 6) — углы открытия/закрытия
+#   CRANE_ARM_OPEN   = 80   — клешня полностью открыта (пружина расслаблена)
+#   CRANE_ARM_CLOSED = 150  — клешня полностью закрыта (захват объекта)
 # ---------------------------------------------------------------------------
 CRANE_ARM_OPEN = 80
 CRANE_ARM_CLOSED = 150
 
 # ---------------------------------------------------------------------------
-# Crane grip (channel 5) — tilt angle positions
-#   CRANE_GRIP_LOW  = 0    — arm fully lowered (picking up objects).
-#   CRANE_GRIP_MID  = 135  — arm at middle     (carrying position).
-#   CRANE_GRIP_HIGH = 190  — arm fully raised   (default / safe position).
+# Наклон клешни (канал 5) — угловые позиции
+#   CRANE_GRIP_LOW  = 0    — рука полностью опущена (захват объектов)
+#   CRANE_GRIP_MID  = 135  — рука в среднем положении (перенос)
+#   CRANE_GRIP_HIGH = 190  — рука полностью поднята (безопасная позиция)
 # ---------------------------------------------------------------------------
 CRANE_GRIP_LOW = 0
 CRANE_GRIP_MID = 135
 CRANE_GRIP_HIGH = 190
 
 # ---------------------------------------------------------------------------
-# Passive buzzer — GPIO 24, driven by PWM for melodies.
-# Set BUZZER_PASSIVE = False for an active buzzer (simple on/off).
+# Пассивный зуммер — GPIO 24, управляется через PWM для мелодий
+# Установите BUZZER_PASSIVE = False для активного зуммера (простое вкл/выкл)
 # ---------------------------------------------------------------------------
 BUZZER_PIN = 24
 BUZZER_PASSIVE = True
 
 # ---------------------------------------------------------------------------
-# HC-SR04 ultrasonic sensor — trigger / echo GPIO pins and max range (meters)
+# HC-SR04 ультразвуковой датчик — пины trigger / echo и максимальная дальность (см)
 # ---------------------------------------------------------------------------
 ULTRASONIC_TRIGGER = 11
 ULTRASONIC_ECHO = 8
 ULTRASONIC_MAX_DISTANCE = 2.0
 
 # ---------------------------------------------------------------------------
-# WS2812 RGB LED strip — number of LEDs and global brightness (0-255).
+# WS2812 RGB LED-лента — количество светодиодов и яркость (0-255)
 # ---------------------------------------------------------------------------
 LED_COUNT = 16
-LED_BRIGHTNESS = 255
+LED_BRIGHTNESS = 200
 
 # ---------------------------------------------------------------------------
-# Headlight / relay switches — GPIO pins for two switchable channels.
-# Typically used for front headlights and rear lights via relays.
+# Фары / реле — GPIO пины для двух переключаемых каналов
+# Обычно используются для передних фар и задних огней через реле
 # ---------------------------------------------------------------------------
 SWITCH_PINS = [6, 13]
 
 # ---------------------------------------------------------------------------
-# Robot-hat headlight — GPIO pin for the main front headlight.
-# This is a simple ON/OFF light connected to pin 1 on the robot-hat board.
+# Фара robot-hat — GPIO пин для основной передней фары
+# Это простая лампа вкл/выкл, подключённая к пину 1 на плате robot-hat
 # ---------------------------------------------------------------------------
 HEADLIGHT_PIN = 5
 
 # ---------------------------------------------------------------------------
-# IR line-tracking sensors — GPIO pins for left / middle / right infrared
-# detectors (matches the original Adeept PiCar-Pro wiring).
-# Active LOW: sensor outputs 0 when over a dark line, 1 on white surface.
+# ИК-датчики линии — GPIO пины для левого / среднего / правого инфракрасных
+# детекторов (соответствует оригинальной схеме Adeept PiCar-Pro)
+# Active LOW: датчик выдаёт 0 над тёмной линией, 1 над белой поверхностью
 # ---------------------------------------------------------------------------
-LINE_LEFT_PIN   = 19
+LINE_LEFT_PIN = 19
 LINE_MIDDLE_PIN = 16
-LINE_RIGHT_PIN  = 20
+LINE_RIGHT_PIN = 20
 
 # ---------------------------------------------------------------------------
-# Camera settings — resolution, frame rate, JPEG quality, and flip options.
+# Настройки камеры — разрешение, частота кадров, качество JPEG, опции переворота
 # ---------------------------------------------------------------------------
 CAMERA_RESOLUTION = (640, 480)
-CAMERA_FPS = 45
-CAMERA_JPEG_QUALITY = 80
+CAMERA_FPS = 30
+CAMERA_JPEG_QUALITY = 75
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL = False
 
 # ---------------------------------------------------------------------------
-# Computer Vision — line-following parameters
+# Computer Vision — параметры следования по линии
+#   CV_LINE_POS_1    — Y-координата первой линии сканирования (нижняя)
+#   CV_LINE_POS_2    — Y-координата второй линии сканирования (верхняя)
+#   CV_LINE_THRESHOLD — порог бинаризации
 # ---------------------------------------------------------------------------
 CV_LINE_POS_1 = 440
 CV_LINE_POS_2 = 380
 CV_LINE_THRESHOLD = 80
 
 # ---------------------------------------------------------------------------
-# CV line-following — speed and steering tuning
+# CV следование по линии — настройка скорости и усиления руля
 # ---------------------------------------------------------------------------
 CV_LINE_FOLLOW_SPEED = 35
 CV_LINE_FOLLOW_STEER_GAIN = 0.8
 
 # ---------------------------------------------------------------------------
-# Voice control — Sherpa-NCNN offline speech recognition
+# Голосовое управление — Sherpa-NCNN офлайн распознавание речи
 # ---------------------------------------------------------------------------
 VOICE_MODEL_PATH = "/opt/sherpa-ncnn/model"
 VOICE_ALSA_DEVICE = "default"
 VOICE_OUTPUT_FILE = "/tmp/picarpro_voice.txt"
 
 # ---------------------------------------------------------------------------
-# DualShock 4 / gamepad configuration
-#   DS4_DEVICE_NAME       — substring to match in evdev device names.
-#   DS4_DEADZONE          — axis dead zone (0..1).
-#   DS4_STEER_SENSITIVITY — multiplier for steering response.
-#   DS4_CAM_SENSITIVITY   — multiplier for camera pan/tilt speed.
-#   DS4_HEARTBEAT_TIMEOUT — seconds without any event before disconnect.
-#   DS4_WATCHDOG_INTERVAL — how often the watchdog thread checks.
-#   DS4_READ_TIMEOUT      — select() timeout when reading events.
+# DualShock 4 / геймпад — конфигурация
+#   DS4_DEVICE_NAME       — подстрока для поиска в именах evdev-устройств
+#   DS4_DEADZONE          — мёртвая зона осей (0..1)
+#   DS4_STEER_SENSITIVITY — множитель чувствительности руля
+#   DS4_CAM_SENSITIVITY   — множитель скорости pan/tilt камеры
+#   DS4_HEARTBEAT_TIMEOUT — секунд без событий перед отключением
+#   DS4_WATCHDOG_INTERVAL — как часто watchdog-поток проверяет состояние
+#   DS4_READ_TIMEOUT      — таймаут select() при чтении событий
 # ---------------------------------------------------------------------------
 DS4_DEVICE_NAME = "Wireless Controller"
 DS4_DEADZONE = 0.12
@@ -232,7 +224,7 @@ DS4_WATCHDOG_INTERVAL = 3.0
 DS4_READ_TIMEOUT = 2.0
 
 # ---------------------------------------------------------------------------
-# DS4 — axis inversion and speed tuning
+# DS4 — инверсия осей и настройка скорости
 # ---------------------------------------------------------------------------
 DS4_INVERT_LY = False
 DS4_INVERT_RY = False
@@ -241,25 +233,25 @@ DS4_CRANE_STEP = 5
 DS4_STEER_RANGE = 60
 
 # ---------------------------------------------------------------------------
-# Network — WebSocket (real-time control) and Flask (web UI / API) ports.
+# Сеть — WebSocket (управление в реальном времени) и Flask (веб-UI / API) порты
 # ---------------------------------------------------------------------------
 WEBSOCKET_PORT = 8888
 FLASK_PORT = 5000
 
 # ---------------------------------------------------------------------------
-# WiFi Hotspot — fallback AP when no known WiFi is available.
+# WiFi Hotspot — резервная точка доступа когда нет известной WiFi-сети
 # ---------------------------------------------------------------------------
 HOTSPOT_SSID = "Adeept_Robot"
 HOTSPOT_PASSWORD = "12345678"
 HOTSPOT_IP = "10.42.0.1"
 
 # ---------------------------------------------------------------------------
-# Flask secret key — used for session signing.
+# Flask secret key — для подписи сессий
 # ---------------------------------------------------------------------------
 SECRET_KEY = os.environ.get('PICARPRO_SECRET_KEY', 'picarpro')
 
 # ---------------------------------------------------------------------------
-# Steering angle map — maps direction commands to servo angles.
+# Маппинг углов руля — связывает команды направления с углами сервопривода
 # ---------------------------------------------------------------------------
 STEER_MAP = {
     'forward': 90, 'backward': 90, 'left': 150, 'right': 30,
@@ -268,30 +260,27 @@ STEER_MAP = {
 }
 
 # ---------------------------------------------------------------------------
-# OLED low-voltage warning — message shown on the OLED when the Raspberry Pi
-# firmware reports an under-voltage condition (the same source the desktop
-# "Low voltage warning" notification uses). The text replaces the bottom
-# line of the display while the warning is active.
+# OLED предупреждение о низком напряжении — текст, показываемый на OLED когда
+# прошивка Raspberry Pi сообщает о просадке напряжения (тот же источник, что
+# использует уведомление рабочего стола "Low voltage warning")
+# Текст заменяет нижнюю строку дисплея пока предупреждение активно
 # ---------------------------------------------------------------------------
 OLED_LOW_VOLTAGE_TEXT = "Low voltage warning Please check your power supply"
 
 # ---------------------------------------------------------------------------
-# Voltage monitoring — how the low-voltage state is detected.
-#   'dmesg'     — scan the kernel ring buffer for 'Under-voltage' events
-#                (default; matches the desktop warning).
-#   'vcgencmd'  — use `vcgencmd measure_volts core` and threshold it.
-#   'auto'      — try 'dmesg' first, fall back to 'vcgencmd'.
+# Мониторинг напряжения — как определяется состояние низкого напряжения
+#   'dmesg'     — сканирование кольцевого буфера ядра на события 'Under-voltage'
+#                (по умолчанию; совпадает с предупреждением рабочего стола)
+#   'vcgencmd'  — использовать `vcgencmd measure_volts core` и пороговое значение
+#   'auto'      — сначала 'dmesg', затем 'vcgencmd' как fallback
 # ---------------------------------------------------------------------------
 VOLTAGE_CHECK_SOURCE = 'auto'
-LOW_VOLTAGE_THRESHOLD_V = 1.2   # only used when source == 'vcgencmd' (core rail)
-VOLTAGE_CHECK_INTERVAL_S = 2.0  # how often oled_loop rechecks the voltage
+LOW_VOLTAGE_THRESHOLD_V = 1.2
+VOLTAGE_CHECK_INTERVAL_S = 2.0
 
 # ---------------------------------------------------------------------------
-# Motion defaults
+# Настройки движения по умолчанию
 # ---------------------------------------------------------------------------
 DEFAULT_SPEED = 50
 TURN_RADIUS_MIN = 0.2
 TURN_RADIUS_MAX = 1.0
-
-# Backward-compat alias kept for any code that still references the old name.
-OLED_SCROLL_TEXT = OLED_LOW_VOLTAGE_TEXT

@@ -1,11 +1,12 @@
 import socket, subprocess, threading, time
-from config import FLASK_PORT, HOTSPOT_IP
 from Server.logger import logger
+from Server.utils.system_info import SystemInfo
+from config import FLASK_PORT
 
 
 def get_ip():
     try:
-        for iface in ['wlan0', 'wlan1', 'uap0']:
+        for iface in ['wlan0', 'wlan1', 'uap0', 'eth0']:
             try:
                 result = subprocess.run(
                     ["ip", "addr", "show", iface],
@@ -15,7 +16,7 @@ def get_ip():
                     line = line.strip()
                     if line.startswith("inet "):
                         ip = line.split()[1].split("/")[0]
-                        if ip.startswith(("10.42.", "192.168.4.", "172.20.")):
+                        if ip.startswith(("10.42.", "192.168.", "172.20.")):
                             return ip
             except Exception:
                 continue
@@ -30,74 +31,45 @@ def get_ip():
             return ip
     except Exception:
         pass
-    return HOTSPOT_IP
+    return "127.0.0.1"
 
 
 def start_redirect_server(port=80, target_port=None):
     if target_port is None:
         target_port = FLASK_PORT
-
     try:
         from http.server import HTTPServer, BaseHTTPRequestHandler
-
-        class RedirectHandler(BaseHTTPRequestHandler):
+        class R(BaseHTTPRequestHandler):
             def do_GET(self):
-                host = self.headers.get('Host', '')
-                if ':' in host:
-                    host = host.split(':')[0]
-                redirect_url = f'http://{host}:{target_port}{self.path}'
+                host = self.headers.get('Host', '').split(':')[0]
                 self.send_response(302)
-                self.send_header('Location', redirect_url)
-                self.send_header('Content-Type', 'text/html')
+                self.send_header('Location', f'http://{host}:{target_port}{self.path}')
                 self.end_headers()
-                self.wfile.write(
-                    f'<html><body>Redirecting to <a href="{redirect_url}">'
-                    f'{redirect_url}</a></body></html>'.encode()
-                )
-
-            def log_message(self, format, *args):
-                pass
-
-        server = HTTPServer(('0.0.0.0', port), RedirectHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        logger.info(f"[WebServer] Port {port} redirect -> :{target_port}")
+            def log_message(self, *a): pass
+        server = HTTPServer(('0.0.0.0', port), R)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        logger.info(f'[Web] Port {port} redirect -> :{target_port}')
         return True
-    except PermissionError:
-        logger.warning(f"[WebServer] Cannot bind port {port} (need root). "
-                       f"Run with sudo or access http://IP:{target_port}")
-        return False
-    except OSError as e:
-        if 'Address already in use' in str(e) or 'Permission denied' in str(e):
-            logger.warning(f"[WebServer] Port {port} already in use or denied: {e}")
-        else:
-            logger.warning(f"[WebServer] Port {port} redirect failed: {e}")
-        return False
     except Exception as e:
-        logger.warning(f"[WebServer] Port {port} redirect failed: {e}")
+        logger.warning(f'[Web] Port {port} redirect failed: {e}')
         return False
 
 
 def oled_loop(state):
-    ip, port = get_ip(), FLASK_PORT
-    from Server.utils.system_info import SystemInfo
-    from config import VOLTAGE_CHECK_INTERVAL_S
+    ip = get_ip()
+    port = FLASK_PORT
     while state.running:
         try:
             info = SystemInfo.get_all()
             ram = info['ram']
-            low_v = info.get('low_voltage', False)
-
-            # Toggle the OLED low-voltage warning — when active, the OLED
-            # module replaces the bottom line with the blinking warning
-            # text instead of the normal project tag / scrolling text.
+            low_v = info['low_voltage']
             if state.oled and state.oled._initialized:
                 state.oled.set_low_voltage(low_v)
                 state.oled.set_lines([
-                    f"{ip}:{port}",
-                    f"CPU:{info['cpu_temp']}C {info['cpu_usage']}%",
-                    f"RAM:{ram['used_mb']}/{ram['total_mb']}M {ram['percent']}%",
+                    f'{ip}:{port}',
+                    f'CPU:{info["cpu_temp"]}C {info["cpu_usage"]}%',
+                    f'RAM:{ram["used_mb"]}/{ram["total_mb"]}M {ram["percent"]}%',
                 ])
         except Exception:
             pass
-        time.sleep(max(1.0, min(VOLTAGE_CHECK_INTERVAL_S, 5.0)))
+        time.sleep(2.0)

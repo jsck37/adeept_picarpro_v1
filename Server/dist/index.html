@@ -3,495 +3,236 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>PiCar Pro v1</title>
+<title>PiCar Pro v2</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="status-bar" id="status-bar">
-  <div class="sb-item"><span class="sb-label">CPU</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">CPU %</span><span class="sb-value" id="sb-cpu-usage">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">RAM</span><span class="sb-value" id="sb-ram">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Dist</span><span class="sb-value" id="sb-distance">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">IMU</span><span class="sb-value" id="sb-imu">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Speed</span><span class="sb-value" id="sb-speed">50%</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Mode</span><span class="sb-value" id="sb-module">Ready</span></div>
-  <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
-  <div class="sb-sep"></div>
-  <div class="conn-dot" id="connection-dot"></div>
+<div class="statusbar">
+  <div class="sbit"><span>CPU</span><b id="sb-cpu-temp">--</b></div>
+  <div class="sbit"><span>%</span><b id="sb-cpu-usage">--</b></div>
+  <div class="sbit"><span>RAM</span><b id="sb-ram">--</b></div>
+  <div class="sbit"><span>Dist</span><b id="sb-distance">--</b></div>
+  <div class="sbit"><span>IMU</span><b id="sb-imu">--</b></div>
+  <div class="sbit"><span>Speed</span><b id="sb-speed">50%</b></div>
+  <div class="sbit"><span>Mode</span><b id="sb-mode">Ready</b></div>
+  <div class="sbit"><span>DS4</span><b id="sb-ds4">--</b></div>
+  <div class="dot" id="dot"></div>
 </div>
 
-<div id="low-voltage-banner" style="display:none;background:#ea4335;color:#fff;padding:8px 16px;font-weight:600;text-align:center;font-size:.9rem;animation:vblink 1s infinite">
-  Low voltage warning Please check your power supply
-</div>
+<div id="lv-banner" style="display:none">Low voltage warning Please check your power supply</div>
 
-<header class="header">
-  <div class="header-logo">
-    <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="16" rx="4" fill="#1a73e8"/><circle cx="8" cy="24" r="3" fill="#202124"/><circle cx="24" cy="24" r="3" fill="#202124"/><rect x="10" y="4" width="12" height="6" rx="2" fill="#1558b0"/><circle cx="20" cy="7" r="1.5" fill="#5a9cf5"/></svg>
-    <span>PiCar Pro v1</span>
+<div class="main">
+  <div class="col">
+
+    <div class="card">
+      <h2>Camera</h2>
+      <img id="feed" src="/video_feed" alt="feed">
+      <div class="cv-badge" id="cv-badge">CV: Off</div>
+    </div>
+
+    <div class="card">
+      <h2>Computer Vision</h2>
+      <div class="btnrow">
+        <button class="cvbtn active" data-cv="none">Off</button>
+        <button class="cvbtn" data-cv="findlineCV">Line</button>
+        <button class="cvbtn" data-cv="trackHand">Hand</button>
+      </div>
+      <div id="hand-color-row" style="display:none;margin-top:8px">
+        <div class="row-label">Hand color preset</div>
+        <div class="btnrow" id="hand-presets">
+          <button class="psbtn active" data-preset="skin">Skin</button>
+          <button class="psbtn" data-preset="red">Red</button>
+          <button class="psbtn" data-preset="green">Green</button>
+          <button class="psbtn" data-preset="blue">Blue</button>
+          <button class="psbtn" data-preset="yellow">Yellow</button>
+        </div>
+        <details>
+          <summary>Custom HSV</summary>
+          <div class="hsv-grid">
+            <label>H low</label><input type="range" id="hl" min="0" max="179" value="0"><b id="hl-v">0</b>
+            <label>S low</label><input type="range" id="sl" min="0" max="255" value="30"><b id="sl-v">30</b>
+            <label>V low</label><input type="range" id="vl" min="0" max="255" value="50"><b id="vl-v">50</b>
+            <label>H high</label><input type="range" id="hh" min="0" max="179" value="25"><b id="hh-v">25</b>
+            <label>S high</label><input type="range" id="sh" min="0" max="255" value="255"><b id="sh-v">255</b>
+            <label>V high</label><input type="range" id="vh" min="0" max="255" value="255"><b id="vh-v">255</b>
+          </div>
+          <button class="btn" id="apply-hsv">Apply</button>
+        </details>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Autonomous</h2>
+      <div class="btnrow" id="auto-row">
+        <button class="btn" data-auto="radarScan">Radar</button>
+        <button class="btn" data-auto="automatic">Drive</button>
+        <button class="btn" data-auto="trackLine">IR Line</button>
+        <button class="btn" data-auto="keepDistance">Distance</button>
+        <button class="btn danger" data-auto="stop">Stop</button>
+      </div>
+      <div class="ir-row">
+        IR: L=<b id="ir-l">--</b> M=<b id="ir-m">--</b> R=<b id="ir-r">--</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>DS4 Gamepad</h2>
+      <div class="ds4-status">
+        <span class="dot small" id="ds4-dot"></span>
+        <span id="ds4-text">Not connected</span>
+      </div>
+      <div class="btnrow">
+        <button class="btn" id="bt-scan">Scan BT</button>
+        <button class="btn" id="bt-auto">Auto-connect</button>
+        <button class="btn danger" id="bt-disc">Disconnect</button>
+      </div>
+      <div id="bt-list" style="display:none">
+        <div class="row-label">Nearby devices:</div>
+        <div id="bt-devs"></div>
+      </div>
+      <div class="ds4-help">
+        <b>L-stick</b> drive · <b>R-stick</b> cam · <b>L2/R2</b> turbo<br>
+        <b>Dpad↑</b> headlight · <b>Dpad↓</b> rainbow · <b>Dpad←/→</b> blinkers<br>
+        <b>×/○</b> crane arm/grip · <b>△</b> CV line · <b>□</b> hand track<br>
+        <b>Options</b> police+turbo+single-motor · <b>Share</b> police only<br>
+        <b>PS</b> home · <b>L1</b> side lights · <b>R1</b> beep
+      </div>
+    </div>
+
   </div>
-  <nav class="tab-bar">
-    <button class="tab-btn active" data-tab="control">Control</button>
-    <button class="tab-btn" data-tab="console">Console</button>
-    <button class="tab-btn" data-tab="info">Info</button>
-  </nav>
-</header>
 
-<div class="tab-content active" id="content-control">
-  <div class="control-layout">
+  <div class="col">
 
-    <div class="col-left">
-
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="camera-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Camera
+    <div class="card">
+      <h2>Movement</h2>
+      <div class="joy-row">
+        <div>
+          <div class="joy" id="joy">
+            <div class="knob" id="knob"></div>
           </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          <div class="row-label" id="joy-label">Wheels — WASD</div>
         </div>
-        <div class="collapsible-body open" id="camera-body">
-          <div class="camera-wrap">
-            <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
-            <div class="cv-badge" id="cv-badge">CV: Off</div>
+        <div>
+          <div class="joy" id="cam-joy">
+            <div class="knob" id="cam-knob"></div>
           </div>
+          <div class="row-label">Camera — Arrows</div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="cv-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/></svg>
-            Computer Vision
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="cv-body">
-          <div class="cv-modes">
-            <button class="cv-btn active" data-cv="none">Off</button>
-            <button class="cv-btn" data-cv="findlineCV">CV Line</button>
-            <button class="cv-btn" data-cv="trackHand">Hand</button>
-          </div>
-          <div id="hand-color-row" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #e0e0e0">
-            <div style="font-size:.75rem;color:#5f6368;font-weight:600;margin-bottom:4px">Hand color preset</div>
-            <div class="btn-group" id="hand-color-group">
-              <button class="gbtn active" data-hand-preset="skin">Skin</button>
-              <button class="gbtn" data-hand-preset="red">Red</button>
-              <button class="gbtn" data-hand-preset="green">Green</button>
-              <button class="gbtn" data-hand-preset="blue">Blue</button>
-              <button class="gbtn" data-hand-preset="yellow">Yellow</button>
-            </div>
-            <details style="margin-top:6px">
-              <summary style="font-size:.72rem;color:#5f6368;cursor:pointer">Custom HSV (advanced)</summary>
-              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center;font-size:.7rem;color:#5f6368;margin-top:6px">
-                <span>H low</span><input type="range" id="hand-h-low" min="0" max="179" value="0"><span id="hand-h-low-val">0</span>
-                <span>S low</span><input type="range" id="hand-s-low" min="0" max="255" value="30"><span id="hand-s-low-val">30</span>
-                <span>V low</span><input type="range" id="hand-v-low" min="0" max="255" value="50"><span id="hand-v-low-val">50</span>
-                <span>H high</span><input type="range" id="hand-h-high" min="0" max="179" value="25"><span id="hand-h-high-val">25</span>
-                <span>S high</span><input type="range" id="hand-s-high" min="0" max="255" value="255"><span id="hand-s-high-val">255</span>
-                <span>V high</span><input type="range" id="hand-v-high" min="0" max="255" value="255"><span id="hand-v-high-val">255</span>
-              </div>
-              <button class="btn-sm btn-primary" id="hand-color-apply" style="margin-top:6px">Apply custom</button>
-            </details>
-          </div>
-        </div>
+      <h3>Crane</h3>
+      <div class="row-label">Arm (grab/release)</div>
+      <div class="btnrow">
+        <button class="btn" data-crane="arm_open">Release</button>
+        <button class="btn" data-crane="arm_close">Grab</button>
+      </div>
+      <div class="row-label">Grip tilt</div>
+      <div class="btnrow">
+        <button class="btn" data-crane="grip_low">Low</button>
+        <button class="btn" data-crane="grip_mid">Mid</button>
+        <button class="btn active" data-crane="grip_high">High</button>
+      </div>
+      <div class="slider-row">
+        <label>Grip</label>
+        <input type="range" id="grip-slider" min="0" max="190" value="190">
+        <b id="grip-val">190°</b>
       </div>
 
-      <div class="card" id="card-autonomous">
-        <div class="card-title collapsible-header open" data-target="auto-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="2"/></svg>
-            Autonomous<span class="hw-missing-tag" id="auto-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="auto-body">
-          <div id="auto-controls">
-            <div class="btn-group" id="auto-group">
-              <button class="gbtn" data-auto="radarScan">Radar</button>
-              <button class="gbtn" data-auto="automatic">Drive</button>
-              <button class="gbtn" data-auto="trackLine">IR Line</button>
-              <button class="gbtn" data-auto="keepDistance">Distance</button>
-              <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
-            </div>
-            <div style="margin-top:8px;font-size:.75rem;color:#5f6368">
-              <div style="font-weight:600;margin-bottom:2px">IR Line Sensors</div>
-              <div style="display:flex;gap:12px">
-                <span>Left: <b id="ir-left-val">--</b></span>
-                <span>Middle: <b id="ir-middle-val">--</b></span>
-                <span>Right: <b id="ir-right-val">--</b></span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <h3>Speed</h3>
+      <div class="slider-row">
+        <label>Motor</label>
+        <input type="range" id="speed" min="0" max="100" value="50">
+        <b id="speed-val">50%</b>
       </div>
-
-      <div class="card" id="card-ds4">
-        <div class="card-title collapsible-header open" data-target="ds4-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
-            DS4 Controller
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="ds4-body">
-          <div id="ds4-controls">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
-              <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
-            </div>
-
-            <div class="bt-section">
-              <div style="display:flex;gap:6px;margin-bottom:8px">
-                <button class="btn-sm btn-primary" id="bt-scan-btn">Scan BT</button>
-                <button class="btn-sm btn-secondary" id="bt-auto-btn">Auto-Connect</button>
-                <button class="btn-sm btn-danger" id="bt-disconnect-btn" style="display:none">Disconnect</button>
-              </div>
-              <div id="bt-device-list" style="display:none;max-height:200px;overflow-y:auto;margin-bottom:8px">
-                <div style="font-size:.72rem;color:#5f6368;margin-bottom:4px">Nearby devices:</div>
-                <div id="bt-devices"></div>
-              </div>
-              <div id="bt-scanning" style="display:none;font-size:.72rem;color:#fdd663">Scanning...</div>
-              <div id="bt-saved-info" style="font-size:.7rem;color:#5f6368;margin-top:4px"></div>
-            </div>
-
-            <div style="font-size:.72rem;color:#5f6368;line-height:1.5">
-              <div><b>Left stick</b> — Drive (fwd/back/turn)</div>
-              <div><b>Right stick</b> — Camera pan/tilt</div>
-              <div><b>L2</b> / <b>R2</b> — Turbo boost (100% speed)</div>
-              <div><b>L1</b> — Headlights &nbsp; <b>R1</b> — Buzzer beep</div>
-              <div><b>Dpad Up</b> — Headlights &nbsp; <b>Dpad Down</b> — Rainbow</div>
-              <div><b>Dpad Left/Right</b> — Blinkers</div>
-              <div><b>Cross</b> — Crane arm (grab/release)</div>
-              <div><b>Circle</b> — Crane grip tilt (low/mid/high)</div>
-              <div><b>Triangle</b> — CV line follow &nbsp; <b>Square</b> — Hand track</div>
-              <div><b>Options</b> — Police light + 100% + single-motor turn</div>
-              <div><b>PS</b> — Home all servos</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="card-voice">
-        <div class="card-title collapsible-header open" data-target="voice-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            Voice Control<span class="hw-missing-tag" id="voice-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="voice-body">
-          <div id="voice-controls">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div id="voice-status-dot" style="width:10px;height:10px;border-radius:50%;background:#9aa0a6"></div>
-              <span id="voice-status-text" style="font-size:.78rem;color:#9aa0a6">Inactive</span>
-            </div>
-            <div class="btn-group" id="voice-group">
-              <button class="gbtn" id="voice-start-btn" style="background:#34a853;color:#fff">Start</button>
-              <button class="gbtn" id="voice-stop-btn" style="background:#ea4335;color:#fff;display:none">Stop</button>
-            </div>
-            <div style="margin-top:8px">
-              <div style="font-size:.72rem;color:#5f6368;font-weight:600;margin-bottom:2px">Last Command</div>
-              <div id="voice-last-cmd" style="font-size:.82rem;font-family:'Courier New',monospace;font-weight:600;color:#1a73e8;min-height:1.2em;padding:3px 8px;background:#f8f9fa;border-radius:5px">&mdash;</div>
-            </div>
-            <div style="font-size:.72rem;color:#5f6368;line-height:1.5;margin-top:8px">
-              <div><b>forward</b> / <b>backward</b> / <b>stop</b> &mdash; Drive</div>
-              <div><b>look left</b> / <b>look right</b> &mdash; Steering</div>
-              <div><b>camera up</b> / <b>camera down</b> &mdash; Tilt</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
     </div>
 
-    <div class="col-right">
-
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="move-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-            Movement
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="move-body">
-          <div class="dual-joystick-row">
-            <div class="joystick-area">
-              <div class="joystick-container" id="joystick-container">
-                <div class="joystick-base"></div>
-                <div class="joystick-crosshair"></div>
-                <div class="joystick-knob" id="joystick-knob"></div>
-              </div>
-              <div class="joystick-label" id="joystick-label">Wheels — WASD</div>
-            </div>
-            <div class="joystick-area">
-              <div class="cam-joystick-container" id="cam-joystick-container">
-                <div class="cam-joystick-base"></div>
-                <div class="cam-joystick-crosshair"></div>
-                <div class="cam-joystick-knob" id="cam-joystick-knob"></div>
-                <div class="cam-joystick-labels">
-                  <span class="cam-lbl cam-lbl-up">Up</span>
-                  <span class="cam-lbl cam-lbl-down">Down</span>
-                  <span class="cam-lbl cam-lbl-left">Left</span>
-                  <span class="cam-lbl cam-lbl-right">Right</span>
-                </div>
-              </div>
-              <div class="cam-joystick-label" id="cam-joystick-label">Camera — Arrows</div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
-            <div class="card-title collapsible-header open" data-target="claw-body" style="margin-bottom:0">
-              <div style="display:flex;align-items:center;gap:8px">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
-                Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
-              </div>
-              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-            <div class="collapsible-body open" id="claw-body">
-              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm (grab/release)</div>
-              <div class="btn-group" id="crane-arm-group">
-                <button class="gbtn crane-arm-btn" id="crane-arm-open" data-action="arm_open">Release</button>
-                <button class="gbtn crane-arm-btn" id="crane-arm-close" data-action="arm_close">Grab</button>
-              </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (190°)</span></div>
-              <div class="btn-group" id="crane-grip-group">
-                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
-                <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-high" data-action="grip_high">High</button>
-              </div>
-              <div class="slider-row" style="margin-top:6px">
-                <label>Grip</label>
-                <input type="range" id="crane-grip-slider" min="0" max="190" value="190">
-                <span class="val" id="crane-grip-slider-val">190°</span>
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e0e0e0">
-            <div class="card-title" style="margin-bottom:6px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                Speed
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Motor</label>
-              <input type="range" id="speed-slider" min="0" max="100" value="50">
-              <span class="val" id="speed-val">50%</span>
-            </div>
-          </div>
-
-
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="servo-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><line x1="14" y1="9" x2="20" y2="9"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="15" x2="20" y2="15"/></svg>
-            Servo Control<span class="hw-missing-tag" id="servo-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="servo-body">
-          <div id="servo-controls">
-            <div class="servo-grid" id="servo-grid"></div>
-            <div class="servo-home-row">
-              <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
-              <button class="btn-sm btn-primary" id="servo-save-limits">Save Limits</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title collapsible-header open" data-target="mpu-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            IMU Sensor (MPU6050)<span class="hw-missing-tag" id="mpu-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="mpu-body">
-          <div id="mpu-controls">
-            <div class="mpu-grid" id="mpu-grid">
-              <div class="mpu-section">
-                <div class="mpu-section-title">Accelerometer (g)</div>
-                <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-ax">0.000</span></div>
-                <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-ay">0.000</span></div>
-                <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-az">0.000</span></div>
-              </div>
-              <div class="mpu-section">
-                <div class="mpu-section-title">Gyroscope (deg/s)</div>
-                <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-gx">0.0</span></div>
-                <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-gy">0.0</span></div>
-                <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-gz">0.0</span></div>
-              </div>
-              <div class="mpu-section">
-                <div class="mpu-section-title">Orientation (deg)</div>
-                <div class="mpu-row"><span class="mpu-label">Roll</span><span class="mpu-val" id="mpu-roll">0.0</span></div>
-                <div class="mpu-row"><span class="mpu-label">Pitch</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
-              </div>
-              <div style="margin-top:8px">
-                <button class="btn-sm btn-secondary" id="i2c-scan-btn" style="font-size:.75rem">Scan I2C Bus</button>
-                <span id="i2c-scan-result" style="font-size:.72rem;color:#8ab4f8;margin-left:6px"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="card-headlights">
-        <div class="card-title collapsible-header open" data-target="hl-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Headlights &amp; Signals<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="hl-body">
-          <div id="hl-controls">
-            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Main Headlight (robot-hat)</div>
-            <div class="headlight-row" style="margin-bottom:10px">
-              <button class="headlight-btn off" id="hl-main">Headlight</button>
-            </div>
-            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600;text-align:center">Turn Signals</div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">
-              <button class="headlight-btn off" id="hl-left-signal" style="font-size:.75rem">&#9664; Left</button>
-              <button class="headlight-btn off" id="hl-both-signal" style="font-size:.75rem">Stop Both</button>
-              <button class="headlight-btn off" id="hl-right-signal" style="font-size:.75rem">Right &#9654;</button>
-            </div>
-            <div style="margin-top:6px;font-size:.75rem;color:#5f6368;text-align:center">
-              <div style="display:flex;gap:12px;justify-content:center">
-                <span>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
-                <span>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
-              </div>
-            </div>
-            <div style="margin-top:10px;padding-top:8px;border-top:1px solid #e0e0e0">
-              <div style="font-size:.75rem;color:#5f6368;font-weight:600">Side Lights</div>
-              <div class="headlight-row" style="margin-top:6px">
-                <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
-                <button class="headlight-btn off" id="hl-both" data-port="both">Both</button>
-                <button class="headlight-btn off" id="hl-right" data-port="2">Right</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="card-led">
-        <div class="card-title collapsible-header open" data-target="led-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="20" height="4" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
-            LED Strip<span class="hw-missing-tag" id="led-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="led-body">
-          <div id="led-controls">
-            <div class="led-color-row">
-              <label class="led-color-label">Color</label>
-              <input type="color" id="led-color" value="#ff0000" class="led-color-input">
-              <div id="led-color-presets" class="led-presets">
-                <button class="color-preset" data-hex="#ff0000" style="background:#ff0000" title="Red"></button>
-                <button class="color-preset" data-hex="#00ff00" style="background:#00ff00" title="Green"></button>
-                <button class="color-preset" data-hex="#0000ff" style="background:#0000ff" title="Blue"></button>
-                <button class="color-preset" data-hex="#ffff00" style="background:#ffff00" title="Yellow"></button>
-                <button class="color-preset" data-hex="#ff00ff" style="background:#ff00ff" title="Magenta"></button>
-                <button class="color-preset" data-hex="#00ffff" style="background:#00ffff" title="Cyan"></button>
-                <button class="color-preset" data-hex="#ff8800" style="background:#ff8800" title="Orange"></button>
-                <button class="color-preset" data-hex="#ffffff" style="background:#ffffff" title="White"></button>
-              </div>
-            </div>
-            <div class="btn-group" id="led-group">
-              <button class="gbtn active" data-led="off">Off</button>
-              <button class="gbtn" data-led="solid">Solid</button>
-              <button class="gbtn" data-led="breath">Breath</button>
-              <button class="gbtn" data-led="flow">Flow</button>
-              <button class="gbtn" data-led="rainbow">Rainbow</button>
-              <button class="gbtn" data-led="police">Police</button>
-              <button class="gbtn" data-led="colorWipe">Wipe</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="card-buzzer">
-        <div class="card-title collapsible-header open" data-target="buzzer-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
-            Buzzer<span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none">Module not found</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="buzzer-body">
-          <div id="buzzer-controls">
-            <div class="btn-group" id="buzzer-group">
-              <button class="gbtn" data-buzzer="beep">Beep</button>
-              <button class="gbtn" data-buzzer="birthday">Birthday</button>
-              <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <div class="card">
+      <h2>Servos</h2>
+      <div id="servo-grid"></div>
+      <button class="btn" id="servo-home">Home All</button>
     </div>
+
+    <div class="card">
+      <h2>IMU (MPU6050)</h2>
+      <div class="imu-grid">
+        <div><b>AX</b><span id="ax">0</span></div>
+        <div><b>AY</b><span id="ay">0</span></div>
+        <div><b>AZ</b><span id="az">0</span></div>
+        <div><b>GX</b><span id="gx">0</span></div>
+        <div><b>GY</b><span id="gy">0</span></div>
+        <div><b>GZ</b><span id="gz">0</span></div>
+        <div><b>Roll</b><span id="roll">0</span></div>
+        <div><b>Pitch</b><span id="pitch">0</span></div>
+      </div>
+      <button class="btn" id="i2c-btn">Scan I²C</button>
+      <span id="i2c-result"></span>
+    </div>
+
+    <div class="card">
+      <h2>Lights</h2>
+      <div class="row-label">Main headlight (robot-hat)</div>
+      <button class="btn big" id="headlight">Headlight</button>
+      <div class="row-label">Turn signals</div>
+      <div class="btnrow">
+        <button class="btn" id="left-blink">◀ Left</button>
+        <button class="btn" id="both-blink">Both off</button>
+        <button class="btn" id="right-blink">Right ▶</button>
+      </div>
+      <div class="row-label">Side lights</div>
+      <div class="btnrow">
+        <button class="btn" data-sw="0">Left</button>
+        <button class="btn" data-sw="both">Both</button>
+        <button class="btn" data-sw="1">Right</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>LED Strip</h2>
+      <div class="led-row">
+        <input type="color" id="led-color" value="#ff0000">
+        <button class="psbtn" data-hex="#ff0000" style="background:#ff0000"></button>
+        <button class="psbtn" data-hex="#00ff00" style="background:#00ff00"></button>
+        <button class="psbtn" data-hex="#0000ff" style="background:#0000ff"></button>
+        <button class="psbtn" data-hex="#ffff00" style="background:#ffff00"></button>
+        <button class="psbtn" data-hex="#ff00ff" style="background:#ff00ff"></button>
+        <button class="psbtn" data-hex="#00ffff" style="background:#00ffff"></button>
+        <button class="psbtn" data-hex="#ffffff" style="background:#ffffff"></button>
+      </div>
+      <div class="btnrow" id="led-modes">
+        <button class="btn active" data-led="off">Off</button>
+        <button class="btn" data-led="solid">Solid</button>
+        <button class="btn" data-led="breath">Breath</button>
+        <button class="btn" data-led="flow">Flow</button>
+        <button class="btn" data-led="rainbow">Rainbow</button>
+        <button class="btn" data-led="police">Police</button>
+        <button class="btn" data-led="colorWipe">Wipe</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Buzzer</h2>
+      <div class="btnrow">
+        <button class="btn" data-buzz="beep">Beep</button>
+        <button class="btn" data-buzz="birthday">Birthday</button>
+        <button class="btn danger" data-buzz="stop">Stop</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Console</h2>
+      <div class="console-toolbar">
+        <span id="log-count">0 lines</span>
+        <button class="btn small" id="log-clear">Clear</button>
+        <label><input type="checkbox" id="log-auto" checked> auto</label>
+      </div>
+      <div class="console" id="console"></div>
+    </div>
+
   </div>
 </div>
 
-<div class="tab-content" id="content-console">
-  <div class="console-card">
-    <div class="console-toolbar">
-      <div class="console-toolbar-left">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        <span class="console-title">Log Console</span>
-        <span class="console-line-count" id="console-line-count">0 lines</span>
-      </div>
-      <div class="console-toolbar-center">
-        <button class="log-filter-btn log-filter-info active" data-level="info" title="INFO"><span class="log-filter-label">[i]</span> <span class="log-filter-count" id="log-count-info">0</span></button>
-        <button class="log-filter-btn log-filter-warn active" data-level="warn" title="WARNING"><span class="log-filter-label">[w]</span> <span class="log-filter-count" id="log-count-warn">0</span></button>
-        <button class="log-filter-btn log-filter-error active" data-level="error" title="ERROR"><span class="log-filter-label">[e]</span> <span class="log-filter-count" id="log-count-error">0</span></button>
-        <button class="log-filter-btn log-filter-debug active" data-level="debug" title="DEBUG"><span class="log-filter-label">[d]</span> <span class="log-filter-count" id="log-count-debug">0</span></button>
-        <select id="log-sort-select" class="log-sort-select" title="Sort order">
-          <option value="time">By Time</option>
-          <option value="level">By Level</option>
-        </select>
-      </div>
-      <div class="console-toolbar-right">
-        <label class="console-autoscroll-label"><input type="checkbox" id="console-autoscroll" checked> Auto-scroll</label>
-        <button class="btn-sm btn-secondary" id="console-clear-btn">Clear</button>
-      </div>
-    </div>
-    <div class="console-output" id="console-output"></div>
-  </div>
-</div>
-
-<div class="tab-content" id="content-info">
-  <div class="info-layout">
-    <div class="info-sidebar" id="info-sidebar">
-      <div class="info-nav">
-        <button class="info-nav-btn active" data-doc="overview">Overview</button>
-        <button class="info-nav-btn" data-doc="pinout">Pinout</button>
-      </div>
-      <div class="info-nav-sep">Components</div>
-      <div id="info-component-nav"></div>
-    </div>
-    <div class="info-main" id="info-main">
-      <div class="info-loading">Loading documentation...</div>
-    </div>
-  </div>
-</div>
-
-<div class="toast-container" id="toast-container"></div>
+<div id="toasts"></div>
 
 <script src="app.js"></script>
 </body>

@@ -1,42 +1,14 @@
-# PiCar Pro v1 — Python Dependencies
-# Install: pip3 install -r requirements.txt
-# On Debian 12+: pip3 install --break-system-packages -r requirements.txt
-
-# I2C / Servo
 adafruit-circuitpython-pca9685
 adafruit-circuitpython-motor
 adafruit-circuitpython-busdevice
-
-# OLED Display
 luma.oled
-
-# WS2812 LED Strip
-rpi_ws281x
+pillow
 spidev
-
-# Web Server
 flask
 websockets
 loguru
-
-# Vision / Video
-numpy
-pillow
-opencv-python-headless
 picamera2
-
-# IMU sensor — primary (same library the original Adeept examples use).
-# Falls back to a built-in smbus2 driver if this package is unavailable.
-mpu6050
-
-# I2C backends (used as fallback for MPU6050 and as the main backend on
-# machines without the external mpu6050 package).
-robot-hat
+opencv-python-headless
+numpy
 smbus2
-
-# DS4 Bluetooth Controller (optional — for PS4 gamepad support)
 evdev
-
-# GPIO (usually pre-installed on Raspberry Pi OS)
-# RPi.GPIO
-# gpiozero
