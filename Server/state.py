@@ -2,12 +2,7 @@ import threading
 from Server.logger import logger
 from Server.utils.system_info import SystemInfo
 from Server.network import get_ip
-from config import (
-    DEFAULT_SPEED, FLASK_PORT,
-    SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
-    CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
-    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
-)
+from config import DEFAULT_SPEED, FLASK_PORT
 
 
 class SharedState:

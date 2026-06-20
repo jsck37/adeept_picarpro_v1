@@ -1,30 +1,55 @@
-'use strict';
+var servoDefs = [
+  { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
+  { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
+  { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
+  { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
+  { id: 4, name: 'Servo 4',  min: 0,  max: 180, init: 90 },
+  { id: 5, name: 'Crane Grip', min: 0, max: 190, init: 190 },
+  { id: 6, name: 'Crane Arm',  min: 0, max: 180, init: 80 },
+];
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-let ws = null;
-let lastDir = 'stop';
-let moveThrottle = 0;
-const craneGripAngle = { low: 0, mid: 135, high: 190 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function $(id) { return document.getElementById(id); }
+var hlMainOn = false;
+var hlLeftSignal = false;
+var hlRightSignal = false;
+var currentLedMode = 'off';
+var lastSentDir = 'stop';
+var moveThrottle = 0;
+var craneArmClosed = false;
+var craneGripPosition = 'high';
+var logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
+var logFilters = { info: true, warn: true, error: true, debug: true };
+var logSortMode = 'time';
+var consoleAutoScroll = true;
+var hw = {
+  motors: false, servos: false, leds: false, buzzer: false,
+  switches: false, ultrasonic: false, mpu6050: false,
+  oled: false, camera: false, autonomous: false, crane: false,
+  ds4: false, voice: false,
+};
+var docsData = null;
+var ws = null;
+var wsReconnectTimer = null;
+var usePolling = false;
+var pollTimer = null;
 
 function toast(msg, type) {
-  const el = document.createElement('div');
-  el.className = 'toast ' + (type || '');
+  type = type || 'info';
+  var container = document.getElementById('toast-container');
+  var el = document.createElement('div');
+  el.className = 'toast ' + type;
   el.textContent = msg;
-  $('toasts').appendChild(el);
-  setTimeout(() => {
-    el.style.animation = 'tout .3s ease forwards';
-    setTimeout(() => el.remove(), 300);
-  }, 2500);
+  container.appendChild(el);
+  setTimeout(function() {
+    el.style.animation = 'toast-out .3s ease forwards';
+    setTimeout(function() { el.remove(); }, 300);
+  }, 3000);
 }
 
-function send(cmd, params) {
+function hexToRgb(hex) {
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+}
+
+function sendCommand(cmd, params) {
   params = params || {};
   if (cmd === 'move' || cmd === 'speed') {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -32,463 +57,1059 @@ function send(cmd, params) {
     }
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({cmd, params}));
+    ws.send(JSON.stringify({cmd: cmd, params: params}));
   } else {
-    fetch(`/cmd/${cmd}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(params),
-    }).catch(() => {});
+    var urlMap = {
+      'move': '/cmd/move', 'speed': '/cmd/speed', 'servo': '/cmd/servo',
+      'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
+      'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
+      'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
+      'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
+      'hand_color': '/cmd/hand_color', 'servo_get_limits': '/cmd/servo_get_limits',
+      'servo_set_limits': '/cmd/servo_set_limits', 'i2c_scan': '/cmd/i2c_scan',
+      'web_active': '/cmd/web_active', 'clear_log': '/cmd/clear_log',
+    };
+    var url = urlMap[cmd];
+    if (url) {
+      fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(params) }).catch(function() {});
+    }
   }
 }
 
-function hex2rgb(hex) {
-  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+document.querySelectorAll('.collapsible-header').forEach(function(header) {
+  header.addEventListener('click', function() {
+    var targetId = header.dataset.target;
+    if (!targetId) return;
+    var body = document.getElementById(targetId);
+    if (!body) return;
+    header.classList.toggle('open');
+    body.classList.toggle('open');
+  });
+});
+
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+    document.getElementById('content-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'info') loadDocs();
+    if (btn.dataset.tab === 'console') fetchConsoleHistory();
+  });
+});
+
+function toggleHwSection(cardId, tagId, available) {
+  var tagEl = document.getElementById(tagId);
+  if (!tagEl) return;
+  if (available) {
+    tagEl.style.display = 'none';
+    if (cardId) {
+      var card = document.getElementById(cardId);
+      if (card) card.classList.remove('hw-missing');
+    }
+    if (!cardId) {
+      var parentCard = tagEl.closest('.card');
+      if (parentCard) parentCard.classList.remove('hw-missing');
+    }
+  } else {
+    tagEl.style.display = '';
+    if (cardId) {
+      var card = document.getElementById(cardId);
+      if (card) card.classList.add('hw-missing');
+    }
+    if (!cardId) {
+      var parentCard = tagEl.closest('.card');
+      if (parentCard) parentCard.classList.add('hw-missing');
+    }
+  }
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket
-// ---------------------------------------------------------------------------
+function updateHardwareUI(hardwareStatus) {
+  if (!hardwareStatus) return;
+  hw = hardwareStatus;
+  toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
+  toggleHwSection(null, 'servo-missing-tag', hw.servos);
+  toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
+  toggleHwSection('card-led', 'led-missing-tag', hw.leds);
+  toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
+  toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
+  toggleHwSection(null, 'claw-missing-tag', hw.crane);
+  toggleHwSection('card-voice', 'voice-missing-tag', hw.voice);
+}
+
 function wsConnect() {
+  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  var wsHost = location.hostname;
+  var wsPort = 8888;
+  var url = 'ws://' + wsHost + ':' + wsPort;
   try {
-    ws = new WebSocket(`ws://${location.hostname}:8888`);
-    ws.onopen = () => $('dot').classList.remove('offline');
-    ws.onmessage = (e) => {
+    ws = new WebSocket(url);
+    ws.onopen = function() {
+      document.getElementById('connection-dot').classList.remove('offline');
+      usePolling = false;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+    ws.onmessage = function(e) {
       try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'status') updateStatus(msg.data);
-        else if (msg.type === 'log') appendLog(msg.text, msg.ts);
-        else if (msg.type === 'log_history' && msg.lines) {
-          msg.lines.forEach(([ts, txt]) => appendLog(txt, ts));
+        var data = JSON.parse(e.data);
+        var msgType = data.type || '';
+        var msgData = data.data || {};
+        if (msgType === 'status') updateStatus(msgData);
+        else if (msgType === 'log') appendConsoleLine(data.text, data.ts);
+        else if (msgType === 'log_history') {
+          if (data.lines && data.lines.length) {
+            data.lines.forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+          }
         }
-        else if (msg.type === 'response' && msg.data && msg.data.error) {
-          toast(msg.data.error, 'error');
+        else if (msgType === 'response') {
+          if (msgData.error) toast(msgData.error, 'error');
+          if (msgData.cmd === 'i2c_scan' && msgData.ok) {
+            var el = document.getElementById('i2c-scan-result');
+            if (el) showI2CResult(msgData, el);
+          }
+          if (msgData.cmd === 'servo_get_limits' && msgData.ok) {
+            applyServoLimits(msgData.limits);
+          }
         }
-      } catch (err) {}
+      } catch(err) {}
     };
-    ws.onclose = () => {
-      $('dot').classList.add('offline');
-      setTimeout(wsConnect, 3000);
+    ws.onclose = function() {
+      document.getElementById('connection-dot').classList.add('offline');
+      wsReconnectTimer = setTimeout(wsConnect, 3000);
+      if (!usePolling) { usePolling = true; startPolling(); }
     };
-    ws.onerror = () => ws.close();
-  } catch (e) {}
+    ws.onerror = function() { ws.close(); };
+  } catch(e) { usePolling = true; startPolling(); }
 }
 
-// ---------------------------------------------------------------------------
-// Status update
-// ---------------------------------------------------------------------------
+function startPolling() {
+  if (pollTimer) return;
+  function poll() {
+    fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+      updateStatus(d);
+    }).catch(function() {});
+  }
+  poll();
+  pollTimer = setInterval(poll, 1500);
+}
+
+function fetchConsoleHistory() {
+  fetch('/api/logs').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.lines) d.lines.forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+  }).catch(function() {});
+}
+
+var firstStatus = true;
 function updateStatus(d) {
   if (!d) return;
-  $('sb-cpu-temp').textContent = d.cpu_temp + '°C';
-  $('sb-cpu-usage').textContent = d.cpu_usage + '%';
-  $('sb-ram').textContent = `${d.ram.used_mb}/${d.ram.total_mb}M ${d.ram.percent}%`;
-  $('sb-distance').textContent = d.distance + 'cm';
-  $('sb-speed').textContent = d.speed + '%';
-  const modes = {
-    none: 'Ready', radarScan: 'Radar', automatic: 'Drive',
-    trackLine: 'IR Line', trackLineCV: 'CV Line', trackHand: 'Hand',
-    keepDistance: 'Distance',
+  if (d.cpu_temp !== undefined) document.getElementById('sb-cpu-temp').textContent = d.cpu_temp + '\u00B0C';
+  if (d.cpu_usage !== undefined) document.getElementById('sb-cpu-usage').textContent = d.cpu_usage + '%';
+  if (d.ram_percent !== undefined || d.ram) {
+    var ramText;
+    if (d.ram && d.ram.used_mb !== undefined) {
+      ramText = d.ram.used_mb + '/' + d.ram.total_mb + 'M ' + d.ram.percent + '%';
+    } else {
+      ramText = d.ram_percent + '%';
+    }
+    document.getElementById('sb-ram').textContent = ramText;
+  }
+  if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
+  if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
+  var autoModeLabels = {
+    'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
+    'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
+    'keepDistance': 'Distance'
   };
-  $('sb-mode').textContent = modes[d.auto_mode] || d.auto_mode || 'Ready';
-  if (d.mpu6050) {
-    $('sb-imu').textContent = `R:${d.mpu6050.roll}° P:${d.mpu6050.pitch}°`;
-    $('ax').textContent = d.mpu6050.accel.x.toFixed(2);
-    $('ay').textContent = d.mpu6050.accel.y.toFixed(2);
-    $('az').textContent = d.mpu6050.accel.z.toFixed(2);
-    $('gx').textContent = d.mpu6050.gyro.x.toFixed(1);
-    $('gy').textContent = d.mpu6050.gyro.y.toFixed(1);
-    $('gz').textContent = d.mpu6050.gyro.z.toFixed(1);
-    $('roll').textContent = d.mpu6050.roll.toFixed(1);
-    $('pitch').textContent = d.mpu6050.pitch.toFixed(1);
+  document.getElementById('sb-module').textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
+  if (d.hw) {
+    updateHardwareUI(d.hw);
+    if (firstStatus) { firstStatus = false; }
+  }
+  if (d.servo_limits) {
+    applyServoLimits(d.servo_limits);
+  }
+  var mpu = d.mpu6050;
+  if (mpu) {
+    document.getElementById('sb-imu').textContent = 'R:' + mpu.roll + '\u00B0 P:' + mpu.pitch + '\u00B0';
+    document.getElementById('mpu-ax').textContent = mpu.accel.x.toFixed(3);
+    document.getElementById('mpu-ay').textContent = mpu.accel.y.toFixed(3);
+    document.getElementById('mpu-az').textContent = mpu.accel.z.toFixed(3);
+    document.getElementById('mpu-gx').textContent = mpu.gyro.x.toFixed(1);
+    document.getElementById('mpu-gy').textContent = mpu.gyro.y.toFixed(1);
+    document.getElementById('mpu-gz').textContent = mpu.gyro.z.toFixed(1);
+    document.getElementById('mpu-roll').textContent = mpu.roll.toFixed(1);
+    document.getElementById('mpu-pitch').textContent = mpu.pitch.toFixed(1);
   } else {
-    $('sb-imu').textContent = 'N/A';
+    document.getElementById('sb-imu').textContent = 'N/A';
   }
-  $('ir-l').textContent = d.ir_left === null ? '--' : (d.ir_left ? 'LINE' : 'CLR');
-  $('ir-m').textContent = d.ir_middle === null ? '--' : (d.ir_middle ? 'LINE' : 'CLR');
-  $('ir-r').textContent = d.ir_right === null ? '--' : (d.ir_right ? 'LINE' : 'CLR');
-  $('lv-banner').style.display = d.low_voltage ? 'block' : 'none';
-  if (d.ds4) {
-    $('sb-ds4').textContent = d.ds4.connected ? 'ON' : '--';
-    $('ds4-dot').style.background = d.ds4.connected ? '#34a853' : '#ea4335';
-    $('ds4-text').textContent = d.ds4.connected
-      ? `Connected (${d.ds4.connect_count}×)`
-      : 'Not connected';
-  }
-  if (d.cv_mode && d.cv_mode !== 'none') {
-    $('cv-badge').textContent = 'CV: ' + d.cv_mode;
-    $('cv-badge').classList.add('visible');
+  if (d.ir_left !== undefined && d.ir_left !== null) {
+    document.getElementById('ir-left-val').textContent = d.ir_left ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-left-val').style.color = d.ir_left ? '#ea4335' : '#34a853';
   } else {
-    $('cv-badge').classList.remove('visible');
+    document.getElementById('ir-left-val').textContent = 'N/A';
+    document.getElementById('ir-left-val').style.color = '#9aa0a6';
   }
-  $('headlight').classList.toggle('active', !!d.headlight);
+  if (d.ir_middle !== undefined && d.ir_middle !== null) {
+    document.getElementById('ir-middle-val').textContent = d.ir_middle ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-middle-val').style.color = d.ir_middle ? '#ea4335' : '#34a853';
+  } else {
+    document.getElementById('ir-middle-val').textContent = 'N/A';
+    document.getElementById('ir-middle-val').style.color = '#9aa0a6';
+  }
+  if (d.ir_right !== undefined && d.ir_right !== null) {
+    document.getElementById('ir-right-val').textContent = d.ir_right ? 'LINE' : 'CLEAR';
+    document.getElementById('ir-right-val').style.color = d.ir_right ? '#ea4335' : '#34a853';
+  } else {
+    document.getElementById('ir-right-val').textContent = 'N/A';
+    document.getElementById('ir-right-val').style.color = '#9aa0a6';
+  }
+  var lvBanner = document.getElementById('low-voltage-banner');
+  if (lvBanner) lvBanner.style.display = d.low_voltage ? 'block' : 'none';
+  var ds4 = d.ds4;
+  if (ds4) {
+    document.getElementById('sb-ds4').textContent = ds4.connected ? 'ON' : '--';
+    var ds4Dot = document.getElementById('ds4-status-dot');
+    var ds4Text = document.getElementById('ds4-status-text');
+    if (ds4Dot) ds4Dot.style.background = ds4.connected ? '#34a853' : '#ea4335';
+    if (ds4Text) {
+      ds4Text.textContent = ds4.connected ? 'Connected (' + ds4.connect_count + '\u00D7)' : 'Not connected';
+      ds4Text.style.color = ds4.connected ? '#34a853' : '#9aa0a6';
+    }
+    var btDiscBtn = document.getElementById('bt-disconnect-btn');
+    if (btDiscBtn) btDiscBtn.style.display = ds4.connected ? '' : 'none';
+    if (ds4.crane_arm_closed !== undefined) {
+      craneArmClosed = ds4.crane_arm_closed;
+      updateCraneArmUI();
+    }
+    if (ds4.crane_grip !== undefined) {
+      craneGripPosition = ds4.crane_grip;
+      updateCraneGripUI();
+    }
+  }
+  if (d.crane_arm_closed !== undefined) {
+    craneArmClosed = d.crane_arm_closed;
+    updateCraneArmUI();
+  }
+  if (d.crane_grip_position !== undefined) {
+    craneGripPosition = d.crane_grip_position;
+    updateCraneGripUI();
+  }
+  if (d.cv_mode !== undefined) {
+    var badge = document.getElementById('cv-badge');
+    if (d.cv_mode && d.cv_mode !== 'none') {
+      badge.textContent = 'CV: ' + d.cv_mode;
+      badge.classList.add('visible');
+    } else {
+      badge.classList.remove('visible');
+    }
+  }
+  if (d.headlight !== undefined) {
+    hlMainOn = d.headlight;
+    var hlMainBtn = document.getElementById('hl-main');
+    if (hlMainBtn) hlMainBtn.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+  }
+  if (d.left_blinker !== undefined) {
+    hlLeftSignal = d.left_blinker;
+    document.getElementById('hl-left-signal').className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+    var lStat = document.getElementById('blinker-left-status');
+    if (lStat) { lStat.textContent = hlLeftSignal ? 'ON' : 'OFF'; lStat.style.color = hlLeftSignal ? '#fbbc04' : '#9aa0a6'; }
+  }
+  if (d.right_blinker !== undefined) {
+    hlRightSignal = d.right_blinker;
+    document.getElementById('hl-right-signal').className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
+    var rStat = document.getElementById('blinker-right-status');
+    if (rStat) { rStat.textContent = hlRightSignal ? 'ON' : 'OFF'; rStat.style.color = hlRightSignal ? '#fbbc04' : '#9aa0a6'; }
+  }
+  if (d.voice) {
+    var v = d.voice;
+    var vDot = document.getElementById('voice-status-dot');
+    var vText = document.getElementById('voice-status-text');
+    var vStart = document.getElementById('voice-start-btn');
+    var vStop = document.getElementById('voice-stop-btn');
+    if (vDot) vDot.style.background = v.active ? '#34a853' : (v.available ? '#fbbc04' : '#9aa0a6');
+    if (vText) {
+      vText.textContent = v.active ? 'Listening...' : (v.available ? 'Ready' : 'Inactive');
+      vText.style.color = v.active ? '#34a853' : '#9aa0a6';
+    }
+    if (vStart && vStop) {
+      if (v.active) { vStart.style.display = 'none'; vStop.style.display = ''; }
+      else { vStart.style.display = ''; vStop.style.display = 'none'; }
+    }
+    if (v.last_command) document.getElementById('voice-last-cmd').textContent = v.last_command;
+  }
+  if (d.led_mode !== undefined) {
+    currentLedMode = d.led_mode;
+    document.querySelectorAll('#led-group .gbtn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.led === currentLedMode);
+    });
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Log
-// ---------------------------------------------------------------------------
-function appendLog(text, ts) {
-  const c = $('console');
-  if (!c) return;
-  const line = document.createElement('div');
-  line.className = 'log-line ' + logLevel(text);
-  if (ts) {
-    const d = new Date(ts * 1000);
-    text = d.toLocaleTimeString() + ' ' + text;
+function updateCraneArmUI() {
+  var openBtn = document.getElementById('crane-arm-open');
+  var closeBtn = document.getElementById('crane-arm-close');
+  if (!openBtn || !closeBtn) return;
+  if (craneArmClosed) {
+    closeBtn.classList.add('active');
+    openBtn.classList.remove('active');
+  } else {
+    openBtn.classList.add('active');
+    closeBtn.classList.remove('active');
   }
-  line.textContent = text;
-  c.appendChild(line);
-  if ($('log-auto').checked) c.scrollTop = c.scrollHeight;
-  $('log-count').textContent = c.children.length + ' lines';
 }
-function logLevel(t) {
-  t = (t || '').toUpperCase();
-  if (t.includes('| ERROR') || t.includes('[ERROR]')) return 'error';
-  if (t.includes('| WARNING') || t.includes('| WARN')) return 'warn';
-  if (t.includes('| DEBUG') || t.includes('[DEBUG]')) return 'debug';
+
+function updateCraneGripUI() {
+  var lowBtn = document.getElementById('crane-grip-low');
+  var midBtn = document.getElementById('crane-grip-mid');
+  var highBtn = document.getElementById('crane-grip-high');
+  var label = document.getElementById('crane-grip-label');
+  if (!lowBtn) return;
+  lowBtn.classList.remove('active');
+  midBtn.classList.remove('active');
+  highBtn.classList.remove('active');
+  var angleMap = { low: 0, mid: 135, high: 190 };
+  var labelMap = { low: 'Low', mid: 'Mid', high: 'High' };
+  if (craneGripPosition === 'low') lowBtn.classList.add('active');
+  else if (craneGripPosition === 'mid') midBtn.classList.add('active');
+  else if (craneGripPosition === 'high') highBtn.classList.add('active');
+  if (label && angleMap[craneGripPosition] !== undefined) {
+    label.textContent = labelMap[craneGripPosition] + ' (' + angleMap[craneGripPosition] + '\u00B0)';
+  }
+}
+
+function buildServoGrid() {
+  var grid = document.getElementById('servo-grid');
+  if (!grid) return;
+  servoDefs.forEach(function(s) {
+    var item = document.createElement('div');
+    item.className = 'servo-item';
+    item.innerHTML = '<label>' + s.name + ' <span class="val">' + s.init + '\u00B0</span></label>' +
+      '<input type="range" min="' + s.min + '" max="' + s.max + '" value="' + s.init + '" data-servo="' + s.id + '">';
+    grid.appendChild(item);
+    var slider = item.querySelector('input');
+    var valSpan = item.querySelector('.val');
+    slider.addEventListener('input', function() { valSpan.textContent = slider.value + '\u00B0'; });
+    slider.addEventListener('change', function() {
+      sendCommand('servo', { id: s.id, angle: parseInt(slider.value) });
+    });
+  });
+}
+
+function applyServoLimits(limits) {
+  for (var sid in limits) {
+    var lim = limits[sid];
+    var slider = document.querySelector('input[data-servo="' + sid + '"]');
+    if (slider) {
+      slider.min = lim.min;
+      slider.max = lim.max;
+    }
+  }
+}
+
+var joystickContainer = document.getElementById('joystick-container');
+var joystickKnob = document.getElementById('joystick-knob');
+var joystickLabel = document.getElementById('joystick-label');
+var joystickDragging = false;
+
+function getJoystickCenter() {
+  var rect = joystickContainer.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 24 };
+}
+
+function getDirection(dx, dy) {
+  var angle = Math.atan2(-dy, dx) * 180 / Math.PI;
+  var dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < 10) return 'stop';
+  if (angle > -22.5 && angle <= 22.5) return 'right';
+  if (angle > 22.5 && angle <= 67.5) return 'forward_right';
+  if (angle > 67.5 && angle <= 112.5) return 'forward';
+  if (angle > 112.5 && angle <= 157.5) return 'forward_left';
+  if (angle > 157.5 || angle <= -157.5) return 'left';
+  if (angle > -157.5 && angle <= -112.5) return 'backward_left';
+  if (angle > -112.5 && angle <= -67.5) return 'backward';
+  if (angle > -67.5 && angle <= -22.5) return 'backward_right';
+  return 'stop';
+}
+
+var dirLabels = {
+  forward: 'Forward', backward: 'Backward', left: 'Left', right: 'Right',
+  forward_left: 'Fwd-Left', forward_right: 'Fwd-Right',
+  backward_left: 'Back-Left', backward_right: 'Back-Right', stop: 'Stopped'
+};
+
+function updateJoystick(clientX, clientY) {
+  var center = getJoystickCenter();
+  var dx = clientX - center.x;
+  var dy = clientY - center.y;
+  var dist = Math.sqrt(dx * dx + dy * dy);
+  var maxR = center.r;
+  if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+  joystickKnob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+  var dir = getDirection(dx, dy);
+  joystickLabel.textContent = dirLabels[dir] || dir;
+  var now = Date.now();
+  if (dir !== lastSentDir || now - moveThrottle > 150) {
+    sendCommand('move', { dir: dir });
+    lastSentDir = dir;
+    moveThrottle = now;
+  }
+}
+
+function resetJoystick() {
+  joystickKnob.classList.add('spring-back');
+  joystickKnob.style.transform = 'translate(-50%, -50%)';
+  joystickLabel.textContent = 'Wheels \u2014 WASD';
+  setTimeout(function() { joystickKnob.classList.remove('spring-back'); }, 300);
+  if (lastSentDir !== 'stop') {
+    sendCommand('move', { dir: 'stop' });
+    lastSentDir = 'stop';
+  }
+}
+
+if (joystickContainer) {
+  joystickContainer.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    joystickDragging = true;
+    joystickKnob.classList.remove('spring-back');
+    updateJoystick(e.clientX, e.clientY);
+  });
+  joystickContainer.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    joystickDragging = true;
+    joystickKnob.classList.remove('spring-back');
+    var t = e.touches[0];
+    updateJoystick(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('mousemove', function(e) {
+    if (joystickDragging) updateJoystick(e.clientX, e.clientY);
+  });
+  document.addEventListener('touchmove', function(e) {
+    if (joystickDragging) {
+      e.preventDefault();
+      var t = e.touches[0];
+      updateJoystick(t.clientX, t.clientY);
+    }
+  }, { passive: false });
+  document.addEventListener('mouseup', function() { if (joystickDragging) { joystickDragging = false; resetJoystick(); } });
+  document.addEventListener('touchend', function() { if (joystickDragging) { joystickDragging = false; resetJoystick(); } });
+}
+
+var camJoystickContainer = document.getElementById('cam-joystick-container');
+var camJoystickKnob = document.getElementById('cam-joystick-knob');
+var camJoystickLabel = document.getElementById('cam-joystick-label');
+var camJoystickDragging = false;
+var camPan = 90, camTilt = 90;
+
+function getCamJoystickCenter() {
+  var rect = camJoystickContainer.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 21 };
+}
+
+function updateCamJoystick(clientX, clientY) {
+  var center = getCamJoystickCenter();
+  var dx = clientX - center.x;
+  var dy = clientY - center.y;
+  var dist = Math.sqrt(dx * dx + dy * dy);
+  var maxR = center.r;
+  if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+  camJoystickKnob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+  var panDelta = Math.round(dx / maxR * 30);
+  var tiltDelta = Math.round(dy / maxR * 30);
+  var newPan = Math.max(0, Math.min(180, 90 + panDelta));
+  var newTilt = Math.max(0, Math.min(180, 90 + tiltDelta));
+  if (newPan !== camPan) {
+    sendCommand('servo', { id: 1, angle: newPan });
+    camPan = newPan;
+  }
+  if (newTilt !== camTilt) {
+    sendCommand('servo', { id: 2, angle: newTilt });
+    camTilt = newTilt;
+  }
+  if (camJoystickLabel) {
+    if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
+      camJoystickLabel.textContent = 'Camera \u2014 Arrows';
+    } else {
+      camJoystickLabel.textContent = 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
+    }
+  }
+}
+
+function resetCamJoystick() {
+  camJoystickKnob.classList.add('spring-back');
+  camJoystickKnob.style.transform = 'translate(-50%, -50%)';
+  if (camJoystickLabel) camJoystickLabel.textContent = 'Camera \u2014 Arrows';
+  setTimeout(function() { camJoystickKnob.classList.remove('spring-back'); }, 300);
+}
+
+if (camJoystickContainer) {
+  camJoystickContainer.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    camJoystickDragging = true;
+    camJoystickKnob.classList.remove('spring-back');
+    updateCamJoystick(e.clientX, e.clientY);
+  });
+  camJoystickContainer.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    camJoystickDragging = true;
+    camJoystickKnob.classList.remove('spring-back');
+    var t = e.touches[0];
+    updateCamJoystick(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('mousemove', function(e) {
+    if (camJoystickDragging) updateCamJoystick(e.clientX, e.clientY);
+  });
+  document.addEventListener('touchmove', function(e) {
+    if (camJoystickDragging) {
+      e.preventDefault();
+      var t = e.touches[0];
+      updateCamJoystick(t.clientX, t.clientY);
+    }
+  }, { passive: false });
+  document.addEventListener('mouseup', function() { if (camJoystickDragging) { camJoystickDragging = false; resetCamJoystick(); } });
+  document.addEventListener('touchend', function() { if (camJoystickDragging) { camJoystickDragging = false; resetCamJoystick(); } });
+}
+
+var keyMap = {
+  'w': 'forward', 's': 'backward', 'a': 'left', 'd': 'right',
+  'ArrowUp': 'forward', 'ArrowDown': 'backward',
+  'ArrowLeft': 'left', 'ArrowRight': 'right',
+};
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  var dir = keyMap[e.key];
+  if (dir && dir !== lastSentDir) {
+    sendCommand('move', { dir: dir });
+    lastSentDir = dir;
+  }
+});
+document.addEventListener('keyup', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (keyMap[e.key] && lastSentDir !== 'stop') {
+    sendCommand('move', { dir: 'stop' });
+    lastSentDir = 'stop';
+  }
+});
+
+document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.cv-btn[data-cv]').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    var mode = btn.dataset.cv;
+    var badge = document.getElementById('cv-badge');
+    var handRow = document.getElementById('hand-color-row');
+    if (mode === 'findlineCV') {
+      badge.textContent = 'CV: Line Follow';
+      badge.classList.add('visible');
+      sendCommand('auto', { func: 'trackLineCV' });
+      if (handRow) handRow.style.display = 'none';
+    } else if (mode === 'trackHand') {
+      badge.textContent = 'CV: Hand Track';
+      badge.classList.add('visible');
+      sendCommand('auto', { func: 'trackHand' });
+      if (handRow) handRow.style.display = '';
+    } else {
+      badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+      badge.classList.toggle('visible', mode !== 'none');
+      if (mode !== 'none') sendCommand('auto', { func: 'stop' });
+      sendCommand('cv_mode', { mode: mode });
+      if (handRow) handRow.style.display = 'none';
+    }
+  });
+});
+
+document.querySelectorAll('#hand-color-group .gbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#hand-color-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    sendCommand('hand_color', { preset: btn.dataset.preset });
+  });
+});
+
+function bindHandSlider(id, valId) {
+  var el = document.getElementById(id);
+  var valEl = document.getElementById(valId);
+  if (!el || !valEl) return;
+  el.addEventListener('input', function() { valEl.textContent = el.value; });
+}
+bindHandSlider('hand-h-low', 'hand-h-low-val');
+bindHandSlider('hand-s-low', 'hand-s-low-val');
+bindHandSlider('hand-v-low', 'hand-v-low-val');
+bindHandSlider('hand-h-high', 'hand-h-high-val');
+bindHandSlider('hand-s-high', 'hand-s-high-val');
+bindHandSlider('hand-v-high', 'hand-v-high-val');
+
+var handColorApply = document.getElementById('hand-color-apply');
+if (handColorApply) {
+  handColorApply.addEventListener('click', function() {
+    sendCommand('hand_color', {
+      h_low: parseInt(document.getElementById('hand-h-low').value),
+      s_low: parseInt(document.getElementById('hand-s-low').value),
+      v_low: parseInt(document.getElementById('hand-v-low').value),
+      h_high: parseInt(document.getElementById('hand-h-high').value),
+      s_high: parseInt(document.getElementById('hand-s-high').value),
+      v_high: parseInt(document.getElementById('hand-v-high').value),
+    });
+    document.querySelectorAll('#hand-color-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    toast('Custom hand color applied', 'success');
+  });
+}
+
+var speedSlider = document.getElementById('speed-slider');
+var speedVal = document.getElementById('speed-val');
+if (speedSlider) {
+  speedSlider.addEventListener('input', function() { speedVal.textContent = speedSlider.value + '%'; });
+  speedSlider.addEventListener('change', function() { sendCommand('speed', { value: parseInt(speedSlider.value) }); });
+}
+
+document.getElementById('servo-home').addEventListener('click', function() {
+  sendCommand('servo_home', {});
+  craneArmClosed = false;
+  craneGripPosition = 'high';
+  updateCraneArmUI();
+  updateCraneGripUI();
+});
+document.getElementById('servo-save-limits').addEventListener('click', function() {
+  sendCommand('servo_get_limits', {});
+});
+
+document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var action = btn.dataset.action;
+    if (action === 'arm_close') craneArmClosed = true;
+    else if (action === 'arm_open') craneArmClosed = false;
+    sendCommand('crane', { action: action });
+    updateCraneArmUI();
+  });
+});
+
+document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var action = btn.dataset.action;
+    if (action === 'grip_low') craneGripPosition = 'low';
+    else if (action === 'grip_mid') craneGripPosition = 'mid';
+    else if (action === 'grip_high') craneGripPosition = 'high';
+    sendCommand('crane', { action: action });
+    updateCraneGripUI();
+    var slider = document.getElementById('crane-grip-slider');
+    var sliderVal = document.getElementById('crane-grip-slider-val');
+    var angleMap = { low: 0, mid: 135, high: 190 };
+    if (slider && angleMap[craneGripPosition] !== undefined) {
+      slider.value = angleMap[craneGripPosition];
+      if (sliderVal) sliderVal.textContent = angleMap[craneGripPosition] + '\u00B0';
+    }
+  });
+});
+
+var craneGripSlider = document.getElementById('crane-grip-slider');
+var craneGripSliderVal = document.getElementById('crane-grip-slider-val');
+if (craneGripSlider) {
+  craneGripSlider.addEventListener('input', function() {
+    if (craneGripSliderVal) craneGripSliderVal.textContent = craneGripSlider.value + '\u00B0';
+  });
+  craneGripSlider.addEventListener('change', function() {
+    sendCommand('crane', { action: 'grip_angle', angle: parseInt(craneGripSlider.value) });
+    document.querySelectorAll('.crane-grip-btn').forEach(function(b) { b.classList.remove('active'); });
+    var label = document.getElementById('crane-grip-label');
+    if (label) label.textContent = 'Custom (' + craneGripSlider.value + '\u00B0)';
+    craneGripPosition = 'custom';
+  });
+}
+
+document.getElementById('hl-main').addEventListener('click', function() {
+  hlMainOn = !hlMainOn;
+  sendCommand('headlight', { action: hlMainOn ? 'on' : 'off' });
+  this.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+});
+
+document.getElementById('hl-left-signal').addEventListener('click', function() {
+  hlLeftSignal = !hlLeftSignal;
+  sendCommand('blinker', { side: 'left', active: hlLeftSignal });
+  this.className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+});
+
+document.getElementById('hl-right-signal').addEventListener('click', function() {
+  hlRightSignal = !hlRightSignal;
+  sendCommand('blinker', { side: 'right', active: hlRightSignal });
+  this.className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
+});
+
+document.getElementById('hl-both-signal').addEventListener('click', function() {
+  hlLeftSignal = false;
+  hlRightSignal = false;
+  sendCommand('blinker', { side: 'both_off' });
+  document.getElementById('hl-left-signal').className = 'headlight-btn off';
+  document.getElementById('hl-right-signal').className = 'headlight-btn off';
+});
+
+document.getElementById('hl-left').addEventListener('click', function() {
+  var currentState = this.classList.contains('on');
+  sendCommand('switch', { id: 0, state: !currentState });
+  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
+});
+document.getElementById('hl-right').addEventListener('click', function() {
+  var currentState = this.classList.contains('on');
+  sendCommand('switch', { id: 1, state: !currentState });
+  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
+});
+document.getElementById('hl-both').addEventListener('click', function() {
+  var bothOn = document.getElementById('hl-left').classList.contains('on') && document.getElementById('hl-right').classList.contains('on');
+  var ns = !bothOn;
+  sendCommand('switch', { id: 0, state: ns }); sendCommand('switch', { id: 1, state: ns });
+  document.getElementById('hl-left').className = 'headlight-btn ' + (ns ? 'on' : 'off');
+  document.getElementById('hl-right').className = 'headlight-btn ' + (ns ? 'on' : 'off');
+  this.className = 'headlight-btn ' + (ns ? 'on' : 'off');
+});
+
+var ledColorInput = document.getElementById('led-color');
+
+document.querySelectorAll('.color-preset').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    ledColorInput.value = btn.dataset.hex;
+    if (currentLedMode !== 'off' && currentLedMode !== 'rainbow' && currentLedMode !== 'police') {
+      sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
+    }
+  });
+});
+ledColorInput.addEventListener('input', function() {
+  if (currentLedMode === 'solid' || currentLedMode === 'breath' || currentLedMode === 'flow' || currentLedMode === 'colorWipe') {
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
+  }
+});
+ledColorInput.addEventListener('change', function() {
+  if (currentLedMode !== 'off' && currentLedMode !== 'rainbow' && currentLedMode !== 'police') {
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
+  }
+});
+document.querySelectorAll('#led-group .gbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#led-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    currentLedMode = btn.dataset.led;
+    sendCommand('led', { mode: currentLedMode, color: hexToRgb(ledColorInput.value) });
+  });
+});
+
+document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    if (btn.dataset.buzzer === 'stop') {
+      sendCommand('buzzer_stop', {});
+    } else {
+      sendCommand('buzzer', { melody: btn.dataset.buzzer });
+    }
+  });
+});
+
+updateCraneArmUI();
+updateCraneGripUI();
+
+document.getElementById('i2c-scan-btn').addEventListener('click', function() {
+  var resultEl = document.getElementById('i2c-scan-result');
+  resultEl.textContent = 'Scanning...';
+  resultEl.style.color = '#fdd663';
+  sendCommand('i2c_scan', {});
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    fetch('/api/i2c_scan').then(function(r) { return r.json(); }).then(function(d) {
+      showI2CResult(d, resultEl);
+    }).catch(function() { resultEl.textContent = 'Scan failed'; resultEl.style.color = '#ea4335'; });
+  }
+});
+
+function showI2CResult(d, el) {
+  if (d.mpu6050_found) {
+    el.textContent = 'MPU6050 at ' + d.mpu6050_addr + ' (WHO_AM_I=' + d.mpu6050_who_am_i + ')';
+    el.style.color = '#34a853';
+  } else if (d.devices && d.devices.length > 0) {
+    el.textContent = 'No MPU6050. Devices: ' + d.devices.join(', ');
+    el.style.color = '#ea4335';
+  } else {
+    el.textContent = 'No I2C devices found!';
+    el.style.color = '#ea4335';
+  }
+}
+
+document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#auto-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
+    if (btn.dataset.auto !== 'stop') btn.classList.add('active');
+    sendCommand('auto', { func: btn.dataset.auto });
+  });
+});
+
+var voiceStartBtn = document.getElementById('voice-start-btn');
+var voiceStopBtn = document.getElementById('voice-stop-btn');
+if (voiceStartBtn) {
+  voiceStartBtn.addEventListener('click', function() {
+    sendCommand('voice', { action: 'start' });
+  });
+}
+if (voiceStopBtn) {
+  voiceStopBtn.addEventListener('click', function() {
+    sendCommand('voice', { action: 'stop' });
+  });
+}
+
+var btScanBtn = document.getElementById('bt-scan-btn');
+var btAutoBtn = document.getElementById('bt-auto-btn');
+var btDisconnectBtn = document.getElementById('bt-disconnect-btn');
+var btDeviceList = document.getElementById('bt-device-list');
+var btDevices = document.getElementById('bt-devices');
+var btScanning = document.getElementById('bt-scanning');
+var btSavedInfo = document.getElementById('bt-saved-info');
+
+btScanBtn.addEventListener('click', function() {
+  btScanning.style.display = '';
+  btDeviceList.style.display = 'none';
+  btDevices.innerHTML = '';
+  fetch('/api/bt/scan').then(function(r) { return r.json(); }).then(function(d) {
+    btScanning.style.display = 'none';
+    if (d.devices && d.devices.length > 0) {
+      btDeviceList.style.display = '';
+      d.devices.forEach(function(dev) {
+        var item = document.createElement('div');
+        item.className = 'bt-device-item' + (dev.is_gamepad ? ' bt-gamepad' : '');
+        item.innerHTML = '<span class="bt-device-name">' + dev.name + ' (' + dev.mac + ')</span>' +
+          '<button class="btn-sm btn-primary bt-connect-btn" data-mac="' + dev.mac + '">Connect</button>';
+        btDevices.appendChild(item);
+        item.querySelector('.bt-connect-btn').addEventListener('click', function() {
+          var btn = this;
+          btn.textContent = '...';
+          fetch('/api/bt/connect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ mac: dev.mac, name: dev.name }) }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) { toast('Connected!', 'success'); btn.textContent = 'Connected'; }
+            else { toast(d.message || d.error || 'Connection failed', 'error'); btn.textContent = 'Connect'; }
+          }).catch(function() { toast('Connection error', 'error'); btn.textContent = 'Connect'; });
+        });
+      });
+    } else {
+      btDeviceList.style.display = '';
+      btDevices.innerHTML = '<div style="font-size:.75rem;color:#5f6368;padding:4px">No devices found</div>';
+    }
+  }).catch(function() {
+    btScanning.style.display = 'none';
+    btDeviceList.style.display = '';
+    btDevices.innerHTML = '<div style="font-size:.75rem;color:#ea4335;padding:4px">Scan failed</div>';
+  });
+});
+
+btAutoBtn.addEventListener('click', function() {
+  fetch('/api/bt/auto_connect', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) toast('Auto-connect started', 'success');
+    else toast(d.error || d.message || 'Auto-connect failed', 'error');
+  }).catch(function() { toast('Auto-connect error', 'error'); });
+});
+
+btDisconnectBtn.addEventListener('click', function() {
+  fetch('/api/bt/disconnect', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) toast('Disconnected', 'success');
+    else toast(d.error || 'Disconnect failed', 'error');
+  }).catch(function() { toast('Disconnect error', 'error'); });
+});
+
+fetch('/api/bt/status').then(function(r) { return r.json(); }).then(function(d) {
+  if (d.saved_mac && btSavedInfo) {
+    btSavedInfo.textContent = 'Saved: ' + d.saved_mac;
+  }
+}).catch(function() {});
+
+function getLogLevel(text) {
+  if (!text) return 'debug';
+  var t = text.toUpperCase();
+  if (t.indexOf('| ERROR') !== -1 || t.indexOf('[ERROR]') !== -1) return 'error';
+  if (t.indexOf('| WARNING') !== -1 || t.indexOf('| WARN') !== -1 || t.indexOf('[WARN') !== -1) return 'warn';
+  if (t.indexOf('| DEBUG') !== -1 || t.indexOf('[DEBUG]') !== -1) return 'debug';
+  if (t.indexOf('| INFO') !== -1 || t.indexOf('[INFO]') !== -1) return 'info';
   return 'info';
 }
 
-// ---------------------------------------------------------------------------
-// Servos
-// ---------------------------------------------------------------------------
-const servoDefs = [
-  {id: 0, name: 'Steering', min: 30, max: 150, init: 90},
-  {id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90},
-  {id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90},
-  {id: 5, name: 'Crane Grip', min: 0, max: 190, init: 190},
-  {id: 6, name: 'Crane Arm',  min: 0, max: 180, init: 80},
-];
-function buildServos() {
-  const grid = $('servo-grid');
-  servoDefs.forEach(s => {
-    const cell = document.createElement('div');
-    cell.className = 'servo-cell';
-    cell.innerHTML = `<label>${s.name}</label>
-      <input type="range" min="${s.min}" max="${s.max}" value="${s.init}" data-servo="${s.id}">
-      <b>${s.init}°</b>`;
-    grid.appendChild(cell);
-    const slider = cell.querySelector('input');
-    const label = cell.querySelector('b');
-    slider.addEventListener('input', () => label.textContent = slider.value + '°');
-    slider.addEventListener('change', () =>
-      send('servo', {id: s.id, angle: parseInt(slider.value)}));
-  });
-  $('servo-home').onclick = () => send('servo_home', {});
+function appendConsoleLine(text, ts) {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  var level = getLogLevel(text);
+  logCounts[level] = (logCounts[level] || 0) + 1;
+  updateLogCounters();
+  var line = document.createElement('div');
+  line.className = 'log-line log-' + level;
+  line.dataset.level = level;
+  if (ts) {
+    var d = new Date(ts * 1000);
+    text = d.toLocaleTimeString() + ' ' + text;
+  }
+  line.textContent = text;
+  line.style.display = logFilters[level] ? '' : 'none';
+  output.appendChild(line);
+  if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
+  var countEl = document.getElementById('console-line-count');
+  if (countEl) countEl.textContent = output.children.length + ' lines';
 }
 
-// ---------------------------------------------------------------------------
-// Joystick
-// ---------------------------------------------------------------------------
-function setupJoy(joyId, knobId, labelId, sendMove) {
-  const joy = $(joyId), knob = $(knobId), label = $(labelId);
-  let dragging = false;
-  function center() {
-    const r = joy.getBoundingClientRect();
-    return {x: r.left + r.width/2, y: r.top + r.height/2, r: r.width/2 - 20};
-  }
-  function dir(dx, dy) {
-    const a = Math.atan2(-dy, dx) * 180 / Math.PI;
-    const d = Math.hypot(dx, dy);
-    if (d < 10) return 'stop';
-    if (a > -22.5 && a <= 22.5) return 'right';
-    if (a > 22.5 && a <= 67.5) return 'forward_right';
-    if (a > 67.5 && a <= 112.5) return 'forward';
-    if (a > 112.5 && a <= 157.5) return 'forward_left';
-    if (a > 157.5 || a <= -157.5) return 'left';
-    if (a > -157.5 && a <= -112.5) return 'backward_left';
-    if (a > -112.5 && a <= -67.5) return 'backward';
-    return 'backward_right';
-  }
-  const labels = {
-    forward: 'Forward', backward: 'Back', left: 'Left', right: 'Right',
-    forward_left: 'F-Left', forward_right: 'F-Right',
-    backward_left: 'B-Left', backward_right: 'B-Right', stop: 'Stop',
-  };
-  function move(cx, cy) {
-    const c = center();
-    let dx = cx - c.x, dy = cy - c.y;
-    const d = Math.hypot(dx, dy);
-    if (d > c.r) { dx = dx/d*c.r; dy = dy/d*c.r; }
-    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    const direction = dir(dx, dy);
-    label.textContent = labels[direction] || direction;
-    if (sendMove) {
-      const now = Date.now();
-      if (direction !== lastDir || now - moveThrottle > 150) {
-        send('move', {dir: direction});
-        lastDir = direction;
-        moveThrottle = now;
-      }
-    } else {
-      // Camera joystick — pan/tilt from direction + magnitude.
-      if (direction !== 'stop') {
-        send('servo', {id: 1, angle: 90 + Math.round(dx / c.r * 30)});
-        send('servo', {id: 2, angle: 90 + Math.round(dy / c.r * 30)});
-      }
-    }
-  }
-  function start(e) {
-    e.preventDefault();
-    dragging = true;
-    const t = e.touches ? e.touches[0] : e;
-    move(t.clientX, t.clientY);
-  }
-  function drag(e) {
-    if (!dragging) return;
-    e.preventDefault();
-    const t = e.touches ? e.touches[0] : e;
-    move(t.clientX, t.clientY);
-  }
-  function end() {
-    if (!dragging) return;
-    dragging = false;
-    knob.style.transform = 'translate(-50%, -50%)';
-    if (sendMove) {
-      send('move', {dir: 'stop'});
-      lastDir = 'stop';
-      label.textContent = 'Wheels — WASD';
-    } else {
-      label.textContent = 'Camera — Arrows';
-    }
-  }
-  joy.addEventListener('mousedown', start);
-  joy.addEventListener('touchstart', start, {passive: false});
-  document.addEventListener('mousemove', drag);
-  document.addEventListener('touchmove', drag, {passive: false});
-  document.addEventListener('mouseup', end);
-  document.addEventListener('touchend', end);
-}
-
-// ---------------------------------------------------------------------------
-// Keyboard
-// ---------------------------------------------------------------------------
-function setupKeyboard() {
-  const keymap = {
-    'w': 'forward', 's': 'backward', 'a': 'left', 'd': 'right',
-    'ArrowUp': 'forward', 'ArrowDown': 'backward',
-    'ArrowLeft': 'left', 'ArrowRight': 'right',
-  };
-  document.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    const dir = keymap[e.key];
-    if (dir && dir !== lastDir) {
-      send('move', {dir});
-      lastDir = dir;
-    }
-  });
-  document.addEventListener('keyup', (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (keymap[e.key] && lastDir !== 'stop') {
-      send('move', {dir: 'stop'});
-      lastDir = 'stop';
-    }
+function updateLogCounters() {
+  ['info', 'warn', 'error', 'debug'].forEach(function(level) {
+    var el = document.getElementById('log-count-' + level);
+    if (el) el.textContent = logCounts[level] || 0;
   });
 }
 
-// ---------------------------------------------------------------------------
-// Wiring up buttons / sliders
-// ---------------------------------------------------------------------------
-function wireUI() {
-  // CV mode buttons
-  document.querySelectorAll('.cvbtn').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('.cvbtn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const mode = btn.dataset.cv;
-      $('hand-color-row').style.display = (mode === 'trackHand') ? 'block' : 'none';
-      if (mode === 'findlineCV' || mode === 'trackHand') {
-        send('auto', {func: mode === 'findlineCV' ? 'trackLineCV' : 'trackHand'});
-      } else {
-        send('auto', {func: 'stop'});
-        send('cv_mode', {mode});
-      }
-    };
+function applyLogFilters() {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  output.querySelectorAll('.log-line').forEach(function(line) {
+    var level = line.dataset.level || 'info';
+    line.style.display = logFilters[level] ? '' : 'none';
   });
+}
 
-  // Hand color presets
-  document.querySelectorAll('.psbtn[data-preset]').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('.psbtn[data-preset]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      send('hand_color', {preset: btn.dataset.preset});
-    };
-  });
-
-  // Hand color custom HSV sliders
-  ['hl','sl','vl','hh','sh','vh'].forEach(id => {
-    const el = $(id), val = $(id + '-v');
-    el.oninput = () => val.textContent = el.value;
-  });
-  $('apply-hsv').onclick = () => {
-    send('hand_color', {
-      h_low: +$('hl').value, s_low: +$('sl').value, v_low: +$('vl').value,
-      h_high: +$('hh').value, s_high: +$('sh').value, v_high: +$('vh').value,
+function applyLogSort() {
+  var output = document.getElementById('console-output');
+  if (!output) return;
+  var lines = Array.from(output.querySelectorAll('.log-line'));
+  var levelOrder = { error: 0, warn: 1, info: 2, debug: 3 };
+  if (logSortMode === 'level') {
+    lines.sort(function(a, b) {
+      var la = levelOrder[a.dataset.level] || 2;
+      var lb = levelOrder[b.dataset.level] || 2;
+      return la - lb;
     });
-    document.querySelectorAll('.psbtn[data-preset]').forEach(b => b.classList.remove('active'));
-    toast('Custom HSV applied', 'success');
-  };
+    lines.forEach(function(line) { output.appendChild(line); });
+  }
+}
 
-  // Auto mode buttons
-  document.querySelectorAll('[data-auto]').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('[data-auto]').forEach(b => b.classList.remove('active'));
-      if (btn.dataset.auto !== 'stop') btn.classList.add('active');
-      send('auto', {func: btn.dataset.auto});
-    };
+document.querySelectorAll('.log-filter-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var level = btn.dataset.level;
+    logFilters[level] = !logFilters[level];
+    btn.classList.toggle('active', logFilters[level]);
+    applyLogFilters();
   });
+});
 
-  // Crane buttons
-  document.querySelectorAll('[data-crane]').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll(`[data-crane="${btn.dataset.crane}"]`)
-        .forEach(b => b.classList.add('active'));
-      // For grip presets, deselect other grip buttons
-      if (btn.dataset.crane.startsWith('grip_')) {
-        document.querySelectorAll('[data-crane^="grip_"]').forEach(b => {
-          if (b !== btn) b.classList.remove('active');
-        });
-        const pos = btn.dataset.crane.replace('grip_', '');
-        $('grip-slider').value = craneGripAngle[pos];
-        $('grip-val').textContent = craneGripAngle[pos] + '°';
-      }
-      send('crane', {action: btn.dataset.crane});
-    };
-  });
+document.getElementById('log-sort-select').addEventListener('change', function() {
+  logSortMode = this.value;
+  applyLogSort();
+});
 
-  // Grip slider
-  $('grip-slider').oninput = () => $('grip-val').textContent = $('grip-slider').value + '°';
-  $('grip-slider').onchange = () => {
-    send('crane', {action: 'grip_angle', angle: parseInt($('grip-slider').value)});
-    document.querySelectorAll('[data-crane^="grip_"]').forEach(b => b.classList.remove('active'));
-  };
+document.getElementById('console-autoscroll').addEventListener('change', function() {
+  consoleAutoScroll = this.checked;
+});
 
-  // Speed slider
-  $('speed').oninput = () => $('speed-val').textContent = $('speed').value + '%';
-  $('speed').onchange = () => send('speed', {value: parseInt($('speed').value)});
+document.getElementById('console-clear-btn').addEventListener('click', function() {
+  var output = document.getElementById('console-output');
+  output.innerHTML = '';
+  logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
+  updateLogCounters();
+  var countEl = document.getElementById('console-line-count');
+  if (countEl) countEl.textContent = '0 lines';
+  sendCommand('clear_log', {});
+});
 
-  // Headlight + blinkers
-  $('headlight').onclick = () => send('headlight', {action: 'toggle'});
-  $('left-blink').onclick = () => {
-    $('left-blink').classList.toggle('active');
-    send('blinker', {side: 'left', active: $('left-blink').classList.contains('active')});
-  };
-  $('right-blink').onclick = () => {
-    $('right-blink').classList.toggle('active');
-    send('blinker', {side: 'right', active: $('right-blink').classList.contains('active')});
-  };
-  $('both-blink').onclick = () => {
-    $('left-blink').classList.remove('active');
-    $('right-blink').classList.remove('active');
-    send('blinker', {side: 'both_off'});
-  };
+async function loadDocs() {
+  if (docsData) { populateComponentNav(); showDocPage('overview'); return; }
+  try {
+    var [idx, pinout] = await Promise.all([
+      fetch('/docs/index.json').then(function(r) { return r.json(); }),
+      fetch('/docs/pinout.json').then(function(r) { return r.json(); }),
+    ]);
+    docsData = { index: idx, pinout: pinout, components: {} };
+    var comps = (idx.components || []).concat(idx.additional_hardware || []);
+    await Promise.all(comps.map(async function(c) {
+      try {
+        docsData.components[c.id] = await fetch('/docs/components/' + c.id + '.json').then(function(r) { return r.json(); });
+      } catch (e) {}
+    }));
+    populateComponentNav();
+    showDocPage('overview');
+  } catch (e) {
+    var main = document.getElementById('info-main');
+    if (main) main.innerHTML = '<div class="info-loading">Failed to load docs.</div>';
+  }
+}
 
-  // Side lights
-  document.querySelectorAll('[data-sw]').forEach(btn => {
-    btn.onclick = () => {
-      const which = btn.dataset.sw;
-      if (which === 'both') {
-        send('switch', {id: 0, state: true});
-        send('switch', {id: 1, state: true});
-      } else {
-        send('switch', {id: parseInt(which), state: true});
-      }
-    };
-  });
-
-  // LED strip
-  const colorInput = $('led-color');
-  document.querySelectorAll('.psbtn[data-hex]').forEach(btn => {
-    btn.onclick = () => {
-      colorInput.value = btn.dataset.hex;
-      send('led', {mode: 'solid', color: hex2rgb(btn.dataset.hex)});
-    };
-  });
-  document.querySelectorAll('[data-led]').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('[data-led]').forEach(b => b.classList.remove('active'));
+function populateComponentNav() {
+  var nav = document.getElementById('info-component-nav');
+  if (!nav || !docsData) return;
+  nav.innerHTML = '';
+  var allComps = (docsData.index.components || []).concat(docsData.index.additional_hardware || []);
+  allComps.forEach(function(c) {
+    var btn = document.createElement('button');
+    btn.className = 'info-comp-btn';
+    btn.dataset.doc = c.id;
+    btn.textContent = c.name;
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
-      send('led', {mode: btn.dataset.led, color: hex2rgb(colorInput.value)});
-    };
-  });
-
-  // Buzzer
-  document.querySelectorAll('[data-buzz]').forEach(btn => {
-    btn.onclick = () => {
-      if (btn.dataset.buzz === 'stop') send('buzzer_stop', {});
-      else send('buzzer', {melody: btn.dataset.buzz});
-    };
-  });
-
-  // I²C scan
-  $('i2c-btn').onclick = () => {
-    $('i2c-result').textContent = 'Scanning...';
-    send('i2c_scan', {});
-  };
-
-  // Console clear
-  $('log-clear').onclick = () => {
-    $('console').innerHTML = '';
-    $('log-count').textContent = '0 lines';
-    send('clear_log', {});
-  };
-
-  // Bluetooth
-  $('bt-scan').onclick = () => btScan();
-  $('bt-auto').onclick = () => {
-    fetch('/api/bt/auto_connect', {method: 'POST'})
-      .then(r => r.json())
-      .then(d => toast(d.ok ? 'Connected' : (d.error || 'Failed'),
-                       d.ok ? 'success' : 'error'));
-  };
-  $('bt-disc').onclick = () => {
-    fetch('/api/bt/disconnect', {method: 'POST'})
-      .then(r => r.json())
-      .then(() => toast('Disconnected'));
-  };
-}
-
-function btScan() {
-  const list = $('bt-list'), devs = $('bt-devs');
-  list.style.display = '';
-  devs.innerHTML = '<div style="color:#9aa0a6;padding:4px">Scanning...</div>';
-  fetch('/api/bt/scan').then(r => r.json()).then(d => {
-    devs.innerHTML = '';
-    if (!d.devices || !d.devices.length) {
-      devs.innerHTML = '<div style="color:#9aa0a6;padding:4px">No devices found</div>';
-      return;
-    }
-    d.devices.forEach(dev => {
-      const item = document.createElement('div');
-      item.className = 'bt-item' + (dev.is_gamepad ? ' gamepad' : '');
-      item.innerHTML = `<span>${dev.name} (${dev.mac})</span>
-        <button class="btn small">Connect</button>`;
-      devs.appendChild(item);
-      item.querySelector('button').onclick = () => {
-        item.querySelector('button').textContent = '...';
-        fetch('/api/bt/connect', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({mac: dev.mac, name: dev.name}),
-        }).then(r => r.json()).then(r => {
-          toast(r.ok ? 'Connected!' : (r.message || 'Failed'),
-                r.ok ? 'success' : 'error');
-        });
-      };
+      showDocPage(c.id);
     });
-  }).catch(() => {
-    devs.innerHTML = '<div style="color:#ea4335;padding:4px">Scan failed</div>';
+    nav.appendChild(btn);
   });
 }
 
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
-buildServos();
-setupJoy('joy', 'knob', 'joy-label', true);
-setupJoy('cam-joy', 'cam-knob', null, false);
-setupKeyboard();
-wireUI();
+document.querySelectorAll('.info-nav-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    showDocPage(btn.dataset.doc);
+  });
+});
+
+function showDocPage(page) {
+  var main = document.getElementById('info-main');
+  if (!main) return;
+  if (page === 'overview' && docsData) {
+    var idx = docsData.index;
+    var html = '<h2 class="info-title">' + (idx.title || 'PiCar Pro v1') + '</h2>';
+    if (idx.description) html += '<p class="info-subtitle">' + idx.description + '</p>';
+    if (idx.features) {
+      html += '<div class="info-section"><h3 class="info-section-title">Features</h3><ul class="tips-list">';
+      idx.features.forEach(function(f) { html += '<li>' + f + '</li>'; });
+      html += '</ul></div>';
+    }
+    main.innerHTML = html;
+    return;
+  }
+  if (page === 'pinout' && docsData && docsData.pinout) {
+    var p = docsData.pinout;
+    var html = '<h2 class="info-title">' + (p.title || 'Pinout') + '</h2>';
+    html += '<img src="/rpi_pinout.png" style="max-width:100%;border-radius:8px;margin-bottom:12px">';
+    if (p.pins) {
+      html += '<div class="info-section"><h3 class="info-section-title">Pin Assignments</h3>';
+      html += '<table class="pin-table"><thead><tr><th>GPIO</th><th>Name</th><th>Module</th><th>Notes</th></tr></thead><tbody>';
+      p.pins.filter(function(pin) { return pin.gpio !== null; }).forEach(function(pin) {
+        html += '<tr><td>GPIO' + pin.gpio + '</td><td>' + (pin.name || pin.function || '') + '</td><td>' + (pin.module || '') + '</td><td>' + (pin.notes || '') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    main.innerHTML = html;
+    return;
+  }
+  if (docsData && docsData.components[page]) {
+    var comp = docsData.components[page];
+    var d = comp.data;
+    var html = '<h2 class="info-title">' + comp.name + '</h2>';
+    if (d.description) html += '<p class="info-subtitle">' + d.description + '</p>';
+    if (d.specs) {
+      html += '<div class="info-section"><h3 class="info-section-title">Specifications</h3><div class="specs-grid">';
+      d.specs.forEach(function(s) {
+        html += '<div class="spec-item"><span class="spec-key">' + s.key + '</span><span class="spec-val">' + s.value + '</span></div>';
+      });
+      html += '</div></div>';
+    }
+    if (d.pins) {
+      html += '<div class="info-section"><h3 class="info-section-title">Pin Connections</h3><div class="comp-pins-list">';
+      d.pins.forEach(function(p) {
+        html += '<div class="comp-pin"><div class="comp-pin-name">' + p.name + '</div><div class="comp-pin-conn">' + (p.connection || '') + '</div><div class="comp-pin-func">' + (p.function || '') + '</div></div>';
+      });
+      html += '</div></div>';
+    }
+    if (d.tips) {
+      html += '<div class="info-section"><h3 class="info-section-title">Tips</h3><ul class="tips-list">';
+      d.tips.forEach(function(t) { html += '<li>' + t + '</li>'; });
+      html += '</ul></div>';
+    }
+    if (d.i2c_address !== undefined) {
+      html += '<div class="info-section"><h3 class="info-section-title">I2C Info</h3><div class="i2c-device-grid"><div class="i2c-device"><div class="i2c-device-addr">0x' + d.i2c_address.toString(16).toUpperCase() + '</div><div class="i2c-device-name">' + comp.name + '</div></div></div></div>';
+    }
+    main.innerHTML = html;
+  }
+}
+
+buildServoGrid();
 wsConnect();
-fetch('/api/logs').then(r => r.json()).then(d => {
-  if (d.lines) d.lines.forEach(([ts, txt]) => appendLog(txt, ts));
-}).catch(() => {});
+fetchConsoleHistory();

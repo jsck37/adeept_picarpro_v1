@@ -1,4 +1,4 @@
-import re, subprocess, threading, time
+import subprocess, threading, time
 
 
 class SystemInfo:

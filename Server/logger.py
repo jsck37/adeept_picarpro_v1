@@ -1,4 +1,4 @@
-import os, sys, threading, time
+import sys, threading, time
 from collections import deque
 from loguru import logger as _log
 

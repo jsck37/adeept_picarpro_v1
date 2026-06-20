@@ -3,7 +3,6 @@ import websockets
 from flask import Flask, Response, jsonify, request, send_from_directory, render_template
 from Server.logger import logger, log_buffer
 from Server.commands import process as process_command
-from Server.utils.system_info import SystemInfo
 from Server.network import get_ip, start_redirect_server
 from config import FLASK_PORT, WEBSOCKET_PORT, SECRET_KEY
 

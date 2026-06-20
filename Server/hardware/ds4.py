@@ -20,6 +20,7 @@ from config import (
     CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_STEER_RANGE,
+    MOTOR_A_IN1, MOTOR_A_IN2, MOTOR_B_IN1, MOTOR_B_IN2,
 )
 
 CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
@@ -474,12 +475,8 @@ class DS4Controller:
         else:
             left, right = s, 0.0
         forward = (direction == 'forward')
-        self._motors._set_side(self._motors._MOTOR_A_IN1 if hasattr(self._motors, '_MOTOR_A_IN1') else 26,
-                               self._motors._MOTOR_A_IN2 if hasattr(self._motors, '_MOTOR_A_IN2') else 21,
-                               self._motors._pwm_a, forward, right)
-        self._motors._set_side(self._motors._MOTOR_B_IN1 if hasattr(self._motors, '_MOTOR_B_IN1') else 27,
-                               self._motors._MOTOR_B_IN2 if hasattr(self._motors, '_MOTOR_B_IN2') else 18,
-                               self._motors._pwm_b, forward, left)
+        self._motors._set_side(MOTOR_A_IN1, MOTOR_A_IN2, self._motors._pwm_a, forward, right)
+        self._motors._set_side(MOTOR_B_IN1, MOTOR_B_IN2, self._motors._pwm_b, forward, left)
 
     def _motors_move_with_turn(self, speed, direction, turn, radius):
         if not self._motors or not self._motors._initialized:
@@ -493,12 +490,8 @@ class DS4Controller:
             left = s
             right = max(s * 0.3, s * (1 - radius))
         forward = (direction == 'forward')
-        self._motors._set_side(self._motors._MOTOR_A_IN1 if hasattr(self._motors, '_MOTOR_A_IN1') else 26,
-                               self._motors._MOTOR_A_IN2 if hasattr(self._motors, '_MOTOR_A_IN2') else 21,
-                               self._motors._pwm_a, forward, right)
-        self._motors._set_side(self._motors._MOTOR_B_IN1 if hasattr(self._motors, '_MOTOR_B_IN1') else 27,
-                               self._motors._MOTOR_B_IN2 if hasattr(self._motors, '_MOTOR_B_IN2') else 18,
-                               self._motors._pwm_b, forward, left)
+        self._motors._set_side(MOTOR_A_IN1, MOTOR_A_IN2, self._motors._pwm_a, forward, right)
+        self._motors._set_side(MOTOR_B_IN1, MOTOR_B_IN2, self._motors._pwm_b, forward, left)
 
     def _apply_pan_tilt(self):
         if not self._servos:
