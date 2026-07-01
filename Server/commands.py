@@ -96,7 +96,13 @@ def process(state, data):
             'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID, None, 'mid'),
             'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH, None, 'high'),
         }
-        if act in actions and state.servos:
+        if act == 'arm_toggle' and state.servos:
+            new_closed = not state.crane_arm_closed
+            angle = CRANE_ARM_CLOSED if new_closed else CRANE_ARM_OPEN
+            state.servos.set_angle(SERVO_CRANE_ARM, angle)
+            state.crane_arm_closed = new_closed
+            r = {'ok': True, 'action': 'arm_toggle', 'closed': new_closed}
+        elif act in actions and state.servos:
             sid, angle, arm_state, grip_state = actions[act]
             state.servos.set_angle(sid, angle)
             if arm_state is not None:

@@ -11,7 +11,7 @@ from config import FLASK_PORT
 
 def main():
     logger.info('=' * 50)
-    logger.info('  PiCar Pro v1 — booting...')
+    logger.info('  PiCar Pro — booting...')
     logger.info('=' * 50)
 
     state = SharedState()

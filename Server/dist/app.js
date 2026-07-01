@@ -163,10 +163,6 @@ function wsConnect() {
         }
         else if (msgType === 'response') {
           if (msgData.error) toast(msgData.error, 'error');
-          if (msgData.cmd === 'i2c_scan' && msgData.ok) {
-            var el = document.getElementById('i2c-scan-result');
-            if (el) showI2CResult(msgData, el);
-          }
           if (msgData.cmd === 'servo_get_limits' && msgData.ok) {
             applyServoLimits(msgData.limits);
           }
@@ -220,7 +216,8 @@ function updateStatus(d) {
     'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
     'keepDistance': 'Distance'
   };
-  document.getElementById('sb-module').textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
+  var sbModule = document.getElementById('sb-module');
+  if (sbModule) sbModule.textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
@@ -346,15 +343,14 @@ function updateStatus(d) {
 }
 
 function updateCraneArmUI() {
-  var openBtn = document.getElementById('crane-arm-open');
-  var closeBtn = document.getElementById('crane-arm-close');
-  if (!openBtn || !closeBtn) return;
+  var toggleBtn = document.getElementById('crane-arm-toggle');
+  if (!toggleBtn) return;
   if (craneArmClosed) {
-    closeBtn.classList.add('active');
-    openBtn.classList.remove('active');
+    toggleBtn.classList.add('active');
+    toggleBtn.textContent = 'Release';
   } else {
-    openBtn.classList.add('active');
-    closeBtn.classList.remove('active');
+    toggleBtn.classList.remove('active');
+    toggleBtn.textContent = 'Grab / Release';
   }
 }
 
@@ -384,13 +380,36 @@ function buildServoGrid() {
     var item = document.createElement('div');
     item.className = 'servo-item';
     item.innerHTML = '<label>' + s.name + ' <span class="val">' + s.init + '\u00B0</span></label>' +
-      '<input type="range" min="' + s.min + '" max="' + s.max + '" value="' + s.init + '" data-servo="' + s.id + '">';
+      '<input type="range" min="' + s.min + '" max="' + s.max + '" value="' + s.init + '" data-servo="' + s.id + '">' +
+      '<div class="servo-limits-row"><span class="servo-limit-label">min</span>' +
+      '<input type="number" class="servo-limit-input" min="0" max="180" value="' + s.min + '" data-servo-min="' + s.id + '">' +
+      '<span class="servo-limit-label">max</span>' +
+      '<input type="number" class="servo-limit-input" min="0" max="180" value="' + s.max + '" data-servo-max="' + s.id + '">' +
+      '</div>';
     grid.appendChild(item);
-    var slider = item.querySelector('input');
+    var slider = item.querySelector('input[type=range]');
     var valSpan = item.querySelector('.val');
+    var minInput = item.querySelector('input[data-servo-min]');
+    var maxInput = item.querySelector('input[data-servo-max]');
     slider.addEventListener('input', function() { valSpan.textContent = slider.value + '\u00B0'; });
     slider.addEventListener('change', function() {
       sendCommand('servo', { id: s.id, angle: parseInt(slider.value) });
+    });
+    minInput.addEventListener('change', function() {
+      var mn = parseInt(minInput.value);
+      var mx = parseInt(maxInput.value);
+      if (mn < mx) {
+        sendCommand('servo_set_limits', { id: s.id, min: mn, max: mx });
+        slider.min = mn;
+      }
+    });
+    maxInput.addEventListener('change', function() {
+      var mn = parseInt(minInput.value);
+      var mx = parseInt(maxInput.value);
+      if (mn < mx) {
+        sendCommand('servo_set_limits', { id: s.id, min: mn, max: mx });
+        slider.max = mx;
+      }
     });
   });
 }
@@ -674,10 +693,8 @@ document.getElementById('servo-save-limits').addEventListener('click', function(
 
 document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
-    var action = btn.dataset.action;
-    if (action === 'arm_close') craneArmClosed = true;
-    else if (action === 'arm_open') craneArmClosed = false;
-    sendCommand('crane', { action: action });
+    craneArmClosed = !craneArmClosed;
+    sendCommand('crane', { action: craneArmClosed ? 'arm_close' : 'arm_open' });
     updateCraneArmUI();
   });
 });
@@ -690,30 +707,8 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     else if (action === 'grip_high') craneGripPosition = 'high';
     sendCommand('crane', { action: action });
     updateCraneGripUI();
-    var slider = document.getElementById('crane-grip-slider');
-    var sliderVal = document.getElementById('crane-grip-slider-val');
-    var angleMap = { low: 0, mid: 135, high: 190 };
-    if (slider && angleMap[craneGripPosition] !== undefined) {
-      slider.value = angleMap[craneGripPosition];
-      if (sliderVal) sliderVal.textContent = angleMap[craneGripPosition] + '\u00B0';
-    }
   });
 });
-
-var craneGripSlider = document.getElementById('crane-grip-slider');
-var craneGripSliderVal = document.getElementById('crane-grip-slider-val');
-if (craneGripSlider) {
-  craneGripSlider.addEventListener('input', function() {
-    if (craneGripSliderVal) craneGripSliderVal.textContent = craneGripSlider.value + '\u00B0';
-  });
-  craneGripSlider.addEventListener('change', function() {
-    sendCommand('crane', { action: 'grip_angle', angle: parseInt(craneGripSlider.value) });
-    document.querySelectorAll('.crane-grip-btn').forEach(function(b) { b.classList.remove('active'); });
-    var label = document.getElementById('crane-grip-label');
-    if (label) label.textContent = 'Custom (' + craneGripSlider.value + '\u00B0)';
-    craneGripPosition = 'custom';
-  });
-}
 
 document.getElementById('hl-main').addEventListener('click', function() {
   hlMainOn = !hlMainOn;
@@ -723,22 +718,22 @@ document.getElementById('hl-main').addEventListener('click', function() {
 
 document.getElementById('hl-left-signal').addEventListener('click', function() {
   hlLeftSignal = !hlLeftSignal;
+  if (hlLeftSignal) {
+    hlRightSignal = false;
+    document.getElementById('hl-right-signal').className = 'headlight-btn off';
+  }
   sendCommand('blinker', { side: 'left', active: hlLeftSignal });
   this.className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
 });
 
 document.getElementById('hl-right-signal').addEventListener('click', function() {
   hlRightSignal = !hlRightSignal;
+  if (hlRightSignal) {
+    hlLeftSignal = false;
+    document.getElementById('hl-left-signal').className = 'headlight-btn off';
+  }
   sendCommand('blinker', { side: 'right', active: hlRightSignal });
   this.className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
-});
-
-document.getElementById('hl-both-signal').addEventListener('click', function() {
-  hlLeftSignal = false;
-  hlRightSignal = false;
-  sendCommand('blinker', { side: 'both_off' });
-  document.getElementById('hl-left-signal').className = 'headlight-btn off';
-  document.getElementById('hl-right-signal').className = 'headlight-btn off';
 });
 
 document.getElementById('hl-left').addEventListener('click', function() {
@@ -801,31 +796,6 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
 
 updateCraneArmUI();
 updateCraneGripUI();
-
-document.getElementById('i2c-scan-btn').addEventListener('click', function() {
-  var resultEl = document.getElementById('i2c-scan-result');
-  resultEl.textContent = 'Scanning...';
-  resultEl.style.color = '#fdd663';
-  sendCommand('i2c_scan', {});
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    fetch('/api/i2c_scan').then(function(r) { return r.json(); }).then(function(d) {
-      showI2CResult(d, resultEl);
-    }).catch(function() { resultEl.textContent = 'Scan failed'; resultEl.style.color = '#ea4335'; });
-  }
-});
-
-function showI2CResult(d, el) {
-  if (d.mpu6050_found) {
-    el.textContent = 'MPU6050 at ' + d.mpu6050_addr + ' (WHO_AM_I=' + d.mpu6050_who_am_i + ')';
-    el.style.color = '#34a853';
-  } else if (d.devices && d.devices.length > 0) {
-    el.textContent = 'No MPU6050. Devices: ' + d.devices.join(', ');
-    el.style.color = '#ea4335';
-  } else {
-    el.textContent = 'No I2C devices found!';
-    el.style.color = '#ea4335';
-  }
-}
 
 document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
@@ -1054,7 +1024,7 @@ function showDocPage(page) {
   if (!main) return;
   if (page === 'overview' && docsData) {
     var idx = docsData.index;
-    var html = '<h2 class="info-title">' + (idx.title || 'PiCar Pro v1') + '</h2>';
+    var html = '<h2 class="info-title">' + (idx.title || 'PiCar Pro') + '</h2>';
     if (idx.description) html += '<p class="info-subtitle">' + idx.description + '</p>';
     if (idx.features) {
       html += '<div class="info-section"><h3 class="info-section-title">Features</h3><ul class="tips-list">';

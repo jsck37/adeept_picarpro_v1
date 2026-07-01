@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent
 SERVICE_NAME = 'picarpro'
 SERVICE_FILE = f'''[Unit]
-Description=PiCar Pro v1 robot server
+Description=PiCar Pro robot server
 After=network-online.target bluetooth.target
 Wants=network-online.target
 
@@ -104,7 +104,7 @@ def install_service():
     ok(f'Service installed: {SERVICE_NAME}.service')
 
 def main():
-    print(f'\n{BOLD}  PiCar Pro v1 — installer{RST}\n')
+    print(f'\n{BOLD}  PiCar Pro — installer{RST}\n')
     if not is_raspberry_pi():
         warn('Not running on a Raspberry Pi — proceeding anyway (some steps may fail)')
     enable_interfaces()

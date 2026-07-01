@@ -94,7 +94,7 @@ class OLEDDisplay:
                     else:
                         draw.text((1, 52), warn_rows[0], fill=text_fill, font=font_small)
                 else:
-                    draw.text((0, 50), 'PiCar Pro v1', fill=255, font=font_small)
+                    draw.text((0, 50), 'PiCar Pro', fill=255, font=font_small)
                 self._device.display(img)
             except Exception:
                 pass

@@ -211,6 +211,7 @@ class CVThread(threading.Thread):
 class Camera:
     _instance_lock = threading.Lock()
     _instance = None
+    _picam_error_logged = False
 
     @classmethod
     def get_instance(cls):
@@ -236,7 +237,9 @@ class Camera:
             if self._picam is not None:
                 return
             if not _HAS_PICAM:
-                logger.error('[Camera] picamera2 not installed')
+                if not Camera._picam_error_logged:
+                    logger.error('[Camera] picamera2 not installed')
+                    Camera._picam_error_logged = True
                 return
             try:
                 self._picam = Picamera2()

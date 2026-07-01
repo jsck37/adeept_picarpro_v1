@@ -1,14 +1,26 @@
+# PiCar Pro — Python Dependencies
+# Install: pip3 install -r requirements.txt
+# On Debian 12+: pip3 install --break-system-packages -r requirements.txt
+
+# I2C / Servo
 adafruit-circuitpython-pca9685
 adafruit-circuitpython-motor
 adafruit-circuitpython-busdevice
+
+# OLED Display
 luma.oled
-pillow
+
+# WS2812 LED Strip
 spidev
+
+# Vision / Video
+pillow
+opencv-python-headless
+numpy
+picamera2
+
 flask
 websockets
 loguru
-picamera2
-opencv-python-headless
-numpy
 smbus2
 evdev
