@@ -1,5 +1,3 @@
-"""OLED SSD1306 — 4 lines + scrolling text."""
-
 import threading, time
 from Server.config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT, OLED_SCROLL_TEXT
 from Server.logger import logger

@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""
-Initialize all servos to their default (90°) position.
-Only initializes the 3 active servos (steering, camera pan/tilt).
-Crane/manipulator is disabled — not physically connected.
-Run this after first setup or when servos need calibration.
-"""
 
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to sys.path so `Server.*` imports work when run directly
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Server.config import SERVO_COUNT, SERVO_INIT_ANGLE, SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT
 from Server.logger import logger

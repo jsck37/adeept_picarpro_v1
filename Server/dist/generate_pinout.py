@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Generate horizontal Raspberry Pi 3B+ GPIO Pinout Diagram for PiCar Pro.
-   All labels horizontal, bold, Liberation Sans (MS Sans), large readable text."""
+
 import os
 import matplotlib
 matplotlib.use('Agg')
@@ -8,14 +7,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.font_manager as fm
 
-# Liberation Sans = metric equivalent of MS Sans Serif
 fm.fontManager.addfont('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf')
 fm.fontManager.addfont('/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf')
-# Noto Sans SC is variable font — skip addfont, let matplotlib find it
 plt.rcParams['font.sans-serif'] = ['Liberation Sans', 'DejaVu Sans', 'Noto Sans SC']
 plt.rcParams['axes.unicode_minus'] = False
 
-# ── Pin data ──
 left_pins = [
     (1,"3V3","3V3\nPower","power"),(3,"GPIO2","SDA1\n(I2C)","i2c"),
     (5,"GPIO3","SCL1\n(I2C)","i2c"),(7,"GPIO4","","gpio"),
@@ -56,12 +52,11 @@ category_colors = {
 }
 picar_indicator_color = "#F1C40F"
 
-# ── Layout constants ──
-PIN_W   = 2.6       # wider pins for large horizontal text
-PIN_H   = 3.2       # taller pin boxes for big font
+PIN_W   = 2.6
+PIN_H   = 3.2
 COL_GAP = 0.18
 NUM_COLS = 20
-ROW_GAP = 0.6       # gap between pin box and board
+ROW_GAP = 0.6
 BOARD_PAD = 1.2
 
 board_w = NUM_COLS * (PIN_W + COL_GAP) - COL_GAP
@@ -74,19 +69,15 @@ ax.set_ylim(-5, fig_h)
 ax.set_aspect('equal')
 ax.axis('off')
 
-# ── Background ──
 fig.patch.set_facecolor('#1A1A2E')
 ax.set_facecolor('#1A1A2E')
 
-# ── Title ──
 title_x = BOARD_PAD + board_w / 2
-# Position title above legend (legend_y + 3.5)
 title_y = 23.5
 ax.text(title_x, title_y,
-        "Raspberry Pi 3B+ \u2014 Распиновка GPIO \u2014 PiCar Pro",
+        "Raspberry Pi 3B+ \u2014 \u0420\u0430\u0441\u043f\u0438\u043d\u043e\u0432\u043a\u0430 GPIO \u2014 PiCar Pro",
         ha='center', va='center', fontsize=64, fontweight='bold', color='#ECF0F1')
 
-# ── Board rectangle ──
 board_x = BOARD_PAD
 board_y = 9.0
 board_h = 2.8
@@ -99,75 +90,60 @@ ax.text(board_x + board_w / 2, board_y + board_h / 2,
         ha='center', va='center', fontsize=64, fontweight='bold',
         color='#7F8C8D', zorder=1)
 
-# ── Draw pins ──
 for col_idx in range(NUM_COLS):
     x = BOARD_PAD + col_idx * (PIN_W + COL_GAP)
     l_data = left_pins[col_idx]
     r_data = right_pins[col_idx]
 
-    # ── Right pin (top row) ──
     pin_num, gpio_label, func_label, category = r_data
     color = category_colors[category]
     top_y = board_y + board_h + ROW_GAP
 
-    # Pin number above
     ax.text(x + PIN_W / 2, top_y + PIN_H + 0.5, str(pin_num),
             ha='center', va='bottom', fontsize=36, fontweight='bold', color='#BDC3C7')
-    # Pin box
     ax.add_patch(patches.FancyBboxPatch(
         (x, top_y), PIN_W, PIN_H,
         boxstyle="round,pad=0.06", facecolor=color,
         edgecolor='#1A1A2E', linewidth=1.2, zorder=2, alpha=0.92))
-    # GPIO label inside box — ALWAYS HORIZONTAL, BOLD
     ax.text(x + PIN_W / 2, top_y + PIN_H / 2, gpio_label,
             ha='center', va='center', fontsize=30, fontweight='bold',
             color='#FFFFFF', zorder=3)
-    # Function label above box (multi-line)
     if func_label:
         ax.text(x + PIN_W / 2, top_y + PIN_H + 1.8, func_label,
                 ha='center', va='bottom', fontsize=31, fontweight='bold',
                 color='#AEB6BF', zorder=3, linespacing=1.1)
-    # PiCar Pro indicator dot
     if pin_num in picar_pro:
         ax.plot(x - 0.25, top_y + PIN_H / 2, 'o',
                 color=picar_indicator_color, markersize=24, zorder=4)
 
-    # ── Left pin (bottom row) ──
     pin_num, gpio_label, func_label, category = l_data
     color = category_colors[category]
     bot_y = board_y - PIN_H - ROW_GAP
 
-    # Pin number below
     ax.text(x + PIN_W / 2, bot_y - 0.7, str(pin_num),
             ha='center', va='top', fontsize=36, fontweight='bold', color='#BDC3C7')
-    # Pin box
     ax.add_patch(patches.FancyBboxPatch(
         (x, bot_y), PIN_W, PIN_H,
         boxstyle="round,pad=0.06", facecolor=color,
         edgecolor='#1A1A2E', linewidth=1.2, zorder=2, alpha=0.92))
-    # GPIO label inside box — ALWAYS HORIZONTAL, BOLD
     ax.text(x + PIN_W / 2, bot_y + PIN_H / 2, gpio_label,
             ha='center', va='center', fontsize=30, fontweight='bold',
             color='#FFFFFF', zorder=3)
-    # Function label below pin number (multi-line)
     if func_label:
         ax.text(x + PIN_W / 2, bot_y - 2.0, func_label,
                 ha='center', va='top', fontsize=31, fontweight='bold',
                 color='#AEB6BF', zorder=3, linespacing=1.1)
-    # PiCar Pro indicator dot
     if pin_num in picar_pro:
         ax.plot(x - 0.25, bot_y + PIN_H / 2, 'o',
                 color=picar_indicator_color, markersize=24, zorder=4)
 
-    # Thin vertical guide line
     ax.plot([x + PIN_W / 2, x + PIN_W / 2],
             [board_y, board_y + board_h],
             color='#3D5A80', linewidth=0.5, alpha=0.3, zorder=0)
 
-# ── PiCar Pro pin assignments table ──
 table_y_start = bot_y - 5.0
 ax.text(BOARD_PAD, table_y_start + 0.3,
-        "\u25a0 PiCar Pro \u2014 Назначение пинов:",
+        "\u25a0 PiCar Pro \u2014 \u041d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u043f\u0438\u043d\u043e\u0432:",
         ha='left', va='top', fontsize=56, fontweight='bold',
         color=picar_indicator_color)
 
@@ -183,14 +159,11 @@ for i, (pin, desc) in enumerate(picar_items):
             ha='left', va='center', fontsize=48, fontweight='bold',
             color='#ECF0F1', zorder=3)
 
-# ── Legend ──
 legend_items = [
-    ("Питание (3V3/5V)", "power"), ("Земля (GND)", "ground"),
+    ("\u041f\u0438\u0442\u0430\u043d\u0438\u0435 (3V3/5V)", "power"), ("\u0417\u0435\u043c\u043b\u044f (GND)", "ground"),
     ("I2C (SDA/SCL)", "i2c"), ("SPI (MOSI/MISO)", "spi"),
-    ("UART (TXD/RXD)", "uart"), ("GPIO Общий", "gpio"),
+    ("UART (TXD/RXD)", "uart"), ("GPIO \u041e\u0431\u0449\u0438\u0439", "gpio"),
 ]
-# Gap from top pins to legend = gap from bottom pins to PiCar header (~2.1 data units)
-# Top pin highest element ≈ 17.4, so legend bottom = 17.4 + 2.1 = 19.5, legend_y = 20.0
 legend_y = 20.0
 legend_spacing = 9.5
 for i, (label, cat) in enumerate(legend_items):
@@ -203,7 +176,6 @@ for i, (label, cat) in enumerate(legend_items):
             ha='left', va='center', fontsize=48, fontweight='bold',
             color='#ECF0F1', zorder=12)
 
-# ── Save ──
 script_dir = os.path.dirname(os.path.abspath(__file__))
 output_path = os.path.join(script_dir, "rpi_pinout.png")
 plt.tight_layout(pad=2.0)

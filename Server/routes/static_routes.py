@@ -1,22 +1,8 @@
-#!/usr/bin/env python3
-"""Static file serving blueprint — index, assets, and docs."""
-
 import os
 from flask import Blueprint, render_template, send_from_directory
 
 
 def create_static_blueprint(dist_dir, docs_dir):
-    """Return a Blueprint that serves the SPA front-end and docs JSON.
-
-    Parameters
-    ----------
-    dist_dir : str
-        Absolute path to the ``dist/`` directory containing built front-end
-        assets (index.html, style.css, app.js, …).
-    docs_dir : str
-        Absolute path to the ``docs/`` directory containing JSON documentation
-        files (index.json, pinout.json).
-    """
     bp = Blueprint("static", __name__)
 
     @bp.route("/")

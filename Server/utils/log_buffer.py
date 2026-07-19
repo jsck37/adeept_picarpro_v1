@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Thread-safe ring buffer for capturing print() output.
+"""Thread-safe ring buffer for capturing loguru output.
 
-Replaces sys.stdout with a Tee that writes to both the real stdout
-and a ring buffer.  The WebSocket handler can fetch recent lines
-and subscribe to new ones.
+The loguru logger is configured with a custom sink that calls
+``log_buffer.write()`` for every log message.  The WebSocket handler
+can fetch recent lines and subscribe to new ones for real-time log
+streaming to the web UI.
 """
 
-import sys
 import threading
 import time
 
@@ -19,8 +19,6 @@ class LogBuffer:
         self._lines = []          # list of (timestamp, text)
         self._lock = threading.Lock()
         self._subscribers = []    # list of callback(text)
-        self._orig_stdout = None
-        self._orig_stderr = None
 
     # ── write (called from loguru sink) ───────────────────────────
 
@@ -28,7 +26,6 @@ class LogBuffer:
         if not text:
             return
         ts = time.time()
-        # Split multi-line text into individual lines
         for line in text.splitlines():
             stripped = line.rstrip()
             if not stripped:
@@ -37,7 +34,6 @@ class LogBuffer:
                 self._lines.append((ts, stripped))
                 if len(self._lines) > self._max:
                     self._lines = self._lines[-self._max:]
-                # Notify subscribers (copy list to avoid holding lock)
                 subs = list(self._subscribers)
             for cb in subs:
                 try:
@@ -80,5 +76,5 @@ class LogBuffer:
                 pass
 
 
-    # ── Global singleton ───────────────────────────────────────────────
+# ── Global singleton ────────────────────────────────────────────────
 log_buffer = LogBuffer()

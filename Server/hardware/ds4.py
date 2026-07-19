@@ -76,7 +76,6 @@ def _ensure_hid_sony():
                        capture_output=True, text=True, timeout=5)
         logger.info("[DS4] Loaded hid-sony kernel module")
     except FileNotFoundError:
-        # Not running as root or modprobe not available
         logger.warning("[DS4] modprobe not found — if DS4 keys don't respond, "
                        "run: sudo modprobe hid-sony")
     except Exception as e:
@@ -276,7 +275,6 @@ class DS4Controller:
                 ecodes.ABS.get(k, hex(k)): f'{v[0]}..{v[1]}'
                 for k, v in self._axis_ranges.items()
             }
-            # Log key capabilities for debugging
             keys = caps.get(ecodes.EV_KEY, [])
             key_names = [ecodes.KEY.get(k, ecodes.BTN.get(k, hex(k))) for k in keys[:20]]
             logger.info(f"[DS4] Connected #{self._connect_count}: "
@@ -331,7 +329,6 @@ class DS4Controller:
                 dev = self._find_device()
                 if dev:
                     self._connect(dev)
-                # Wait for next cycle, but break early if rescan requested
                 self._rescan_flag.wait(timeout=1.0)
                 self._rescan_flag.clear()
             else:
@@ -423,7 +420,6 @@ class DS4Controller:
             self._lx = self._norm_axis(value, code)
             self._apply_move()
         elif code == ecodes.ABS_Y:
-            # INVERTED: push stick forward (value < centre) = ly > 0 = forward
             raw = self._norm_axis(value, code)
             self._ly = -raw if DS4_INVERT_LY else raw
             self._apply_move()
@@ -431,7 +427,6 @@ class DS4Controller:
             self._rx = self._norm_axis(value, code)
             self._apply_crane_pan_tilt()
         elif code == ecodes.ABS_RY:
-            # INVERTED for crane: push stick up = ry < 0 -> we want tilt up
             raw = self._norm_axis(value, code)
             self._ry = -raw if DS4_INVERT_RY else raw
             self._apply_crane_pan_tilt()
@@ -478,7 +473,6 @@ class DS4Controller:
         # -- Auto-mode buttons: Triangle (trackLineCV) and Square (trackHand) --
         if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):     # Triangle - CV line follow
             if self._autonomous and self._shared_state:
-                # Ensure camera is available
                 if hasattr(self._shared_state, 'camera') and self._shared_state.camera:
                     self._autonomous._camera = self._shared_state.camera
                 elif hasattr(self._shared_state, 'init_camera'):
@@ -598,7 +592,6 @@ class DS4Controller:
         with self._lock:
             speed = self._speed
 
-        # ly > 0 = forward (stick pushed), ly < 0 = backward (stick pulled)
         d = 'forward' if ly >= 0 else 'backward'
 
         if abs(lx) < 0.1:
@@ -608,17 +601,14 @@ class DS4Controller:
         else:
             turn, radius = 'left', max(0.2, 0.5 + lx * DS4_STEER_SENSITIVITY * 0.3)
 
-        # Apply speed multiplier for faster driving
         abs_ly = abs(ly)
         s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
-        s = min(100, s)  # Cap at 100
+        s = min(100, s)
 
         # -- Drift mode --
         if self._drift_mode and s > 0 and abs(lx) > 0.3:
             self._drift_active = True
-            # Over-steer: exaggerate front wheel angle
             steer = max(25, min(155, 90 - int(lx * DS4_DRIFT_STEER_RANGE * DS4_STEER_SENSITIVITY)))
-            # Full rear power, reduced on inner wheel for slide effect
             drift_speed = min(100, int(s * 1.2))
             self._motors.move(drift_speed, d, turn, max(0.15, radius * 0.6))
         else:
@@ -642,14 +632,11 @@ class DS4Controller:
             return
         rx, ry = self._rx, self._ry
 
-        # Only move if stick is deflected enough
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
 
-        # Pan (servo 1): rx > 0 -> increase angle (pan right), rx < 0 -> decrease (pan left)
         if abs(rx) >= DS4_DEADZONE:
             current_pan = self._servos.get_angle(SERVO_CAM_PAN)
-            # Proportional step: 1 deg at small deflection, up to 10 deg at full deflection
             pan_step = max(1, int(abs(rx) * DS4_CAM_SENSITIVITY * 10))
             if rx > 0:
                 new_pan = min(180, current_pan + pan_step)
@@ -659,10 +646,8 @@ class DS4Controller:
                 self._servos.set_angle(SERVO_CAM_PAN, new_pan)
                 self._cam_pan = new_pan
 
-        # Tilt (servo 2): ry > 0 (stick up) -> increase angle (tilt up)
         if abs(ry) >= DS4_DEADZONE:
             current_tilt = self._servos.get_angle(SERVO_CAM_TILT)
-            # Proportional step: 1 deg at small deflection, up to 10 deg at full deflection
             tilt_step = max(1, int(abs(ry) * DS4_CAM_SENSITIVITY * 10))
             if ry > 0:
                 new_tilt = min(180, current_tilt + tilt_step)
@@ -682,13 +667,13 @@ class DS4Controller:
         """
         if not CRANE_ENABLED or not self._servos:
             return
-        if self._hat_y > 0:                                    # D-pad DOWN
+        if self._hat_y > 0:
             self._smooth_crane(SERVO_CLAW_ARM, CLAW_ARM_DOWN)
-        elif self._hat_y < 0:                                  # D-pad UP
+        elif self._hat_y < 0:
             self._smooth_crane(SERVO_CLAW_ARM, CLAW_ARM_UP)
-        if self._hat_x < 0:                                    # D-pad LEFT
+        if self._hat_x < 0:
             self._smooth_crane(SERVO_CLAW_GRIP, CLAW_GRIP_OPEN)
-        elif self._hat_x > 0:                                  # D-pad RIGHT
+        elif self._hat_x > 0:
             self._smooth_crane(SERVO_CLAW_GRIP, CLAW_GRIP_CLOSED)
 
     # -- Blinker methods --------------------------------------------------
@@ -697,7 +682,6 @@ class DS4Controller:
         """Toggle left headlight blinker on/off."""
         if self._left_blinking:
             self._left_blinking = False
-            # Make sure left light is off when stopping blinker
             if self._switches and self._switches._initialized:
                 self._switches.off(0)
             return
@@ -722,7 +706,6 @@ class DS4Controller:
         """Toggle right headlight blinker on/off."""
         if self._right_blinking:
             self._right_blinking = False
-            # Make sure right light is off when stopping blinker
             if self._switches and self._switches._initialized:
                 self._switches.off(1)
             return

@@ -1,5 +1,3 @@
-"""WS2812 LED strip — rpi_ws281x with SPI fallback."""
-
 import time, threading
 from Server.config import LED_COUNT, LED_BRIGHTNESS
 from Server.logger import logger
@@ -75,7 +73,6 @@ class LEDController:
             self.fill(*color) if mode == "solid" else self.clear()
             self._flag.clear()
         else:
-            # For animated modes: restart animation so it picks up new color
             self._flag.clear()
             time.sleep(0.05)
             self._mode = mode
@@ -134,22 +131,19 @@ class LEDController:
             time.sleep(0.02)
 
     def _anim_police(self):
-        """Police strobe: odd LEDs red + even LEDs blue, then swap."""
         while self._flag.is_set() and self._mode == "police":
-            # State A: odd=red, even=blue
             for i in range(LED_COUNT):
                 if i % 2 == 0:
-                    self._pixels[i] = (0, 0, 255)    # even = blue
+                    self._pixels[i] = (0, 0, 255)
                 else:
-                    self._pixels[i] = (255, 0, 0)    # odd = red
+                    self._pixels[i] = (255, 0, 0)
             self._show()
             time.sleep(0.15)
-            # State B: swap — odd=blue, even=red
             for i in range(LED_COUNT):
                 if i % 2 == 0:
-                    self._pixels[i] = (255, 0, 0)    # even = red
+                    self._pixels[i] = (255, 0, 0)
                 else:
-                    self._pixels[i] = (0, 0, 255)    # odd = blue
+                    self._pixels[i] = (0, 0, 255)
             self._show()
             time.sleep(0.15)
 

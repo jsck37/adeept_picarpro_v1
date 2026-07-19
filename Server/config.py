@@ -1,16 +1,3 @@
-"""PiCar Pro v1 — hardware configuration.
-
-Centralised constants for all subsystems.  Every module imports from
-here so that magic numbers live in exactly one place.
-
-Changes from v1:
-  - DS4 stick inversion config added
-  - Speed multiplier for gamepad
-  - Crane smooth step size config
-  - Drift mode config
-  - Hotspot IP for captive portal
-"""
-
 import os
 
 # ── Feature flags ──────────────────────────────────────────────────────
@@ -46,7 +33,7 @@ MOTOR_B_IN1 = 27
 MOTOR_B_IN2 = 18
 
 # ── Servo channels & pulse limits ──────────────────────────────────────
-SERVO_COUNT      = 6
+SERVO_COUNT      = 7       # 7 channels (ch0-5 standard + ch6 claw arm)
 SERVO_MIN_PULSE  = 500
 SERVO_MAX_PULSE  = 2400
 SERVO_INIT_ANGLE = 90
@@ -55,7 +42,7 @@ SERVO_INIT_ANGLE = 90
 SERVO_STEERING   = 0
 SERVO_CAM_PAN    = 1
 SERVO_CAM_TILT   = 2
-SERVO_CLAW_ARM   = 4
+SERVO_CLAW_ARM   = 6
 SERVO_CLAW_GRIP  = 5
 
 # ── Per-servo init angles ─────────────────────────────────────────────
@@ -66,8 +53,9 @@ SERVO_INIT_ANGLES = {
     1: 90,   # Cam Pan — centre
     2: 90,   # Cam Tilt — centre
     3: 90,   # Unused channel
-    4: None,  # Claw Arm — set dynamically from CLAW_ARM_UP
+    4: 90,   # Unused channel
     5: None,  # Claw Grip — set dynamically from CLAW_GRIP_OPEN
+    6: None,  # Claw Arm — set dynamically from CLAW_ARM_UP
 }
 
 # ── Claw angle limits ─────────────────────────────────────────────────
@@ -104,7 +92,7 @@ LINE_RIGHT_PIN  = 19
 
 # ── Camera ─────────────────────────────────────────────────────────────
 CAMERA_RESOLUTION      = (640, 480)
-CAMERA_FPS             = 30
+CAMERA_FPS             = 45
 CAMERA_JPEG_QUALITY    = 80
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL   = False

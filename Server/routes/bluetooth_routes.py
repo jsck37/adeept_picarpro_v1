@@ -34,7 +34,6 @@ def _load_hid_sony():
     This is the #1 reason why a DS4 "connects" but keys don't respond.
     """
     try:
-        # Check if already loaded
         with open('/proc/modules', 'r') as f:
             for line in f:
                 if line.startswith('hid_sony ') or line.startswith('hid_playstation '):
@@ -59,7 +58,6 @@ def _load_hid_sony():
     except Exception as e:
         logger.warning(f"[BT] modprobe hid-sony error: {e}")
 
-    # Try hid-playstation as fallback (newer kernels)
     try:
         result = subprocess.run(
             ['modprobe', 'hid-playstation'],
@@ -101,7 +99,6 @@ def _wait_for_evdev_device(timeout=8):
                     dev = evdev.InputDevice(path)
                     name_lower = dev.name.lower()
                     if any(kw in name_lower for kw in ds4_keywords):
-                        # Verify it has gamepad buttons (not just the touchpad)
                         caps = dev.capabilities()
                         keys = caps.get(evdev.ecodes.EV_KEY, [])
                         if evdev.ecodes.BTN_SOUTH in keys:
@@ -151,14 +148,11 @@ def _scan_devices(scan_time=3):
     Starts a background scan, waits, then reads the device list.
     Returns a list of dicts: [{"name": "...", "mac": "XX:XX:XX:XX:XX:XX"}, ...]
     """
-    # Ensure hid-sony is loaded before scanning
     _load_hid_sony()
 
-    # Power on and start scan in background
     _btctl('power', 'on', timeout=5)
     time.sleep(0.2)
 
-    # Start scan (fire and forget — runs in bluetoothctl's own process)
     scan_proc = subprocess.Popen(
         ['bluetoothctl', 'scan', 'on'],
         stdin=subprocess.DEVNULL,
@@ -166,10 +160,8 @@ def _scan_devices(scan_time=3):
         stderr=subprocess.DEVNULL,
     )
 
-    # Wait for devices to appear
     time.sleep(scan_time)
 
-    # Stop scan
     try:
         scan_proc.terminate()
         scan_proc.wait(timeout=2)
@@ -179,7 +171,6 @@ def _scan_devices(scan_time=3):
         except Exception:
             pass
 
-    # Read device list
     output = _btctl('devices', timeout=5)
 
     devices = []
@@ -221,7 +212,6 @@ def _pair_and_connect(mac, ds4_controller=None):
     """
     mac = mac.upper()
 
-    # Step 0: Ensure hid-sony is loaded
     _load_hid_sony()
 
     _btctl('power', 'on', timeout=5)
@@ -233,21 +223,17 @@ def _pair_and_connect(mac, ds4_controller=None):
     logger.info(f"[BT] Attempting direct connect to {mac}...")
     out = _btctl('connect', mac, timeout=10)
     if 'successful' in out.lower():
-        # Already paired — ensure trusted
         _btctl('trust', mac, timeout=5)
         logger.info(f"[BT] Direct connect succeeded for {mac}")
-        # Wait for evdev device and trigger rescan
         _post_connect(mac, ds4_controller)
         return True, f"Connected to {mac}"
 
     # -- Step 2: Full pair sequence --
     logger.info(f"[BT] Direct connect failed, full pairing for {mac}...")
 
-    # Remove any existing pairing
     _btctl('remove', mac, timeout=5)
     time.sleep(0.5)
 
-    # Start scan so device is discoverable
     scan_proc = subprocess.Popen(
         ['bluetoothctl', 'scan', 'on'],
         stdin=subprocess.DEVNULL,
@@ -265,28 +251,22 @@ def _pair_and_connect(mac, ds4_controller=None):
             pass
     time.sleep(0.3)
 
-    # Pair
     logger.info(f"[BT] Pairing with {mac}...")
     pair_out = _btctl('pair', mac, timeout=15)
     if 'successful' not in pair_out.lower() and 'Failed' in pair_out:
-        # Some bluetoothctl versions report pairing differently
-        # Check if device appears in paired list
         info_out = _btctl('info', mac, timeout=5)
         if 'Paired: yes' not in info_out:
             return False, f"Pairing failed for {mac}"
 
     time.sleep(0.5)
 
-    # Trust
     _btctl('trust', mac, timeout=5)
     time.sleep(0.3)
 
-    # Connect
     logger.info(f"[BT] Connecting to {mac}...")
     conn_out = _btctl('connect', mac, timeout=10)
     if 'successful' in conn_out.lower():
         logger.info(f"[BT] Pair + connect succeeded for {mac}")
-        # Wait for evdev device and trigger rescan
         _post_connect(mac, ds4_controller)
         return True, f"Paired and connected to {mac}"
 
@@ -300,7 +280,6 @@ def _post_connect(mac, ds4_controller=None):
     This is critical — without this step, the DS4 connects at the
     Bluetooth level but the robot never receives gamepad input.
     """
-    # Wait for the evdev device to appear
     evdev_path = _wait_for_evdev_device(timeout=8)
 
     if evdev_path:
@@ -309,7 +288,6 @@ def _post_connect(mac, ds4_controller=None):
         logger.warning("[BT] DS4 input device NOT found — keys may not respond")
         logger.warning("[BT] Check: lsmod | grep hid_sony ; ls /dev/input/")
 
-    # Trigger DS4 controller rescan if available
     if ds4_controller is not None:
         try:
             ds4_controller.trigger_rescan()
@@ -396,11 +374,7 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/scan", methods=["GET"])
     def bt_scan():
-        """Scan for nearby Bluetooth devices.
-
-        Returns a list of found devices sorted by whether they look like
-        gamepads (gamepads first).
-        """
+        """Scan for nearby Bluetooth devices."""
         try:
             devices = _scan_devices(scan_time=3)
             for d in devices:
@@ -464,7 +438,6 @@ def create_bluetooth_blueprint(state):
         """Return the current Bluetooth connection status and saved config."""
         cfg = _load_bt_config()
         ds4_connected = state.ds4.connected if state.ds4 else False
-        # Also check if hid-sony is loaded
         hid_sony_loaded = False
         try:
             with open('/proc/modules', 'r') as f:
@@ -508,11 +481,7 @@ def create_bluetooth_blueprint(state):
 
     @bp.route("/load_hid_sony", methods=["POST"])
     def bt_load_hid_sony():
-        """Manually trigger loading the hid-sony kernel module.
-
-        This endpoint is useful for debugging — if the DS4 connects
-        but keys don't respond, calling this endpoint may fix it.
-        """
+        """Manually trigger loading the hid-sony kernel module."""
         ok = _load_hid_sony()
         return jsonify({"ok": ok, "message": "hid-sony loaded" if ok else "Failed to load hid-sony"})
 

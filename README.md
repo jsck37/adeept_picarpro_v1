@@ -1,4 +1,4 @@
-# Adeept PiCar-Pro V1
+# Adeept PiCar-Pro V1 firmware by jsck37
 
 ---
 
@@ -14,13 +14,20 @@
 ## ⚙️ Установка
 
 ### 1. Подготовка образа ОС
-1. Скачайте [Raspberry Pi Imager](https://downloads.raspberrypi.com/imager/imager_latest.exe)
-2. Выберите ОС: [Raspberry Pi OS](https://www.raspberrypi.com/software/operating-systems/)
-3. Запишите образ на microSD и запустите Raspberry Pi
+1. Скачать [Raspberry Pi Imager](https://downloads.raspberrypi.com/imager/imager_latest.exe)
+2. Выбрать ОС: [Raspberry Pi OS](https://www.raspberrypi.com/software/operating-systems/)
+3. Записать образ на microSD и запустить Raspberry Pi
 
-### 2. Установка ПО
+### 2. Подготовка Raspberry Pi
 
-Подключитесь к Raspberry Pi через SSH или терминал и выполните:
+- microSD с установленной OS
+- Адаптер питания
+- HDMI-кабель для вывода изображения
+- Периферия (мышка/клава)
+
+### 3. Установка ПО
+
+Открыть терминал в Raspberry Pi через SSH или напрямую:
 
 ```bash
 # Обновление системы
@@ -36,13 +43,19 @@ git clone https://github.com/jsck37/adeept_picarpro_v1
 sudo python3 adeept_picarpro_v1/setup.py
 ```
 
-### 3. Проверка службы автозагрузки
+### 4. Проверка службы автозагрузки
 
 ```bash
 systemctl status picarpro
+
+# Должно вывести loaded: enabled; active: active.
+# Иначе пересоздать службу автозагрузки
 ```
 
-### 4. Запуск веб-интерфейса
+### 5. Открытие веб-панели
 
+Подключитесь к точке доступа "Adeept/0123456789"
+
+Открыть одну из ссылок:
 1. http://localhost:5000
 2. http://10.42.0.1:5000

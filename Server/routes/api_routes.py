@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""API blueprint — status, SSE stream, and hardware scan.
+"""API blueprint — status, SSE stream, hardware scan, and logs.
 
 All routes are registered under the ``/api`` url prefix.
 """
 
 import json, time
 from flask import Blueprint, Response, jsonify
+from Server.utils.log_buffer import log_buffer
 
 
 def create_api_blueprint(state):
@@ -44,5 +45,11 @@ def create_api_blueprint(state):
             "devices": [f'0x{a:02X}' for a in devs],
             "mpu6050_found": addr is not None,
         })
+
+    @bp.route("/logs")
+    def api_logs():
+        """Return the last 200 log lines for the web UI log viewer."""
+        lines = log_buffer.get_lines(last_n=200)
+        return jsonify({"ok": True, "lines": [[ts, txt] for ts, txt in lines]})
 
     return bp

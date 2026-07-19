@@ -1,5 +1,3 @@
-"""Headlight switch via gpiozero LED."""
-
 from Server.config import SWITCH_PINS
 from Server.logger import logger
 

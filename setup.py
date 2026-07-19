@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Automated setup for PiCar Pro (Flask + WebSocket) on Raspberry Pi 3B+."""
 
 import os
 import sys
@@ -13,12 +12,30 @@ if not username:
     username = os.popen('whoami').readline().strip()
 if not username:
     username = "pi"
-user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f 6').readline().strip()
+user_home = os.popen(f'getent passwd {username} 2>/dev/null | cut -d: -f6').readline().strip()
 if not user_home:
     user_home = f"/home/{username}"
 curpath = os.path.realpath(__file__)
 thisPath = os.path.dirname(curpath)
 LOG_FILE = "/tmp/picarpro_setup.log"
+
+# ── Platform detection ────────────────────────────────────────────────
+ARCH = platform.machine()  # e.g. 'armv7l', 'aarch64', 'x86_64'
+
+
+def is_raspberry_pi():
+    """Return True if running on actual Raspberry Pi hardware."""
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            model = f.read().strip('\x00').lower()
+            return 'raspberry pi' in model
+    except Exception:
+        pass
+    # Fallback: ARM architecture likely means RPi in this context
+    return ARCH in ('armv7l', 'aarch64')
+
+
+IS_RPI = is_raspberry_pi()
 
 RST  = "\033[0m"
 BOLD = "\033[1m"
@@ -118,10 +135,38 @@ def append_to_config(keyword, line, config_path=None):
         print(f"  {RED}[!]{RST} Could not edit {config_path}: {e}")
 
 
+def fix_clock_skew():
+    """Try to sync system clock via NTP / systemd-timesyncd to fix apt
+    'InRelease not valid yet' errors caused by clock drift."""
+    print(f"  {DIM}[*]{RST} Checking system clock...")
+    rc, _ = run_cmd("timedatectl show 2>/dev/null | grep -q 'NTPSynchronized=yes'", critical=False)
+    if rc == 0:
+        print(f"  {GRN}[+]{RST} NTP sync OK")
+        return
+
+    # Try systemd-timesyncd first
+    run_cmd("systemctl enable systemd-timesyncd 2>/dev/null", critical=False)
+    run_cmd("systemctl start systemd-timesyncd 2>/dev/null", critical=False)
+
+    # Try ntpdate as fallback
+    run_cmd("which ntpdate 2>/dev/null && ntpdate -bu pool.ntp.org 2>/dev/null", critical=False)
+
+    # Wait a moment for sync to take effect
+    time.sleep(2)
+
+    # Clear apt cache if it has stale data
+    print(f"  {DIM}[*]{RST} Clearing apt cache...")
+    run_cmd("apt-get clean", critical=False)
+    rc2, _ = run_cmd("find /var/lib/apt/lists -name '*.InRelease' -delete 2>/dev/null; "
+                      "find /var/lib/apt/lists -name '*_InRelease' -delete 2>/dev/null", critical=False)
+
+    print(f"  {GRN}[+]{RST} Clock sync attempted, apt cache cleared")
+
+
 def stage_0_preflight():
     print(f"\n{BOLD}{CYN}{'=' * 55}{RST}")
     print(f"  {BOLD}PiCar Pro Setup{RST}")
-    print(f"  {DIM}Flask + WebSocket | Raspberry Pi 3B+{RST}")
+    print(f"  {DIM}Flask + WebSocket | Raspberry Pi{RST}")
     print(f"{BOLD}{CYN}{'=' * 55}{RST}")
 
     if os.geteuid() != 0:
@@ -137,17 +182,31 @@ def stage_0_preflight():
     debian_ver = get_debian_version()
     codename = get_os_codename()
     print(f"  {GRN}[+]{RST} OS: Debian {debian_ver} ({codename})")
+    print(f"  {GRN}[+]{RST} Arch: {ARCH}")
     print(f"  {GRN}[+]{RST} User: {username}, Path: {thisPath}")
+
+    if IS_RPI:
+        print(f"  {GRN}[+]{RST} Platform: Raspberry Pi")
+    else:
+        print(f"  {YLW}[!]{RST} Platform: NOT a Raspberry Pi ({ARCH})")
+        print(f"  {YLW}[!]{RST} Some hardware packages and features will be skipped")
 
     server_check = os.path.join(thisPath, "Server", "WebServer.py")
     if not os.path.exists(server_check):
         print(f"  {YLW}[!]{RST} Server/WebServer.py not found at {server_check}")
+
+    # Fix clock skew before apt operations
+    fix_clock_skew()
 
     return debian_ver, codename
 
 
 def stage_1_wifi(debian_ver, codename):
     print(f"\n  {BLU}[1/7]{RST} WiFi configuration...")
+
+    if not IS_RPI:
+        print(f"  {DIM}[i]{RST} Skipping WiFi config (not a Raspberry Pi)")
+        return
 
     if debian_ver >= 12:
         _, conn_result = run_cmd(
@@ -215,7 +274,6 @@ def stage_2_swap():
 
     print(f"  {DIM}[i]{RST} Creating 2GB swap file...")
 
-    # Stop all existing swap services first
     run_cmd("systemctl stop dphys-swapfile 2>/dev/null || true", critical=False)
     run_cmd("systemctl disable dphys-swapfile 2>/dev/null || true", critical=False)
     run_cmd("swapoff /var/swap 2>/dev/null || true", critical=False)
@@ -281,36 +339,62 @@ def stage_3_apt_packages(debian_ver, codename):
             break
         print(f"  {YLW}[!]{RST} apt update attempt {attempt}/3 failed")
         if attempt < 3:
+            # Re-try clock fix on failure
+            print(f"  {DIM}[*]{RST} Retrying clock sync...")
+            run_cmd("apt-get clean", critical=False)
+            run_cmd("find /var/lib/apt/lists -name '*.InRelease' -delete 2>/dev/null", critical=False)
             time.sleep(10)
 
     if not update_ok:
-        print(f"  {RED}[!]{RST} apt update failed after 3 attempts, continuing anyway")
+        print(f"  {YLW}[!]{RST} apt update failed after 3 attempts, continuing anyway")
+        print(f"  {YLW}[!]{RST} If you see 'InRelease not valid yet' errors, check system time:")
+        print(f"  {YLW}[!]{RST}   sudo timedatectl set-ntp true")
+        print(f"  {YLW}[!]{RST}   sudo apt-get clean && sudo apt update")
     else:
         run_cmd("apt upgrade -y", critical=False)
 
+    # ── Base packages (work on any Debian) ────────────────────────────
     all_packages = [
-        "i2c-tools", "python3-smbus", "python3-gpiozero",
         "fonts-noto-color-emoji",
+        "libfreetype6-dev", "libjpeg-dev", "build-essential",
+        "python3-pip", "python3-pil",        # system Pillow (avoids pip build issues)
     ]
 
-    if debian_ver >= 13:
-        camera_packages = ["python3-opencv", "opencv-data"]
+    # ── RPi-only packages ────────────────────────────────────────────
+    if IS_RPI:
+        all_packages.extend([
+            "i2c-tools", "python3-smbus", "python3-gpiozero",
+        ])
+
+        # picamera2 only on Bookworm+ RPi (requires raspberrypi-kernel)
+        if debian_ver >= 12:
+            all_packages.append("python3-picamera2")
     else:
-        camera_packages = ["python3-picamera2", "python3-opencv", "opencv-data"]
+        print(f"  {DIM}[i]{RST} Skipping RPi-only packages (smbus, gpiozero, picamera2)")
 
-    all_packages.extend(camera_packages)
-    all_packages.extend([
-        "libfreetype6-dev", "libjpeg-dev", "build-essential",
-        "network-manager",
-    ])
+    # ── Camera / OpenCV (available on both) ──────────────────────────
+    all_packages.extend(["python3-opencv", "opencv-data"])
 
+    # ── Network Manager (for hotspot on Bookworm+) ───────────────────
+    if debian_ver >= 12 and IS_RPI:
+        all_packages.append("network-manager")
+
+    # ── pyzmq via apt to avoid pip marker bug ────────────────────────
+    all_packages.append("python3-zmq")
+
+    # Filter out already-installed packages
     missing = [p for p in all_packages if not is_package_installed(p)]
     if not missing:
         print(f"  {GRN}[+]{RST} All packages already installed")
         return
 
     print(f"  {DIM}[*]{RST} Installing {len(missing)} packages...")
-    run_cmd(f"apt-get install -y --no-install-recommends {' '.join(missing)}", critical=False)
+    # Install packages one by one to avoid one broken dependency blocking all
+    for pkg in missing:
+        rc, _ = run_cmd(f"apt-get install -y --no-install-recommends {pkg}", critical=False)
+        if rc != 0:
+            print(f"  {YLW}[!]{RST} Could not install {pkg}, skipping")
+
     run_cmd("apt-get clean", critical=False)
     run_cmd("apt-get -y autoremove", critical=False)
 
@@ -320,40 +404,69 @@ def stage_4_pip_packages(debian_ver):
 
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
+    # Update pip FIRST to avoid marker comparison bugs (e.g. pyzmq === operator)
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip3 install {pip_flag} --upgrade pip setuptools wheel", critical=False)
 
-    pip_groups = [
-        ("I2C/Motor/Servo",
-         f"sudo -H pip3 install {pip_flag} "
-         "adafruit-circuitpython-pca9685 "
-         "adafruit-circuitpython-motor "
-         "adafruit-circuitpython-busdevice"),
-        ("OLED/LED",
-         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
-        ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
-        ("Vision/Video",
-         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
-        ("IMU Sensor",
-         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
-        ("DS4 Controller",
-         f"sudo -H pip3 install {pip_flag} evdev"),
-    ]
+    pip_groups = []
+
+    # ── I2C/Motor/Servo (RPi only — needs smbus) ─────────────────────
+    if IS_RPI:
+        pip_groups.append(("I2C/Motor/Servo",
+                           f"sudo -H pip3 install {pip_flag} "
+                           "adafruit-circuitpython-pca9685 "
+                           "adafruit-circuitpython-motor "
+                           "adafruit-circuitpython-busdevice"))
+    else:
+        print(f"  {DIM}[i]{RST} Skipping I2C/Motor/Servo pip packages (not RPi)")
+
+    # ── OLED/LED (rpi_ws281x only on RPi) ────────────────────────────
+    if IS_RPI:
+        pip_groups.append(("OLED/LED",
+                           f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"))
+    else:
+        # luma.oled works on any platform (I2C display)
+        pip_groups.append(("OLED",
+                           f"sudo -H pip3 install {pip_flag} luma.oled"))
+        print(f"  {DIM}[i]{RST} Skipping rpi_ws281x (not RPi)")
+
+    # ── Web Server (universal) ────────────────────────────────────────
+    pip_groups.append(("Web Server",
+                       f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"))
+
+    # ── Vision/Video (universal, pillow from apt, pyzmq from apt) ────
+    pip_groups.append(("Vision/Video",
+                       f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64"))
+
+    # ── IMU Sensor (RPi only) ─────────────────────────────────────────
+    if IS_RPI:
+        pip_groups.append(("IMU Sensor",
+                           f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"))
+    else:
+        print(f"  {DIM}[i]{RST} Skipping mpu6050-raspberrypi (not RPi)")
+
+    # ── DS4 Controller ────────────────────────────────────────────────
+    pip_groups.append(("DS4 Controller",
+                       f"sudo -H pip3 install {pip_flag} evdev"))
 
     for group_name, cmd in pip_groups:
         print(f"  {DIM}[*]{RST} {group_name}...")
-        run_cmd(cmd, critical=False)
+        rc, _ = run_cmd(cmd, critical=False)
+        if rc != 0:
+            print(f"  {YLW}[!]{RST} {group_name} had errors, some packages may be missing")
 
 
 def stage_5_hardware_config():
     print(f"\n  {BLU}[5/7]{RST} Configuring hardware...")
 
+    if not IS_RPI:
+        print(f"  {DIM}[i]{RST} Skipping RPi hardware config (not a Raspberry Pi)")
+        return
+
     run_cmd("raspi-config nonint do_i2c 0", critical=False)
     run_cmd("raspi-config nonint do_spi 0", critical=False)
     run_cmd("raspi-config nonint do_camera 0", critical=False)
 
-    # Mask all failing rpi/zram/swap services to prevent boot errors
     services_to_mask = [
         "rpi-setup-resize.service",
         "rpi-resize-swap-file.service",
@@ -365,7 +478,6 @@ def stage_5_hardware_config():
         "dev-zram0.swap",
     ]
 
-    # Stop first, then disable+mask (order matters)
     for svc in services_to_mask:
         run_cmd(f"systemctl stop {svc} 2>/dev/null || true", critical=False)
     for svc in swap_units_to_mask:
@@ -398,6 +510,10 @@ def stage_5_hardware_config():
 
 def stage_6_wifi_hotspot(debian_ver):
     print(f"\n  {BLU}[6/7]{RST} Setting up WiFi Hotspot...")
+
+    if not IS_RPI:
+        print(f"  {DIM}[i]{RST} Skipping WiFi hotspot setup (not a Raspberry Pi)")
+        return
 
     if debian_ver < 12:
         print(f"  {YLW}[!]{RST} Hotspot requires Bookworm+ (Debian 12+)")
@@ -580,7 +696,7 @@ def main():
         with open('/proc/device-tree/model', 'r') as f:
             pi_model = f.read().strip('\x00')
     except Exception:
-        pi_model = 'Unknown'
+        pi_model = 'Unknown (not RPi)' if not IS_RPI else 'Unknown'
 
     try:
         ip_result = subprocess.run(
@@ -591,7 +707,6 @@ def main():
     except Exception:
         current_ip = "(error)"
 
-    # Gather system info
     cpu_info = "Unknown"
     try:
         with open('/proc/cpuinfo', 'r') as f:
@@ -626,22 +741,23 @@ def main():
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
     i2c_devices = []
-    try:
-        i2c_result = subprocess.run(
-            "i2cdetect -y 1 2>/dev/null",
-            shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
-        )
-        for line in (i2c_result.stdout or "").split('\n'):
-            for part in line.split():
-                if part.startswith('--') or part.startswith('0'):
-                    continue
-                try:
-                    int(part, 16)
-                    i2c_devices.append(part)
-                except ValueError:
-                    pass
-    except Exception:
-        pass
+    if IS_RPI:
+        try:
+            i2c_result = subprocess.run(
+                "i2cdetect -y 1 2>/dev/null",
+                shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+            )
+            for line in (i2c_result.stdout or "").split('\n'):
+                for part in line.split():
+                    if part.startswith('--') or part.startswith('0'):
+                        continue
+                    try:
+                        int(part, 16)
+                        i2c_devices.append(part)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
 
     kernel_ver = platform.release()
     arch = platform.machine()
@@ -657,6 +773,7 @@ def main():
     print(f"  Arch:     {arch}")
     print(f"  OS:       Debian {debian_ver} ({codename})")
     print(f"  Python:   {py_version}")
+    print(f"  RPi:      {'Yes' if IS_RPI else 'No — some hardware features disabled'}")
     print(f"")
     print(f"  {BOLD}Resources:{RST}")
     print(f"  RAM:      {mem_used}MB / {mem_total}MB ({round(100*mem_used/mem_total if mem_total else 0,1)}%)")
@@ -670,7 +787,8 @@ def main():
     print(f"")
     print(f"  {BOLD}Network:{RST}")
     print(f"  IP:       {current_ip}")
-    print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
+    if IS_RPI:
+        print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
     print(f"")
     print(f"  {BOLD}Server:{RST}")
     print(f"  Path:     {thisPath}")
@@ -682,8 +800,8 @@ def main():
     print(f"")
     print(f"  {BOLD}Next Steps:{RST}")
     print(f"  1. Reboot:  {YLW}sudo reboot{RST}")
-    print(f"  2. Open:    {YLW}http://{current_ip}:5000{RST}")
-    print(f"  3. Check:   {YLW}systemctl status picarpro{RST}")
+    print(f"  2. Check:   {YLW}systemctl status picarpro{RST}")
+    print(f"  3. Open:    {YLW}http://{current_ip}:5000{RST}")
     print(f"{BOLD}{GRN}{'=' * 55}{RST}")
 
     while True:

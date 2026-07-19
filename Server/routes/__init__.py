@@ -1,1 +1,0 @@
-"""PiCar Pro route blueprints."""

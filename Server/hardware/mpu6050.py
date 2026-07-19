@@ -96,7 +96,6 @@ class MPU6050Controller:
         try:
             import smbus
             bus = smbus.SMBus(I2C_BUS)
-            # Read WHO_AM_I
             who = bus.read_byte_data(addr, REG_WHO_AM_I)
             if who not in WHO_AM_I_VALUES:
                 logger.warning(f"[MPU6050] WHO_AM_I=0x{who:02X} at 0x{addr:02X} — unexpected")
