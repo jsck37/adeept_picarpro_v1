@@ -47,7 +47,7 @@
     { "pin": 33, "gpio": 13, "function": "GPIO13", "name": "Правая фара", "module": "switch", "color_category": "gpio", "notes": "Порт выключателя 1 — управление правой фарой LED (SWITCH_PINS[1])" },
     { "pin": 34, "gpio": null, "function": "GND", "name": "Земля", "module": null, "color_category": "ground", "notes": "Общая земля" },
     { "pin": 35, "gpio": 19, "function": "GPIO19", "name": "Датчик линии правый", "module": "line_tracker", "color_category": "gpio", "notes": "Правый ИК-датчик линии — цифровой вход от ИК-рефлекторного датчика (LINE_RIGHT_PIN)" },
-    { "pin": 36, "gpio": 16, "function": "GPIO16", "name": "Свободный", "module": null, "color_category": "gpio", "notes": "Свободный GPIO. Ранее отмечался как центральный датчик линии, но PiCar Pro v1 использует только 2 ИК-датчика (левый и правый)." },
+    { "pin": 36, "gpio": 16, "function": "GPIO16", "name": "Датчик линии центральный", "module": "line_tracker", "color_category": "gpio", "notes": "Центральный ИК-датчик линии — цифровой вход от ИК-рефлекторного датчика (LINE_MIDDLE_PIN). Соответствует оригинальной схеме Adeept PiCar-Pro." },
     { "pin": 37, "gpio": 26, "function": "GPIO26", "name": "Мотор A IN1", "module": "l298n", "color_category": "gpio", "notes": "IN1_A — Вход управления направлением мотора A (левый мотор)" },
     { "pin": 38, "gpio": 20, "function": "GPIO20", "name": "Датчик линии левый", "module": "line_tracker", "color_category": "gpio", "notes": "Левый ИК-датчик линии — цифровой вход от ИК-рефлекторного датчика (LINE_LEFT_PIN)" },
     { "pin": 39, "gpio": null, "function": "GND", "name": "Земля", "module": null, "color_category": "ground", "notes": "Общая земля" },

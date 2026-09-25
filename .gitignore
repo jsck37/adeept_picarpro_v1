@@ -1,4 +1,12 @@
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+instance/
+servo_cal.json
+bt_config.json
+*.log
+.venv/
 venv/
