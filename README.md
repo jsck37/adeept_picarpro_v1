@@ -7,7 +7,7 @@
 - Raspberry Pi (3B/3B+/4/5 или совместимая модель)
 - Карта microSD (от 8 ГБ)
 - Подключение к интернету
-- ОС: **Raspberry Pi OS** (64-bit или 32-bit)
+- ОС: **Raspberry Pi OS** (64-bit)
 
 ---
 
