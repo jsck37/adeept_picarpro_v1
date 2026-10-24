@@ -1,5 +1,35 @@
 # CHANGELOG — PiCar-Pro Merged Edition v1.0.0
 
+## MOD v1.1.1 — совместимость с Raspberry Pi OS Trixie (Debian 13)
+
+Установщик `setup.py` падал на свежей Raspberry Pi OS Trixie: три системных
+пакета в Debian 13 переименованы/удалены. На Bullseye/Bookworm поведение
+установщика не изменилось.
+
+* `install_packages()` определяет выпуск ОС (`/etc/debian_version` +
+  `/etc/os-release`) и подбирает имена пакетов:
+  - `libtiff5` → `libtiff6`;
+  - `libraspberrypi-bin` → `raspi-utils-core` + `raspi-utils-dt`
+    (`vcgencmd` для мониторинга напряжения теперь в `raspi-utils-core`);
+  - `raspberrypi-kernel-headers` больше не ставится — прошивка не собирает
+    модули ядра; `pi-bluetooth` переведён в best-effort (отсутствие
+    не роняет установку);
+* защита от будущих переименований: если установка списком не удалась,
+  пакеты доустанавливаются по одному с предупреждением вместо падения
+  всего установщика;
+* `picamera2` на Debian 12+ ставится из **apt** (`python3-picamera2` +
+  `python3-libcamera`) и отфильтровывается из pip-зависимостей —
+  PyPI-версия ставится, но не импортируется без системных биндингов
+  libcamera, которые на PyPI отсутствуют;
+* `RPi.GPIO` добавлен в `requirements.txt`: на Trixie он больше не
+  предустановлен в системе, а прошивка импортирует его в модулях
+  моторов, сонара, бузера и световой индикации — без строки в
+  зависимостях сервис не стартовал бы после чистой установки;
+* `raspi-config nonint do_camera` на Trixie не вызывается (команда
+  удалена в raspi-config, камера включена всегда);
+* установщик в финальной подсказке напоминает про `tools/setup_swap.sh`
+  (обязательно для YOLO на 1 ГБ ОЗУ) и `tools/selftest.py`.
+
 ## MOD v1.1.0 — YOLO на 1 ГБ ОЗУ + порт hugo-Peltier + MPU6050 fix + servo UX
 
 ### YOLO/OpenCV на RPi 3B+ (1 ГБ ОЗУ)

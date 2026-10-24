@@ -1,6 +1,11 @@
 # PiCar Pro (merged) — Python Dependencies
 # Install: pip3 install -r requirements.txt
 # On Debian 12+: pip3 install --break-system-packages -r requirements.txt
+# (setup.py делает это автоматически и корректно для Bullseye/Bookworm/Trixie)
+
+# GPIO: на RPi OS Trixie RPi.GPIO больше НЕ предустановлен в системе,
+# без него прошивка не стартует (моторы/сонар/бузер/свитч)
+RPi.GPIO
 
 # I2C / Servo (PCA9685)
 adafruit-circuitpython-pca9685
@@ -19,6 +24,11 @@ spidev
 pillow
 opencv-python-headless>=4.7
 numpy
+# picamera2: Debian 12+ (bookworm/trixie) — ТОЛЬКО из apt:
+#   sudo apt-get install -y python3-picamera2 python3-libcamera
+# (PyPI-версия не импортируется без системных биндингов libcamera).
+# setup.py на Debian 12+ отфильтрует строку ниже автоматически;
+# вручную она нужна только на legacy-системах (bullseye).
 picamera2
 
 # Web / Network

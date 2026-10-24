@@ -9,6 +9,7 @@
 
 Отличия от оригинальных setup.py: без chmod 777, без хрупкой правки
 rc.local, без create_ap из GitHub, идемпотентная установка сервисов.
+Поддерживает Debian 11-13 (Bullseye / Bookworm / Trixie).
 """
 import os
 import subprocess
@@ -122,40 +123,113 @@ def is_raspberry_pi():
         return False
 
 
+def _debian_release():
+    """(major, codename) текущего Debian/RPi OS; (0, '') если не удалось."""
+    major = 0
+    codename = ''
+    try:
+        with open('/etc/debian_version') as f:
+            s = f.read().strip()
+        token = s.split('/')[0]              # '13.2' | 'trixie/sid' | '12.5'
+        if token[:1].isdigit():
+            major = int(token.split('.')[0])
+    except Exception:
+        pass
+    try:
+        with open('/etc/os-release') as f:
+            for line in f:
+                if line.startswith('VERSION_CODENAME='):
+                    codename = line.split('=', 1)[1].strip().strip('"')
+    except Exception:
+        pass
+    if not major:
+        major = {'bullseye': 11, 'bookworm': 12,
+                 'trixie': 13}.get(codename, 0)
+    return major, codename
+
+
 def enable_interfaces():
     step('Enabling I2C, SPI, camera...')
     run('sudo raspi-config nonint do_i2c 0', check=False)
     run('sudo modprobe i2c-dev', check=False)
     run('sudo raspi-config nonint do_spi 0', check=False)
     run('sudo modprobe spidev', check=False)
-    run('sudo raspi-config nonint do_camera 0', check=False)
+    if _debian_release()[0] < 13:
+        # Trixie: камера включена всегда, do_camera из raspi-config удалён
+        run('sudo raspi-config nonint do_camera 0', check=False)
     ok('Interfaces enabled')
 
 
 def install_packages():
     step('Installing system packages...')
     run(['sudo', 'apt-get', 'update', '-y'])
-    run(['sudo', 'apt-get', 'install', '-y',
-         'git', 'python3-pip', 'python3-dev', 'build-essential',
-         'libopenjp2-7', 'libtiff5', 'libjpeg-dev', 'zlib1g-dev',
-         'libraspberrypi-bin', 'raspberrypi-kernel-headers',
-         'i2c-tools', 'bluetooth', 'bluez', 'bluez-firmware',
-         'pi-bluetooth', 'network-manager'])
+
+    major, codename = _debian_release()
+    if major >= 13 or codename in ('trixie', 'forky', 'sid'):
+        # Debian 13 / RPi OS Trixie: пакеты переименованы
+        #   libtiff5 -> libtiff6;
+        #   libraspberrypi-bin -> raspi-utils-core (в нём и vcgencmd,
+        #     нужен мониторингу напряжения) + raspi-utils-dt;
+        #   raspberrypi-kernel-headers удалён — прошивка не собирает
+        #     модули ядра и в заголовках не нуждается.
+        ok(f'Detected Debian {major or "?"} ({codename or "trixie"}): '
+           'using new package names')
+        core = ['git', 'python3-pip', 'python3-dev', 'build-essential',
+                'libopenjp2-7', 'libtiff6', 'libjpeg-dev', 'zlib1g-dev',
+                'raspi-utils-core', 'raspi-utils-dt',
+                'i2c-tools', 'bluetooth', 'bluez', 'bluez-firmware',
+                'network-manager']
+    else:
+        core = ['git', 'python3-pip', 'python3-dev', 'build-essential',
+                'libopenjp2-7', 'libtiff5', 'libjpeg-dev', 'zlib1g-dev',
+                'libraspberrypi-bin', 'raspberrypi-kernel-headers',
+                'i2c-tools', 'bluetooth', 'bluez', 'bluez-firmware',
+                'pi-bluetooth', 'network-manager']
+
+    r = run(['sudo', 'apt-get', 'install', '-y', *core], check=False)
+    if r is None or r.returncode != 0:
+        # защита от будущих переименований: недостающий пакет не должен
+        # ронять весь установщик — добираем по одному
+        warn('Batch install failed — retrying package-by-package...')
+        for pkg in core:
+            run(['sudo', 'apt-get', 'install', '-y', pkg], check=False)
+
+    # best-effort: отсутствие этого пакета не критично
+    run(['sudo', 'apt-get', 'install', '-y', 'pi-bluetooth'], check=False)
 
 
 def install_python_deps():
     step('Installing Python packages...')
-    flag = '--break-system-packages'
-    try:
-        with open('/etc/debian_version') as f:
-            ver = f.read().strip()
-            if ver and int(ver.split('.')[0]) < 12:
-                flag = ''
-    except Exception:
-        pass
-    run(['sudo', '-H', 'pip3', 'install', flag, '--upgrade', 'pip'], check=False)
-    run(['sudo', '-H', 'pip3', 'install', flag,
-         '-r', str(PROJECT_DIR / 'requirements.txt')])
+    major, _ = _debian_release()
+    flag = ['--break-system-packages'] if major >= 12 else []
+
+    # picamera2 (Debian 12+): рабочий способ — только apt
+    # (python3-picamera2 с системными биндингами libcamera). Версия с PyPI
+    # ставится, но не импортируется. На Debian 12+ она фильтруется из
+    # requirements.txt перед установкой через pip.
+    reqs = str(PROJECT_DIR / 'requirements.txt')
+    pip_reqs = reqs
+    tmp = None
+    if major >= 12:
+        r = run(['sudo', 'apt-get', 'install', '-y',
+                 'python3-picamera2', 'python3-libcamera'], check=False)
+        if r and r.returncode == 0:
+            ok('picamera2 installed from apt (system libcamera bindings)')
+            try:
+                lines = [ln for ln in Path(reqs).read_text().splitlines()
+                         if ln.strip() and not ln.strip().startswith('#')
+                         and ln.strip() != 'picamera2']
+                tmp = Path('/tmp/picarpro_requirements.txt')
+                tmp.write_text('\n'.join(lines) + '\n')
+                pip_reqs = str(tmp)
+            except Exception:
+                tmp = None
+                pip_reqs = reqs
+
+    run(['sudo', '-H', 'pip3', 'install', *flag, '--upgrade', 'pip'], check=False)
+    run(['sudo', '-H', 'pip3', 'install', *flag, '-r', pip_reqs])
+    if tmp is not None:
+        tmp.unlink(missing_ok=True)
 
 
 def _write_service(name, content):
@@ -199,6 +273,9 @@ def main():
     print(f'  Logs:    {BOLD}sudo journalctl -u {SERVICE_NAME} -f{RST}')
     print(f'  Web UI:  {BOLD}http://<this-pi-ip>:5000{RST} (или порт 80)')
     print(f'  Tests:   {BOLD}python3 -m pytest tests/ -v{RST} (на ПК, без железа)')
+    print(f'  Swap:    {BOLD}sudo bash tools/setup_swap.sh{RST} '
+          '(2 ГБ подкачки — обязательно для YOLO на 1 ГБ ОЗУ)')
+    print(f'  Camera:  {BOLD}python3 tools/selftest.py{RST} (аппаратный самотест)')
     print()
     print(f'{YLW}Reboot recommended to activate all kernel modules.{RST}')
 
