@@ -1,4 +1,5 @@
 import threading
+import time
 
 from picarpro.logger import logger
 from picarpro.utils.system_info import SystemInfo
@@ -33,6 +34,15 @@ class SharedState:
         self.voice = None
         self.steady = None
         self.voltage = None
+        # Портированные режимы hugo-Peltier + NavTCP/IMU-стрим
+        self.aruco_nav = None       # бортовая ArUco-навигация
+        self.pusher = None          # расталкивание препятствий клешней
+        self.color_scan = None      # сканирование рукой + цветовой захват
+        self.nav_server = None      # NavTCP (команды хоста, порт 5001)
+        self.imu_stream = None      # UDP-стриминг gz (порт 5005)
+        self.nav_tcp_host = None    # IP подключённого навигационного хоста
+        self.nav_last_cmd = ''
+        self.nav_last_cmd_ts = 0.0
 
     def _try_init(self, name, factory):
         try:
@@ -150,11 +160,42 @@ class SharedState:
             'servo_angles': servo_angles,
             'crane_arm_closed': self.crane_arm_closed,
             'crane_grip_position': self.crane_grip_position,
+            'yolo': (self.camera.get_yolo_status()
+                     if self.camera else {'loaded': False, 'objects': []}),
+            'nav_tcp': {
+                'host': self.nav_tcp_host,
+                'last_cmd': self.nav_last_cmd,
+                'age_s': round(max(0.0, time.time()
+                                   - self.nav_last_cmd_ts), 1)
+                if self.nav_last_cmd_ts else None,
+            },
+            'aruco_nav': (self.aruco_nav.get_status()
+                          if self.aruco_nav else
+                          {'active': False, 'finished': False}),
+            'push': (self.pusher.get_status() if self.pusher else
+                     {'active': False, 'pushes_done': 0}),
+            'color_scan': (self.color_scan.get_status() if self.color_scan else
+                           {'active': False, 'mode': 'IDLE'}),
         }
 
     def shutdown(self):
         self.running = False
         logger.info('[State] shutting down...')
+        if self.aruco_nav:
+            try: self.aruco_nav.stop()
+            except Exception: pass
+        if self.color_scan:
+            try: self.color_scan.stop()
+            except Exception: pass
+        if self.pusher:
+            try: self.pusher.stop()
+            except Exception: pass
+        if self.nav_server:
+            try: self.nav_server.shutdown()
+            except Exception: pass
+        if self.imu_stream:
+            try: self.imu_stream.stop()
+            except Exception: pass
         if self.autonomous:
             try: self.autonomous.shutdown()
             except Exception: pass

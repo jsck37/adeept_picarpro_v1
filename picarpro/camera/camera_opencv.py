@@ -1,5 +1,6 @@
 import threading, time, math
 from picarpro.logger import logger
+from picarpro.camera.yolo_detector import YoloDetector
 from config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
@@ -29,6 +30,7 @@ CV_LINE = 'findlineCV'
 CV_HAND = 'trackHand'
 CV_FINDCOLOR = 'findColor'
 CV_WATCHDOG = 'watchDog'
+CV_YOLO = 'yoloDetect'      # нейросетевое детектирование объектов (ONNX, cv2.dnn)
 
 DEFAULT_HAND_LOW = np.array([0, 30, 50], dtype=np.uint8) if _HAS_CV2 else None
 DEFAULT_HAND_HIGH = np.array([25, 255, 255], dtype=np.uint8) if _HAS_CV2 else None
@@ -59,6 +61,10 @@ class CVThread(threading.Thread):
         self._last_motion_ts = 0.0
         self.overlay_frame = None
         self._overlay_lock = threading.Lock()
+        # YOLO (задача: нейросетевое зрение на 1 ГБ RAM — см. docs/YOLO_GUIDE.md)
+        self.yolo = YoloDetector()
+        self.yolo._objects_lock = threading.Lock()
+        self.on_yolo_found = None   # callback(objects)
 
     def run(self):
         while self._running:
@@ -118,6 +124,8 @@ class CVThread(threading.Thread):
             self._find_color(frame)
         elif self.cv_mode == CV_WATCHDOG:
             self._watch_dog(frame)
+        elif self.cv_mode == CV_YOLO:
+            self._yolo_detect(frame)
 
     def _find_line(self, frame):
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -304,6 +312,40 @@ class CVThread(threading.Thread):
                 if self.on_motion:
                     self.on_motion(motion_pixels)
 
+    def _yolo_detect(self, frame):
+        """Детектирование объектов YOLO (ONNX через cv2.dnn).
+
+        Производительность под 1 ГБ RAM: инференс запускается только
+        каждый YOLO_FRAME_SKIP-й кадр, вход 320x320, модель — nano.
+        Ожидание на RPi 3B+: ~0.6-1.2 с на кадр при 320px — этого достаточно
+        для слежения/патрулирования, но не для быстрой навигации.
+        """
+        if not self.yolo.loaded:
+            if not self.yolo.load():
+                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                cv2.putText(bgr, 'YOLO MODEL NOT FOUND', (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                with self._overlay_lock:
+                    self.overlay_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                return
+        if not self.yolo.should_infer():
+            # между инференсами показываем последний результат поверх кадра
+            objs = list(self.yolo.objects)
+        else:
+            objs = self.yolo.infer(frame)
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        self.yolo.draw(bgr, objs)
+        cv2.putText(bgr, f'YOLO {len(objs)} obj '
+                            f'({self.yolo.last_infer_ms:.0f} ms)',
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        with self._overlay_lock:
+            self.overlay_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        if self.on_yolo_found and objs:
+            try:
+                self.on_yolo_found(objs)
+            except Exception as e:
+                logger.warning(f'[YOLO] callback error: {e}')
+
     @staticmethod
     def _draw_search(disp, cx, cy):
         cv2.line(disp, (cx - 20, cy), (cx + 20, cy), (0, 255, 0), 1)
@@ -336,6 +378,8 @@ class Camera:
         self._frame_ready = threading.Event()
         self._running = True
         self._thread = None
+        self._last_raw = None                # сырой RGB-кадр (для ArUco-навигации)
+        self._raw_lock = threading.Lock()
 
     def _init_camera(self):
         with self._picam_lock:
@@ -413,6 +457,8 @@ class Camera:
                     time.sleep(0.01)
                     continue
                 consecutive_errors = 0
+                with self._raw_lock:
+                    self._last_raw = raw
                 if self.cv_thread.cv_mode != CV_NONE and _HAS_CV2:
                     self.cv_thread.submit_frame(raw)
                     overlay = self.cv_thread.get_overlay()
@@ -440,6 +486,13 @@ class Camera:
                 else:
                     time.sleep(0.05)
 
+    def get_raw_frame(self):
+        """Последний сырой RGB-кадр (без оверлеев) — для ArUco-навигации."""
+        if self._thread is None or not self._thread.is_alive():
+            self.start()
+        with self._raw_lock:
+            return None if self._last_raw is None else self._last_raw.copy()
+
     def get_frame(self):
         if self._thread is None or not self._thread.is_alive():
             self.start()
@@ -448,11 +501,16 @@ class Camera:
             return self._frame
 
     def set_cv_mode(self, mode):
+        if mode == CV_YOLO:
+            self.cv_thread.yolo.load()   # ленивая загрузка ONNX при включении
         self.cv_thread.cv_mode = mode
         if mode == CV_NONE:
             with self.cv_thread._overlay_lock:
                 self.cv_thread.overlay_frame = None
             self.cv_thread._prev_gray = None
+
+    def get_yolo_status(self):
+        return self.cv_thread.yolo.get_status()
 
     def set_hand_color(self, h_low, s_low, v_low, h_high, s_high, v_high):
         self.cv_thread.set_hand_color(h_low, s_low, v_low, h_high, s_high, v_high)

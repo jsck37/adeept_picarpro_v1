@@ -21,6 +21,14 @@ REG_ACCEL_CONFIG = 0x1C
 REG_ACCEL_XOUT_H = 0x3B
 REG_WHO_AM_I = 0x75
 
+# PWR_MGMT_1 биты
+PWR_DEVICE_RESET = 0x80   # программный сброс всех регистров
+PWR_SLEEP = 0x40          # режим сна (по умолчанию после подачи питания!)
+PWR_CLKSEL_PLL = 0x01     # источник тактирования — PLL гироскопа X (рекомендация InvenSense)
+
+INIT_ATTEMPTS = 3         # попыток инициализации на адрес
+INIT_RETRY_DELAY = 0.15   # пауза между попытками (чипу нужно ~100 мс после подачи питания)
+
 ACCEL_SCALE = 16384.0
 GYRO_SCALE = 131.0
 WHO_AM_I_VALUES = (0x68, 0x70, 0x71, 0x72)
@@ -87,11 +95,17 @@ class MPU6050Controller:
     def __init__(self):
         self._bus = None
         self._addr = MPU6050_ADDR
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()      # защита данных get_data()
+        self._bus_lock = threading.Lock()  # сериализация доступа к I2C-шине
         self._running = False
         self._thread = None
         self._errors = 0
         self.initialized = False
+        # Генерация цикла инициализации: увеличивается при каждой (ре)инициализации.
+        # Фикс оригинальной утечки: старые _read_loop не завершались после _reinit
+        # и плодили дублирующиеся циклы чтения шины. Теперь каждый цикл хранит
+        # свой номер генерации и завершается при несовпадении.
+        self._gen = 0
         self._accel = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self._gyro = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self._temp = 0.0
@@ -110,31 +124,83 @@ class MPU6050Controller:
             return
         logger.warning('[MPU6050] not found — will retry in background')
         self._running = True
-        self._thread = threading.Thread(target=self._retry_loop, daemon=True)
+        self._gen += 1
+        self._thread = threading.Thread(
+            target=self._retry_loop, args=(self._gen,), daemon=True)
         self._thread.start()
+
+    def _stop_loops(self):
+        """Остановить все рабочие циклы и закрыть шину (перед реинициализацией)."""
+        self._running = False
+        self._gen += 1  # все циклы со старой генерацией выйдут сами
+        with self._bus_lock:
+            try:
+                if self._bus:
+                    self._bus.close()
+            except Exception:
+                pass
+            self._bus = None
 
     def _try_init(self, addr):
         bus = _get_smbus()
         if not bus:
             return False
         try:
-            who = bus.read_byte_data(addr, REG_WHO_AM_I)
+            # WHO_AM_I может не ответить сразу после подачи питания — повторяем
+            who = None
+            for attempt in range(INIT_ATTEMPTS):
+                try:
+                    who = bus.read_byte_data(addr, REG_WHO_AM_I)
+                    if who in WHO_AM_I_VALUES:
+                        break
+                except Exception:
+                    pass
+                time.sleep(INIT_RETRY_DELAY)
             if who not in WHO_AM_I_VALUES:
                 bus.close()
                 return False
-            bus.write_byte_data(addr, REG_PWR_MGMT_1, 0x00)
+
+            # --- корректная последовательность запуска (datasheet InvenSense) ---
+            # 1. DEVICE_RESET: чип по умолчанию просыпается в SLEEP (бит 0x40
+            #    выставлен заводом), кроме того после сброса сбрасываются все
+            #    регистры — устраняет «залипшее» состояние от прошлых процессов.
+            bus.write_byte_data(addr, REG_PWR_MGMT_1, PWR_DEVICE_RESET)
+            time.sleep(0.10)
+            # 2. Пробуждение: сброс SLEEP + тактирование от PLL гироскопа X.
+            #    В оригинале писался 0x00 (внутренний RC-генератор 8 МГц) —
+            #    на клонах MPU6050 это часто давало плавающие нули и дрейф.
+            bus.write_byte_data(addr, REG_PWR_MGMT_1, PWR_CLKSEL_PLL)
             time.sleep(0.05)
-            bus.write_byte_data(addr, REG_SMPLRT_DIV, 0x07)
-            bus.write_byte_data(addr, REG_CONFIG, 0x03)
-            bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)
-            bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00)
-            bus.read_i2c_block_data(addr, REG_ACCEL_XOUT_H, 14)
+            # 3. Контроль: бит SLEEP обязан быть сброшен, иначе чтения вернут нули.
+            pwr = bus.read_byte_data(addr, REG_PWR_MGMT_1)
+            if pwr & PWR_SLEEP:
+                bus.write_byte_data(addr, REG_PWR_MGMT_1, PWR_CLKSEL_PLL)
+                time.sleep(0.05)
+                pwr = bus.read_byte_data(addr, REG_PWR_MGMT_1)
+                if pwr & PWR_SLEEP:
+                    logger.warning(f'[MPU6050] @0x{addr:02X} still in SLEEP (0x{pwr:02X})')
+                    bus.close()
+                    return False
+            # 4. Рабочая конфигурация.
+            bus.write_byte_data(addr, REG_SMPLRT_DIV, 0x07)   # 1 кГц / 8 = 125 Гц
+            bus.write_byte_data(addr, REG_CONFIG, 0x03)       # DLPF ~44 Гц
+            bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)  # ±250 °/с
+            bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00) # ±2g
+            # 5. Пробное чтение — убеждаемся, что шина отвечает данными.
+            raw = bus.read_i2c_block_data(addr, REG_ACCEL_XOUT_H, 14)
+            if raw is None or len(raw) != 14:
+                bus.close()
+                return False
+
+            self._stop_loops()
             self._addr = addr
             self._bus = bus
             self.initialized = True
             self._running = True
             self._errors = 0
-            self._thread = threading.Thread(target=self._read_loop, daemon=True)
+            self._gen += 1
+            self._thread = threading.Thread(
+                target=self._read_loop, args=(self._gen,), daemon=True)
             self._thread.start()
             logger.info(f'[MPU6050] OK at 0x{addr:02X} (WHO_AM_I=0x{who:02X})')
             return True
@@ -146,10 +212,16 @@ class MPU6050Controller:
                 pass
             return False
 
-    def _read_loop(self):
-        while self._running:
+    def _read_loop(self, gen):
+        my_gen = gen
+        while self._running and my_gen == self._gen:
+            bus = self._bus
+            if bus is None:
+                time.sleep(0.5)
+                continue
             try:
-                raw = self._bus.read_i2c_block_data(self._addr, REG_ACCEL_XOUT_H, 14)
+                with self._bus_lock:
+                    raw = bus.read_i2c_block_data(self._addr, REG_ACCEL_XOUT_H, 14)
                 ax = self._s16((raw[0] << 8) | raw[1]) / ACCEL_SCALE
                 ay = self._s16((raw[2] << 8) | raw[3]) / ACCEL_SCALE
                 az = self._s16((raw[4] << 8) | raw[5]) / ACCEL_SCALE
@@ -168,18 +240,23 @@ class MPU6050Controller:
                     self._pitch = round(pitch, 1)
                 self._errors = 0
             except Exception:
+                if my_gen != self._gen:
+                    break  # цикл устарел — выходим без ошибки
                 self._errors += 1
                 if self._errors >= 30:
                     logger.error('[MPU6050] too many read errors — reinit')
                     self._reinit()
+                    break  # _reinit порождает новый цикл; этот обязан завершиться
             time.sleep(0.1)
 
-    def _retry_loop(self):
+    def _retry_loop(self, gen):
+        my_gen = gen
         retry = 0
-        while self._running and not self.initialized:
+        while (self._running and not self.initialized
+               and my_gen == self._gen):
             retry += 1
             time.sleep(5 if retry <= 5 else 15)
-            if not self._running or self.initialized:
+            if not self._running or self.initialized or my_gen != self._gen:
                 return
             logger.info(f'[MPU6050] retry #{retry}...')
             for addr in POSSIBLE_ADDRS:
@@ -190,16 +267,17 @@ class MPU6050Controller:
                 return
 
     def _reinit(self):
+        """Мягкий перезапуск: останавливает текущие циклы (включая вызывающий)
+        и запускает фоновый цикл повторной инициализации. Фикс: раньше
+        вызывающий _read_loop продолжал крутиться с self._bus = None,
+        снова набирал 30 ошибок и плодил новые retry-потоки бесконечно."""
         self.initialized = False
         self._errors = 0
-        try:
-            if self._bus:
-                self._bus.close()
-        except Exception:
-            pass
-        self._bus = None
+        self._stop_loops()
         self._running = True
-        self._thread = threading.Thread(target=self._retry_loop, daemon=True)
+        self._gen += 1
+        self._thread = threading.Thread(
+            target=self._retry_loop, args=(self._gen,), daemon=True)
         self._thread.start()
 
     @staticmethod
@@ -219,16 +297,16 @@ class MPU6050Controller:
             }
 
     def shutdown(self):
+        # сначала переводим чип в SLEEP, потом останавливаем циклы и шину
+        # (запись в закрытую шину невозможна — и в тесте, и на железе)
         self._running = False
-        if self._bus:
+        bus, addr = self._bus, self._addr
+        if bus:
             try:
-                self._bus.write_byte_data(self._addr, REG_PWR_MGMT_1, 0x40)
+                bus.write_byte_data(addr, REG_PWR_MGMT_1, PWR_SLEEP)
             except Exception:
                 pass
-            try:
-                self._bus.close()
-            except Exception:
-                pass
+        self._stop_loops()
         self._bus = None
         self.initialized = False
         logger.info('[MPU6050] shutdown')

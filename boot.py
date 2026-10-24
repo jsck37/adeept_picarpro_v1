@@ -58,6 +58,22 @@ def main():
 
     threading.Thread(target=oled_loop, args=(state,), daemon=True).start()
 
+    # --- NavTCP: команды хоста ArUco-навигации (порт hugo-Peltier) ---------
+    try:
+        from picarpro.routes.nav_server import NavTcpServer
+        state.nav_server = NavTcpServer(state)
+        state.nav_server.start()
+    except Exception as e:
+        logger.warning(f'[Boot] NavTCP start failed: {e}')
+
+    # --- IMU-стриминг gz по UDP (для слияния курса на хосте) ---------------
+    try:
+        from picarpro.functions.imu_stream import ImuUdpStreamer
+        state.imu_stream = ImuUdpStreamer(state)
+        state.imu_stream.start()
+    except Exception as e:
+        logger.warning(f'[Boot] IMU stream start failed: {e}')
+
     def _shutdown(signum, frame):
         logger.info(f'[Boot] signal {signum} received')
         state.shutdown()

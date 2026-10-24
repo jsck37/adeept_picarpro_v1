@@ -1,5 +1,72 @@
 # CHANGELOG — PiCar-Pro Merged Edition v1.0.0
 
+## MOD v1.1.0 — YOLO на 1 ГБ ОЗУ + порт hugo-Peltier + MPU6050 fix + servo UX
+
+### YOLO/OpenCV на RPi 3B+ (1 ГБ ОЗУ)
+* `picarpro/camera/yolo_detector.py` — инференс YOLO через `cv2.dnn` (ONNX),
+  БЕЗ PyTorch (экономия ~700 МБ); вход 320×320, NMS, разбор выхода
+  ultralytics (1,84,N)/(1,N,85);
+* новый CV-режим `yoloDetect` (кнопка «YOLO» в Computer Vision) с оверлеем
+  рамок на MJPEG-потоке и ленивой загрузкой модели;
+* `tools/setup_swap.sh` — своп 2 ГБ (dphys-swapfile), vm.swappiness=80,
+  опциональный zram (zstd); `docs/MEMORY_TUNING.md`;
+* `tools/export_yolo_onnx.py` — экспорт .pt → .onnx + classes.txt (на ПК);
+  `docs/YOLO_GUIDE.md`.
+
+### Порт hugo-Peltier/Adeept-picarPro
+* `picarpro/routes/nav_server.py` — NavTCP на порту **5001** (в оригинале
+  5000 конфликтовал с Flask): FORWARD/LEFT/RIGHT/BACKWARD/STOP/SPEED/
+  PICK_BLUE/DROP/STATUS/QUIT + watchdog STOP при потере хоста;
+* `picarpro/functions/aruco_nav.py` — бортовая ArUco-навигация (порт Demo.py):
+  путевые точки DICT_4X4_50, 3-state контроллер, прибытие по площади маркера,
+  PICK_BLUE по завершении; поддержка нового (≥4.7) и старого cv2.aruco API;
+* `tools/aruco_nav_host.py` — хост-скрипт с надземной камерой (порт Demo.py):
+  слияние курса с IMU по UDP (alpha-фильтр), финальное сближение;
+* `picarpro/functions/imu_stream.py` — UDP-стриминг gz @ 20 Гц (порт 5005);
+* `picarpro/functions/arm_push.py` — расталкивание препятствий клешней
+  (порт Phase 2 «Obstacle handling»);
+* `picarpro/functions/color_scan.py` — сканирование панорамой + цветовой
+  захват (порт colortracking.py: SCAN/TRACK/GRASP, TRACK_STEP=1°);
+* web-UI: блок «ArUco Nav & Arm» в Autonomous; команды `aruco_nav`,
+  `push`, `color_scan`; статусы в broadcast.
+
+### Исправлена инициализация MPU6050
+* корректная reset-последовательность: DEVICE_RESET (0x80) → пробуждение
+  с CLKSEL=PLL гироскопа X (0x01) — раньше писался 0x00 (внутренний RC),
+  а чип по умолчанию просыпается в SLEEP;
+* контроль бита SLEEP после пробуждения, повторные попытки WHO_AM_I
+  (3×150 мс — чипу нужно время после подачи питания);
+* **фикс утечки потоков**: после 30 ошибок чтения `_reinit` порождал новый
+  retry-цикл, а старый `_read_loop` продолжал крутиться с `bus=None` и
+  клонировал циклы бесконечно — теперь генерационные токены (`self._gen`)
+  останавливают устаревшие циклы; доступ к шине сериализован `_bus_lock`.
+
+### Servo Control: степперы вместо слайдеров
+* слайдеры заменены на степперы «−/+» с шагом ровно 1°: тап = 1°,
+  удержание = автоповтор (~8°/с), прямой ввод угла;
+* **защита лимитов**: min/max заблокированы (disabled, пунктир) по умолчанию;
+  редактирование — только по кнопке «🔒 Edit Limits» (на время редактирования
+  движение серво блокируется), сохранение — строго по «Save Limits»
+  (атомарная запись всех серво в servo_cal.json на Pi + подтверждение
+  через servo_get_limits); отмена — «Cancel»;
+* сервер валидирует лимиты как и раньше (`_clamp` в ServoController) —
+  случайное изменение невозможно ни в UI, ни по прямым командам;
+* синхронизация углов из статуса (servo_angles) с защитой от перезаписи
+  поля в фокусе.
+
+### Прочее
+* boot.py: запуск NavTCP + IMU-стрима, корректная остановка при выходе;
+* state.py: новые компоненты (aruco_nav, pusher, color_scan, nav_server,
+  imu_stream) + расширенный статус (yolo, nav_tcp, aruco_nav, push,
+  color_scan);
+* config.py: секции YOLO_*, ARUCO_*, NAV_TCP_PORT=5001, IMU_UDP_PORT=5005,
+  OBSTACLE_PUSH_*, COLOR_SCAN_*;
+* commands.py: команды `yolo_status`, `aruco_nav`, `push`, `color_scan`,
+  cv-режим `yoloDetect`;
+* docs: YOLO_GUIDE.md, MEMORY_TUNING.md, ARUCO_NAV.md; README дополнен.
+
+---
+
 Полное слияние трёх версий прошивки Adeept с приоритетом мода **jsck37**:
 
 | Источник | Роль в слиянии |

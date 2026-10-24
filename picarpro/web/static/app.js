@@ -88,6 +88,8 @@ function sendCommand(cmd, params) {
       'servo_set_limits': '/cmd/servo_set_limits', 'i2c_scan': '/cmd/i2c_scan',
       'web_active': '/cmd/web_active', 'clear_log': '/cmd/clear_log',
       'steady': '/cmd/steady', 'battery': '/cmd/battery',
+      'aruco_nav': '/cmd/aruco_nav', 'push': '/cmd/push',
+      'color_scan': '/cmd/color_scan', 'yolo_status': '/cmd/yolo_status',
     };
     var url = urlMap[cmd];
     if (url) {
@@ -256,6 +258,31 @@ function updateStatus(d) {
   }
   if (d.servo_limits) {
     applyServoLimits(d.servo_limits);
+  }
+  // синхронизация углов с сервера (когда поле не в фокусе)
+  if (d.servo_angles && Array.isArray(d.servo_angles) && !servoLimitsEditMode) {
+    d.servo_angles.forEach(function(ang, sid) {
+      var inp = document.querySelector('input.servo-angle-input[data-servo="' + sid + '"]');
+      if (inp && document.activeElement !== inp) {
+        var def = servoDefById(sid);
+        if (def && Math.abs((def.cur || 0) - ang) >= 1) {
+          def.cur = ang;
+          inp.value = ang;
+          var val = document.querySelector('label .val[data-servo-val="' + sid + '"]');
+          if (val) val.textContent = ang + '\u00B0';
+        }
+      }
+    });
+  }
+  // статусы портированных режимов
+  if (d.aruco_nav && d.aruco_nav.active !== undefined) {
+    setPortedMode('aruco', d.aruco_nav.active);
+  }
+  if (d.push && d.push.active !== undefined) {
+    setPortedMode('push', d.push.active);
+  }
+  if (d.color_scan && d.color_scan.active !== undefined) {
+    setPortedMode('colorscan', d.color_scan.active);
   }
   var mpu = d.mpu6050;
   if (mpu) {
@@ -427,54 +454,185 @@ function updateCraneGripUI() {
   }
 }
 
+// ===================== Servo Control (степперы ±1°) =====================
+// Слайдеры заменены на степперы: точная настройка по 1 градусу с удержанием
+// (автоповтор) и прямым вводом угла. Лимиты ЗАБЛОКИРОВАНЫ по умолчанию —
+// редактируются только после нажатия «Edit Limits» и сохраняются строго
+// по кнопке «Save Limits» (двойная защита: клиент + сервер).
+var servoLimitsEditMode = false;
+
+function servoDefById(id) {
+  for (var i = 0; i < servoDefs.length; i++) {
+    if (servoDefs[i].id === id) return servoDefs[i];
+  }
+  return null;
+}
+
+function clampAngle(def, angle) {
+  angle = parseInt(angle, 10);
+  if (isNaN(angle)) angle = def.init;
+  return Math.max(def.min, Math.min(def.max, angle));
+}
+
+function sendServoAngle(id, angle) {
+  var def = servoDefById(id);
+  if (!def) return;
+  var clamped = clampAngle(def, angle);
+  def.cur = clamped;
+  var inp = document.querySelector('input.servo-angle-input[data-servo="' + id + '"]');
+  var val = document.querySelector('label .val[data-servo-val="' + id + '"]');
+  if (inp) inp.value = clamped;
+  if (val) val.textContent = clamped + '\u00B0';
+  sendCommand('servo', { id: id, angle: clamped });
+}
+
 function buildServoGrid() {
   var grid = document.getElementById('servo-grid');
   if (!grid) return;
+  grid.innerHTML = '';
   servoDefs.forEach(function(s) {
+    if (s.cur === undefined) s.cur = s.init;
     var item = document.createElement('div');
     item.className = 'servo-item';
-    item.innerHTML = '<label>' + s.name + ' <span class="val">' + s.init + '\u00B0</span></label>' +
-      '<input type="range" min="' + s.min + '" max="' + s.max + '" value="' + s.init + '" data-servo="' + s.id + '">' +
+    item.innerHTML = '<label>' + s.name + ' <span class="val" data-servo-val="' + s.id + '">' + s.cur + '\u00B0</span></label>' +
+      '<div class="servo-step-row">' +
+      '<button type="button" class="servo-step-btn" data-servo-dec="' + s.id + '" title="\u22121\u00B0 (удерживайте для автоповтора)">&minus;</button>' +
+      '<input type="number" class="servo-angle-input" data-servo="' + s.id + '" min="' + s.min + '" max="' + s.max + '" value="' + s.cur + '">' +
+      '<button type="button" class="servo-step-btn" data-servo-inc="' + s.id + '" title="+1\u00B0 (удерживайте для автоповтора)">+</button>' +
+      '</div>' +
       '<div class="servo-limits-row"><span class="servo-limit-label">min</span>' +
-      '<input type="number" class="servo-limit-input" min="0" max="180" value="' + s.min + '" data-servo-min="' + s.id + '">' +
+      '<input type="number" class="servo-limit-input" min="0" max="190" value="' + s.min + '" data-servo-min="' + s.id + '" disabled>' +
       '<span class="servo-limit-label">max</span>' +
-      '<input type="number" class="servo-limit-input" min="0" max="180" value="' + s.max + '" data-servo-max="' + s.id + '">' +
+      '<input type="number" class="servo-limit-input" min="0" max="190" value="' + s.max + '" data-servo-max="' + s.id + '" disabled>' +
       '</div>';
     grid.appendChild(item);
-    var slider = item.querySelector('input[type=range]');
-    var valSpan = item.querySelector('.val');
-    var minInput = item.querySelector('input[data-servo-min]');
-    var maxInput = item.querySelector('input[data-servo-max]');
-    slider.addEventListener('input', function() { valSpan.textContent = slider.value + '\u00B0'; });
-    slider.addEventListener('change', function() {
-      sendCommand('servo', { id: s.id, angle: parseInt(slider.value) });
+  });
+
+  // --- степперы: тап = ±1°, удержание = автоповтор ----------------------
+  document.querySelectorAll('.servo-step-btn').forEach(function(btn) {
+    var repeatTimer = null, delayTimer = null;
+    function stepOnce() {
+      var isInc = btn.hasAttribute('data-servo-inc');
+      var id = parseInt(isInc ? btn.getAttribute('data-servo-inc')
+                              : btn.getAttribute('data-servo-dec'), 10);
+      var def = servoDefById(id);
+      if (!def) return;
+      sendServoAngle(id, def.cur + (isInc ? 1 : -1));
+    }
+    function stopRepeat() {
+      if (delayTimer) { clearTimeout(delayTimer); delayTimer = null; }
+      if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+    }
+    btn.addEventListener('pointerdown', function(e) {
+      e.preventDefault();
+      stepOnce();
+      delayTimer = setTimeout(function() {
+        repeatTimer = setInterval(stepOnce, 120);   // ~8°/с при удержании
+      }, 400);
     });
-    minInput.addEventListener('change', function() {
-      var mn = parseInt(minInput.value);
-      var mx = parseInt(maxInput.value);
-      if (mn < mx) {
-        sendCommand('servo_set_limits', { id: s.id, min: mn, max: mx });
-        slider.min = mn;
-      }
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) {
+      btn.addEventListener(ev, stopRepeat);
     });
-    maxInput.addEventListener('change', function() {
-      var mn = parseInt(minInput.value);
-      var mx = parseInt(maxInput.value);
-      if (mn < mx) {
-        sendCommand('servo_set_limits', { id: s.id, min: mn, max: mx });
-        slider.max = mx;
-      }
+    btn.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+  });
+
+  // --- прямой ввод угла ---------------------------------------------------
+  document.querySelectorAll('input.servo-angle-input').forEach(function(inp) {
+    inp.addEventListener('change', function() {
+      sendServoAngle(parseInt(inp.getAttribute('data-servo'), 10), inp.value);
     });
   });
+}
+
+// --- режим редактирования лимитов ------------------------------------------
+function setServoLimitsEditMode(on) {
+  servoLimitsEditMode = on;
+  document.querySelectorAll('.servo-limit-input').forEach(function(inp) {
+    inp.disabled = !on;
+  });
+  // на время редактирования движение серво заблокировано (защита от путаницы)
+  document.querySelectorAll('input.servo-angle-input').forEach(function(inp) {
+    inp.readOnly = on;
+  });
+  document.querySelectorAll('.servo-step-btn').forEach(function(btn) {
+    btn.disabled = on;
+  });
+  var editBtn = document.getElementById('servo-edit-limits');
+  var saveBtn = document.getElementById('servo-save-limits');
+  var cancelBtn = document.getElementById('servo-cancel-limits');
+  var note = document.getElementById('servo-limits-note');
+  if (editBtn) editBtn.style.display = on ? 'none' : '';
+  if (saveBtn) saveBtn.style.display = on ? '' : 'none';
+  if (cancelBtn) cancelBtn.style.display = on ? '' : 'none';
+  if (note) {
+    note.textContent = on
+      ? 'РЕЖИМ РЕДАКТИРОВАНИЯ: задайте min/max и нажмите «Save Limits». '
+        + 'Изменения запомнятся на сервере только после сохранения.'
+      : 'Лимиты заблокированы — случайно изменить их нельзя. '
+        + 'Для настройки нажмите кнопку «Edit Limits».';
+    note.classList.toggle('unlocked', on);
+  }
+}
+
+function saveServoLimits() {
+  document.querySelectorAll('input.servo-limit-input').forEach(function(inp) {
+    var sidAttr = inp.getAttribute('data-servo-min');
+    var isMin = sidAttr !== null;
+    var sid = parseInt(isMin ? sidAttr : inp.getAttribute('data-servo-max'), 10);
+    var minInp = document.querySelector('input[data-servo-min="' + sid + '"]');
+    var maxInp = document.querySelector('input[data-servo-max="' + sid + '"]');
+    if (!minInp || !maxInp) return;
+    var mn = parseInt(minInp.value, 10), mx = parseInt(maxInp.value, 10);
+    if (isNaN(mn) || isNaN(mx)) return;
+    if (mn > mx) { var t = mn; mn = mx; mx = t; }
+    mn = Math.max(0, Math.min(190, mn));
+    mx = Math.max(0, Math.min(190, mx));
+    sendCommand('servo_set_limits', { id: sid, min: mn, max: mx });
+    // локальное применение (сервер подтвердит через servo_get_limits)
+    var def = servoDefById(sid);
+    if (def) { def.min = mn; def.max = mx; }
+  });
+  setTimeout(function() { sendCommand('servo_get_limits', {}); }, 400);
+  setServoLimitsEditMode(false);
+  toast('Лимиты сохранены на сервере');
+}
+
+function cancelServoLimits() {
+  // возвращаем значения из servoDefs (последние подтверждённые сервером)
+  servoDefs.forEach(function(s) {
+    var minInp = document.querySelector('input[data-servo-min="' + s.id + '"]');
+    var maxInp = document.querySelector('input[data-servo-max="' + s.id + '"]');
+    if (minInp) minInp.value = s.min;
+    if (maxInp) maxInp.value = s.max;
+  });
+  setServoLimitsEditMode(false);
 }
 
 function applyServoLimits(limits) {
   for (var sid in limits) {
     var lim = limits[sid];
-    var slider = document.querySelector('input[data-servo="' + sid + '"]');
-    if (slider) {
-      slider.min = lim.min;
-      slider.max = lim.max;
+    var id = parseInt(sid, 10);
+    var def = servoDefById(id);
+    if (!def) continue;
+    def.min = lim.min;
+    def.max = lim.max;
+    if (def.cur === undefined) def.cur = def.init;
+    def.cur = clampAngle(def, def.cur);
+    var angleInp = document.querySelector('input.servo-angle-input[data-servo="' + sid + '"]');
+    if (angleInp) {
+      angleInp.min = lim.min;
+      angleInp.max = lim.max;
+      // не затираем значение, пока пользователь редактирует поле
+      if (document.activeElement !== angleInp) angleInp.value = def.cur;
+    }
+    var val = document.querySelector('label .val[data-servo-val="' + sid + '"]');
+    if (val) val.textContent = def.cur + '\u00B0';
+    // лимит-инпуты обновляем ТОЛЬКО когда они не в редактировании
+    if (!servoLimitsEditMode) {
+      var minInp = document.querySelector('input[data-servo-min="' + sid + '"]');
+      var maxInp = document.querySelector('input[data-servo-max="' + sid + '"]');
+      if (minInp) minInp.value = lim.min;
+      if (maxInp) maxInp.value = lim.max;
     }
   }
 }
@@ -746,8 +904,14 @@ document.getElementById('servo-home').addEventListener('click', function() {
   updateCraneArmUI();
   updateCraneGripUI();
 });
+document.getElementById('servo-edit-limits').addEventListener('click', function() {
+  setServoLimitsEditMode(true);
+});
 document.getElementById('servo-save-limits').addEventListener('click', function() {
-  sendCommand('servo_get_limits', {});
+  saveServoLimits();
+});
+document.getElementById('servo-cancel-limits').addEventListener('click', function() {
+  cancelServoLimits();
 });
 
 document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
@@ -882,6 +1046,40 @@ if (steadyToggle) {
   steadyToggle.addEventListener('click', function() {
     sendCommand('steady', { action: 'toggle' });
   });
+}
+
+// --- портированные режимы (hugo-Peltier): ArUco nav / Push / Color Scan -----
+var portedModes = {
+  aruco: { btn: 'aruco-toggle', cmd: 'aruco_nav', active: false,
+           labelOn: 'Stop Nav', labelOff: 'ArUco Nav' },
+  push:  { btn: 'push-toggle', cmd: 'push', active: false,
+           labelOn: 'Stop Push', labelOff: 'Push Mode' },
+  colorscan: { btn: 'colorscan-toggle', cmd: 'color_scan', active: false,
+               labelOn: 'Stop Scan', labelOff: 'Color Scan' },
+};
+
+Object.keys(portedModes).forEach(function(key) {
+  var m = portedModes[key];
+  var btn = document.getElementById(m.btn);
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    var action = m.active ? 'stop' : 'start';
+    sendCommand(m.cmd, { action: action });
+    // оптимистичное переключение — статус с сервера подтвердит/откатит
+    setPortedMode(key, !m.active);
+    toast(m.labelOff + ': ' + (m.active ? 'запущен' : 'остановлен'));
+  });
+});
+
+function setPortedMode(key, active) {
+  var m = portedModes[key];
+  if (!m) return;
+  m.active = !!active;
+  var btn = document.getElementById(m.btn);
+  if (btn) {
+    btn.classList.toggle('active', m.active);
+    btn.textContent = m.active ? m.labelOn : m.labelOff;
+  }
 }
 
 var btScanBtn = document.getElementById('bt-scan-btn');

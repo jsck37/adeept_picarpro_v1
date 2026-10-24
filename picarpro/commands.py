@@ -8,7 +8,8 @@
   (автономные режимы из v1/v2), battery (статус питания).
 """
 from picarpro.logger import logger
-from picarpro.camera.camera_opencv import CV_NONE, CV_LINE, CV_HAND
+from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
+                                           CV_YOLO)
 from config import (
     SERVO_COUNT, SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
@@ -196,13 +197,90 @@ def process(state, data):
         r = {'ok': True, 'web_active': state.web_active}
 
     elif cmd == 'cv_mode':
-        mode_map = {'none': CV_NONE, 'findlineCV': CV_LINE, 'trackHand': CV_HAND}
+        mode_map = {'none': CV_NONE, 'findlineCV': CV_LINE,
+                    'trackHand': CV_HAND, 'yoloDetect': CV_YOLO}
         m = mode_map.get(str(p.get('mode', 'none')))
         if m is not None:
             state.init_camera()
             if state.camera:
                 state.camera.set_cv_mode(m)
                 r = {'ok': True, 'mode': p.get('mode')}
+
+    elif cmd == 'yolo_status':
+        r = {'ok': True}
+        if state.camera:
+            r.update(state.camera.get_yolo_status())
+        else:
+            r.update({'loaded': False, 'objects': []})
+
+    # ------------------------------------------------------------------
+    # Портированные режимы из hugo-Peltier/Adeept-picarPro
+    # ------------------------------------------------------------------
+    elif cmd == 'aruco_nav':
+        # бортовая ArUco-навигация (порт Demo.py, камера Pi)
+        action = str(p.get('action', 'status'))
+        if action == 'status' and not state.aruco_nav:
+            r = {'ok': True, 'active': False, 'finished': False}
+        else:
+            state.init_camera()
+            if not state.aruco_nav and state.camera:
+                from picarpro.functions.aruco_nav import ArucoNavigator
+                state.aruco_nav = ArucoNavigator(state, state.camera)
+            if not state.aruco_nav:
+                r = {'ok': False, 'error': 'Камера недоступна'}
+            elif action == 'start':
+                ok, msg = state.aruco_nav.start()
+                r = {'ok': ok, 'action': 'start'}
+                if not ok:
+                    r['error'] = msg
+            elif action == 'stop':
+                state.aruco_nav.stop()
+                r = {'ok': True, 'action': 'stop'}
+            else:
+                r = state.aruco_nav.get_status()
+                r['ok'] = True
+
+    elif cmd == 'push':
+        # расталкивание препятствий клешней (порт Phase 2)
+        action = str(p.get('action', 'status'))
+        if not state.pusher:
+            from picarpro.functions.arm_push import ObstaclePusher
+            state.pusher = ObstaclePusher(state)
+        if action == 'start':
+            ok, msg = state.pusher.start()
+            r = {'ok': ok, 'action': 'start'}
+            if not ok:
+                r['error'] = msg
+        elif action == 'stop':
+            state.pusher.stop()
+            r = {'ok': True, 'action': 'stop'}
+        else:
+            r = state.pusher.get_status()
+            r['ok'] = True
+
+    elif cmd == 'color_scan':
+        # сканирование рукой + цветовой захват (порт colortracking.py)
+        action = str(p.get('action', 'status'))
+        if action == 'status' and not state.color_scan:
+            r = {'ok': True, 'active': False, 'mode': 'IDLE'}
+        else:
+            state.init_camera()
+            if not state.color_scan and state.camera:
+                from picarpro.functions.color_scan import ColorArmScanner
+                state.color_scan = ColorArmScanner(state, state.camera)
+            if not state.color_scan:
+                r = {'ok': False, 'error': 'Камера недоступна'}
+            elif action == 'start':
+                ok, msg = state.color_scan.start()
+                r = {'ok': ok, 'action': 'start'}
+                if not ok:
+                    r['error'] = msg
+            elif action == 'stop':
+                state.color_scan.stop()
+                r = {'ok': True, 'action': 'stop'}
+            else:
+                r = state.color_scan.get_status()
+                r['ok'] = True
 
     elif cmd == 'hand_color':
         state.init_camera()

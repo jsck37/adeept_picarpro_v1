@@ -14,8 +14,10 @@ luma.oled
 spidev
 
 # Vision / Video
+# opencv>=4.7 — современный cv2.aruco API (ArucoDetector) для ArUco-навигации;
+# более старые версии тоже работают (в коде есть fallback на старый API).
 pillow
-opencv-python-headless
+opencv-python-headless>=4.7
 numpy
 picamera2
 

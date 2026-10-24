@@ -79,6 +79,7 @@
             <button class="cv-btn" data-cv="findlineCV">CV Line</button>
             <button class="cv-btn" data-cv="trackHand">Hand</button>
             <button class="cv-btn" data-cv="findColor">Color</button>
+            <button class="cv-btn" data-cv="yoloDetect" title="YOLO ONNX (см. docs/YOLO_GUIDE.md)">YOLO</button>
           </div>
           <div id="hand-color-row" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #e0e0e0">
             <div style="font-size:.75rem;color:#5f6368;font-weight:600;margin-bottom:4px">Hand color preset</div>
@@ -125,6 +126,12 @@
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
               <button class="gbtn" id="steady-toggle">Steady Cam</button>
+            </div>
+            <div style="margin-top:8px;font-size:.75rem;color:#5f6368;font-weight:600">ArUco Nav & Arm (порт hugo-Peltier)</div>
+            <div class="btn-group" id="ported-group" style="margin-top:4px">
+              <button class="gbtn" id="aruco-toggle" title="Бортовая ArUco-навигация по путевым точкам">ArUco Nav</button>
+              <button class="gbtn" id="push-toggle" title="Расталкивание препятствий клешней">Push Mode</button>
+              <button class="gbtn" id="colorscan-toggle" title="Сканирование + цветовой захват">Color Scan</button>
             </div>
             <div style="margin-top:8px;font-size:.75rem;color:#5f6368">
               <div style="font-weight:600;margin-bottom:2px">IR Line Sensors</div>
@@ -325,7 +332,13 @@
             <div class="servo-grid" id="servo-grid"></div>
             <div class="servo-home-row">
               <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
-              <button class="btn-sm btn-primary" id="servo-save-limits">Save Limits</button>
+              <button class="btn-sm btn-edit" id="servo-edit-limits">&#128274; Edit Limits</button>
+              <button class="btn-sm btn-primary" id="servo-save-limits" style="display:none">Save Limits</button>
+              <button class="btn-sm btn-secondary" id="servo-cancel-limits" style="display:none">Cancel</button>
+            </div>
+            <div class="servo-limits-note" id="servo-limits-note">
+              Лимиты заблокированы — случайно изменить их нельзя.
+              Для настройки нажмите «&#128274; Edit Limits».
             </div>
           </div>
         </div>

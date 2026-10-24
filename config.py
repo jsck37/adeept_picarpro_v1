@@ -220,6 +220,65 @@ DEFAULT_SPEED = 50
 TURN_RADIUS_MIN = 0.2
 TURN_RADIUS_MAX = 1.0
 
+# ---------------------------------------------------------------------------
+# YOLO — детектирование объектов на OpenCV DNN (ONNX), без PyTorch.
+#   Подходит для RPi 3B+ с 1 ГБ ОЗУ ТОЛЬКО вместе с расширенным swap
+#   (tools/setup_swap.sh) и моделью nano при входе 320x320.
+#   Модель экспортируется на ПК: tools/export_yolo_onnx.py (см. docs/YOLO_GUIDE.md)
+# ---------------------------------------------------------------------------
+YOLO_MODEL_PATH = '/home/pi/models/yolov8n.onnx'   # путь к ONNX-модели на Pi
+YOLO_CLASSES_FILE = '/home/pi/models/classes.txt'  # имена классов по строкам
+YOLO_INPUT_SIZE = 320          # вход сети (320 — оптимально для 3B+; 640 слишком медленно)
+YOLO_CONFIDENCE = 0.45         # порог уверенности
+YOLO_NMS_THRESHOLD = 0.45      # порог NMS
+YOLO_FRAME_SKIP = 3            # инференс каждый N-й кадр (разгрузка CPU)
+
+# ---------------------------------------------------------------------------
+# ArUco-навигация — порт из репозитория hugo-Peltier/Adeept-picarPro
+#   Два режима:
+#   1) Хост-ПК (надземная камера): tools/aruco_nav_host.py + NavTCP (ниже);
+#   2) Бортовой: picarpro/functions/aruco_nav.py — камера Pi ищет маркеры.
+# ---------------------------------------------------------------------------
+ARUCO_DICT_NAME = 'DICT_4X4_50'   # словарь маркеров (как в оригинале)
+ARUCO_ROBOT_ID = 0                # ID маркера робота (для хост-режима)
+ARUCO_WAYPOINTS = [1, 2]          # ID путевых точек по порядку
+ARUCO_ANGLE_THRESHOLD_DEG = 12    # мёртвая зона курса (3-state контроллер)
+ARUCO_SPEED = 35                  # скорость движения в режиме навигации
+ARUCO_REACH_AREA = 9000           # площадь маркера (px^2) = «прибыл» (бортовой)
+ARUCO_REACHED_FRAMES = 3          # подтверждение прибытия N кадров подряд
+ARUCO_TARGET_HOLD_S = 0.7         # удержание курса при потере маркера
+ARUCO_WAYPOINT_PAUSE_S = 0.8      # пауза на точке (WAYPOINT_PAUSE в оригинале)
+ARUCO_CAM_FOV_DEG = 62            # горизонтальный FOV камеры (для пересчёта px->deg)
+PICK_BLUE_ON_FINISH = True        # схват по завершении миссии (порт PICK_BLUE)
+
+# NavTCP — приёмник команд хоста (FORWARD/LEFT/RIGHT/STOP/PICK_BLUE/STATUS)
+# ВНИМАНИЕ: не 5000 — этот порт занят Flask!
+NAV_TCP_PORT = 5001
+
+# UDP-стриминг гироскопа gz (для IMU-слияния на хосте, порт Demo.py)
+IMU_UDP_PORT = 5005
+IMU_STREAM_HZ = 20
+
+# ---------------------------------------------------------------------------
+# Расталкивание препятствий клешней (порт Phase 2 «Obstacle handling»)
+# ---------------------------------------------------------------------------
+OBSTACLE_PUSH_DISTANCE_M = 0.30   # препятствие ближе этого — остановка и толчок
+OBSTACLE_PUSH_COOLDOWN_S = 6.0    # пауза между попытками
+
+# ---------------------------------------------------------------------------
+# Сканирование рукой + цветовой захват (порт colortracking.py)
+# ---------------------------------------------------------------------------
+COLOR_SCAN_SERVO = 1              # «база» сканирования — панорама камеры
+COLOR_SCAN_GRIP_SERVO = 6         # схват — клешня
+COLOR_SCAN_MIN_AREA = 1500        # минимальная площадь цели (MIN_AREA)
+COLOR_SCAN_CENTER_TOL_PX = 35     # мёртвая зона центра (CENTER_TOL)
+COLOR_SCAN_STEP = 2               # шаг сканирования (SCAN_STEP)
+COLOR_SCAN_TRACK_STEP = 1         # шаг доворота (TRACK_STEP = 1°)
+COLOR_SCAN_DELAY = 0.04           # задержка цикла (SCAN_DELAY)
+COLOR_SCAN_GRIP_OPEN = 80         # раскрытая клешня (CRANE_ARM_OPEN)
+COLOR_SCAN_GRIP_CLOSED = 150      # закрытая клешня (CRANE_ARM_CLOSED)
+COLOR_SCAN_SCAN_RANGE = (10, 170) # пределы качания «базы»
+
 # Калибровка серво / конфиг BT — файлы состояния
 SERVO_CAL_FILE = BASE_DIR / 'servo_cal.json'
 BT_CONFIG_FILE = BASE_DIR / 'bt_config.json'
