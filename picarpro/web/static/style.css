@@ -290,3 +290,15 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
 .bt-device-item.bt-gamepad { background: #e8f0fe; border: 1px solid #d2e3fc; }
 .bt-device-name { flex: 1; font-size: .78rem; font-weight: 500; }
 .bt-connect-btn { flex-shrink: 0; }
+
+/* ---- v1.3.0: мобильные тормоза — на телефонах отключаем дорогие
+   эффекты (transition на сотнях элементов, backdrop-filter, hover) ---- */
+@media (max-width:820px){
+  .card,.btn-sm,.gbtn,.cv-btn,.tab-btn,.headlight-btn,.log-filter-btn,
+  .servo-step-btn,.info-nav-btn,.color-preset,.joystick-knob,
+  .cam-joystick-knob,.collapsible-header svg.chevron{transition:none!important}
+  .cv-badge{backdrop-filter:none!important}
+  .card:hover{box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04)}
+  .color-preset:hover{transform:none;box-shadow:none}
+  .status-bar .conn-dot{animation:none}
+}

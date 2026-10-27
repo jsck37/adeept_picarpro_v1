@@ -41,9 +41,26 @@ class ColorArmScanner:
         self._active = False
         self._running = False
         self._thread = None
+        self._demand_held = False   # v1.2.0: держим камеру в боевом ритме
         self.last_mode = 'IDLE'
         self.last_offset = 0
         self.grasp_done = False
+
+    def _demand_open(self):
+        if not self._demand_held and self.camera is not None:
+            try:
+                self.camera.raw_demand_open()
+                self._demand_held = True
+            except Exception:
+                pass
+
+    def _demand_close(self):
+        if self._demand_held and self.camera is not None:
+            try:
+                self.camera.raw_demand_close()
+            except Exception:
+                pass
+            self._demand_held = False
 
     @property
     def active(self):
@@ -67,6 +84,7 @@ class ColorArmScanner:
         self.grasp_done = False
         self._running = True
         self._active = True
+        self._demand_open()   # v1.2.0: сырые кадры нужны в полном темпе
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         logger.info('[ColorScan] started (SCAN mode)')
@@ -75,6 +93,7 @@ class ColorArmScanner:
     def stop(self):
         self._active = False
         self._running = False
+        self._demand_close()
         self.last_mode = 'IDLE'
         logger.info('[ColorScan] stopped')
         return True, 'ok'
@@ -190,5 +209,6 @@ class ColorArmScanner:
                     time.sleep(COLOR_SCAN_DELAY)
         finally:
             self._active = False
+            self._demand_close()   # v1.2.0: скан завершён — камере можно idle
             if self.last_mode != 'DONE':
                 self.last_mode = 'IDLE'

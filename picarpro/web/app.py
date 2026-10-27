@@ -28,7 +28,8 @@ from picarpro.routes.bluetooth import (
     load_config as bt_load_config, save_config as bt_save_config,
     _load_hid_sony, validate_mac,
 )
-from config import FLASK_PORT, WEBSOCKET_PORT, BASE_DIR, CORS_ORIGINS
+from config import (FLASK_PORT, WEBSOCKET_PORT, BASE_DIR, CORS_ORIGINS,
+                    TELEMETRY_INTERVAL_S)
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), 'static')
 DOCS_DIR = os.path.join(BASE_DIR, 'docs')
@@ -119,17 +120,25 @@ def create_app(state):
             return Response('Camera not available', status=503,
                             mimetype='text/plain')
 
+        cam = state.camera
+        # держим спрос на кадры всё соединение (v1.2.0): без зрителей
+        # камера живёт в экономном idle-ритме CAMERA_IDLE_INTERVAL_S
+        cam.stream_open()
+
         def gen():
-            while state.running:
-                try:
-                    frame = state.camera.get_frame()
-                except Exception:
-                    frame = None
-                if frame:
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
-                           + frame + b'\r\n')
-                else:
-                    time.sleep(0.05)
+            try:
+                while state.running:
+                    try:
+                        frame = cam.get_frame()
+                    except Exception:
+                        frame = None
+                    if frame:
+                        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+                               + frame + b'\r\n')
+                    else:
+                        time.sleep(0.05)
+            finally:
+                cam.stream_close()
 
         return Response(gen(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -147,7 +156,7 @@ def create_app(state):
                     yield f'data: {json.dumps(state.get_status())}\n\n'
                 except Exception:
                     break
-                time.sleep(1.0)
+                time.sleep(TELEMETRY_INTERVAL_S)
 
         return Response(gen(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache',

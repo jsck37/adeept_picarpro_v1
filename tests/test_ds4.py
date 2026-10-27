@@ -97,10 +97,10 @@ class TestButtons:
         assert ds4._crane_arm_closed is False
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            if hw.servos.get_angle(6) == 80:  # CRANE_ARM_OPEN
+            if hw.servos.get_angle(6) == 100:  # CRANE_ARM_OPEN (v1.3.0)
                 break
             time.sleep(0.02)
-        assert hw.servos.get_angle(6) == 80
+        assert hw.servos.get_angle(6) == 100
         ds4._connected = False
 
     def test_crane_grip_cycle(self, ds4, hw):

@@ -1,6 +1,7 @@
 import threading, time
 from picarpro.logger import logger
-from config import ULTRASONIC_TRIGGER, ULTRASONIC_ECHO, ULTRASONIC_MAX_DISTANCE
+from config import (ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
+                    ULTRASONIC_MAX_DISTANCE, ULTRASONIC_ECHO_TIMEOUT_S)
 
 try:
     import RPi.GPIO as GPIO
@@ -33,19 +34,39 @@ class UltrasonicSensor:
             logger.error(f'[Ultrasonic] init failed: {e}')
 
     def _measure(self):
+        """Одно измерение дистанции.
+
+        Оптимизация v1.2.0: ожидание эха — событийное (GPIO.wait_for_edge,
+        нулевая загрузка CPU), раньше было активное кручение GPIO.input
+        до 60 мс на каждом цикле — до 50% ядра впустую при отсутствии
+        препятствия (нет эха = полный таймаут на активном ожидании).
+        Для сред без wait_for_edge (фейки в тестах) остаётся старый путь.
+        """
         GPIO.output(ULTRASONIC_TRIGGER, GPIO.HIGH)
         time.sleep(0.00001)
         GPIO.output(ULTRASONIC_TRIGGER, GPIO.LOW)
-        deadline = time.time() + 0.03
-        while GPIO.input(ULTRASONIC_ECHO) == 0:
-            if time.time() > deadline:
+        wait_edge = getattr(GPIO, 'wait_for_edge', None)
+        if wait_edge is not None:
+            timeout_ms = int(ULTRASONIC_ECHO_TIMEOUT_S * 1000)
+            if wait_edge(ULTRASONIC_ECHO, GPIO.RISING,
+                         timeout=timeout_ms) is None:
                 return None
-        t_start = time.time()
-        deadline = time.time() + 0.03
-        while GPIO.input(ULTRASONIC_ECHO) == 1:
-            if time.time() > deadline:
+            t_start = time.time()
+            if wait_edge(ULTRASONIC_ECHO, GPIO.FALLING,
+                         timeout=timeout_ms) is None:
                 return None
-        t_end = time.time()
+            t_end = time.time()
+        else:
+            deadline = time.time() + 0.03
+            while GPIO.input(ULTRASONIC_ECHO) == 0:
+                if time.time() > deadline:
+                    return None
+            t_start = time.time()
+            deadline = time.time() + 0.03
+            while GPIO.input(ULTRASONIC_ECHO) == 1:
+                if time.time() > deadline:
+                    return None
+            t_end = time.time()
         duration = t_end - t_start
         return round(duration * 17150.0, 1)
 

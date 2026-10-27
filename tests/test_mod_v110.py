@@ -45,25 +45,27 @@ class TestPortedCommands:
 
 
 class TestServoLimitsViaCommands:
-    def test_set_and_get_limits(self, state, tmp_path):
-        r = call(state, 'servo_set_limits', {'id': 0, 'min': 40, 'max': 140})
-        assert r['ok'] is True
+    """v1.3.0: лимиты серво — только из config.py, редактирование удалено."""
+
+    def test_limits_readonly_from_config(self, state):
+        from config import SERVO_LIMITS
         r = call(state, 'servo_get_limits')
         assert r['ok'] is True
-        lim = r['limits'][0]
-        assert lim['min'] == 40 and lim['max'] == 140
+        assert r['limits'] == {
+            int(k): dict(v) for k, v in SERVO_LIMITS.items()}
 
-    def test_limit_swap_on_inversion(self, state):
-        r = call(state, 'servo_set_limits', {'id': 1, 'min': 150, 'max': 20})
-        assert r['ok'] is True
-        assert r['min'] == 20 and r['max'] == 150
-
-    def test_angle_clamped_by_limits(self, state):
-        call(state, 'servo_set_limits', {'id': 2, 'min': 60, 'max': 120})
+    def test_angle_clamped_by_config_limits(self, state):
+        # tilt: 80..170, grip: 100..180 — углы в стоп больше не проходят
         call(state, 'servo', {'id': 2, 'angle': 10})
-        assert state.servos.get_angle(2) == 60
+        assert state.servos.get_angle(2) == 80
         call(state, 'servo', {'id': 2, 'angle': 200})
-        assert state.servos.get_angle(2) == 120
+        assert state.servos.get_angle(2) == 170
+        call(state, 'crane', {'action': 'grip_high'})
+        assert state.servos.get_angle(5) == 180
+        call(state, 'crane', {'action': 'grip_low'})
+        assert state.servos.get_angle(5) == 100
+        call(state, 'crane', {'action': 'arm_open'})
+        assert state.servos.get_angle(6) == 100
 
 
 class TestNavTcpProtocol:

@@ -4,7 +4,9 @@ from loguru import logger as _log
 
 
 class LogBuffer:
-    def __init__(self, maxlen=2000):
+    def __init__(self, maxlen=800):
+        # v1.2.0: 2000 -> 800 строк (~150 КБ ОЗУ экономии; UI показывает
+        # последние 100-200 строк, больше не нужно)
         self._lines = deque(maxlen=maxlen)
         self._lock = threading.Lock()
         self._subscribers = []

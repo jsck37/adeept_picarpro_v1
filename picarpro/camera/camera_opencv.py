@@ -3,6 +3,7 @@ from picarpro.logger import logger
 from picarpro.camera.yolo_detector import YoloDetector
 from config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
+    CAMERA_IDLE_INTERVAL_S,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
     CV_LINE_POS_1, CV_LINE_POS_2,
     FINDCOLOR_AREA_MIN, WATCHDOG_THRESHOLD, WATCHDOG_MIN_AREA,
@@ -61,6 +62,7 @@ class CVThread(threading.Thread):
         self._last_motion_ts = 0.0
         self.overlay_frame = None
         self._overlay_lock = threading.Lock()
+        self._yolo_err_drawn = False
         # YOLO (задача: нейросетевое зрение на 1 ГБ RAM — см. docs/YOLO_GUIDE.md)
         self.yolo = YoloDetector()
         self.yolo._objects_lock = threading.Lock()
@@ -82,10 +84,17 @@ class CVThread(threading.Thread):
                 logger.error(f'[CV] error: {e}')
 
     def submit_frame(self, frame):
+        """Передать кадр в CV-поток.
+
+        Оптимизация v1.2.0: копия НЕ создаётся — capture_array() picamera2
+        возвращает свежий буфер на каждый вызов, и ни один CV-режим не
+        мутирует входной кадр (все преобразования — в новые массивы).
+        Экономия: ~0.9 МБ memcpy на каждый кадр при активном CV.
+        """
         if self._processing:
             return
         with self._frame_lock:
-            self._frame = frame.copy()
+            self._frame = frame
         self._flag.set()
 
     def get_overlay(self):
@@ -322,11 +331,15 @@ class CVThread(threading.Thread):
         """
         if not self.yolo.loaded:
             if not self.yolo.load():
-                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                cv2.putText(bgr, 'YOLO MODEL NOT FOUND', (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                with self._overlay_lock:
-                    self.overlay_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                # «модель не найдена» рисуем ОДИН раз (v1.2.0: раньше
+                # перерисовывалось 3 cvtColor + putText на каждый кадр)
+                if not self._yolo_err_drawn:
+                    bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    cv2.putText(bgr, 'YOLO MODEL NOT FOUND', (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    with self._overlay_lock:
+                        self.overlay_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    self._yolo_err_drawn = True
                 return
         if not self.yolo.should_infer():
             # между инференсами показываем последний результат поверх кадра
@@ -380,6 +393,13 @@ class Camera:
         self._thread = None
         self._last_raw = None                # сырой RGB-кадр (для ArUco-навигации)
         self._raw_lock = threading.Lock()
+        # Потребители кадров (v1.2.0): JPEG/CV-обработка только при спросе.
+        #   _stream_clients — открытые /video_feed-соединения;
+        #   _raw_demand — потребители сырых кадров (ArUco, color_scan).
+        # CV-режим (cv_mode != none) считается спросом сам по себе.
+        self._demand_lock = threading.Lock()
+        self._stream_clients = 0
+        self._raw_demand = 0
 
     def _init_camera(self):
         with self._picam_lock:
@@ -427,6 +447,31 @@ class Camera:
         time.sleep(backoff)
         self._init_camera()
 
+    # ---- учёт потребителей кадров (v1.2.0) -------------------------------
+    def stream_open(self):
+        """Открыть MJPEG-стрим (/video_feed) — держит камеру в боевом ритме."""
+        with self._demand_lock:
+            self._stream_clients += 1
+
+    def stream_close(self):
+        with self._demand_lock:
+            self._stream_clients = max(0, self._stream_clients - 1)
+
+    def raw_demand_open(self):
+        """Регистрация потребителя сырых кадров (aruco_nav, color_scan)."""
+        with self._demand_lock:
+            self._raw_demand += 1
+
+    def raw_demand_close(self):
+        with self._demand_lock:
+            self._raw_demand = max(0, self._raw_demand - 1)
+
+    def _has_demand(self):
+        with self._demand_lock:
+            if self._stream_clients + self._raw_demand > 0:
+                return True
+        return self.cv_thread.cv_mode != CV_NONE
+
     def start(self):
         if self._thread and self._thread.is_alive():
             return
@@ -459,24 +504,33 @@ class Camera:
                 consecutive_errors = 0
                 with self._raw_lock:
                     self._last_raw = raw
-                if self.cv_thread.cv_mode != CV_NONE and _HAS_CV2:
-                    self.cv_thread.submit_frame(raw)
-                    overlay = self.cv_thread.get_overlay()
-                    frame = overlay if overlay is not None else raw
+                demand = self._has_demand()
+                if demand:
+                    if self.cv_thread.cv_mode != CV_NONE and _HAS_CV2:
+                        self.cv_thread.submit_frame(raw)
+                        overlay = self.cv_thread.get_overlay()
+                        frame = overlay if overlay is not None else raw
+                    else:
+                        frame = raw
+                    if _HAS_CV2:
+                        # JPEG-кодируем только при спросе: без зрителей
+                        # imencode 640x480 съедал ядро впустую (v1.2.0)
+                        ok, jpg = cv2.imencode('.jpg', frame,
+                                                [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
+                        if ok:
+                            with self._frame_lock:
+                                self._frame = jpg.tobytes()
+                            # событие оставляем установленным: get_frame ждёт на нём.
+                            # В исходнике set()+clear() подряд теряли пробуждение
+                            # ожидающего потока (race: кадр есть, wait() вечно спит).
+                            self._frame_ready.set()
+                    sleep_s = frame_interval - 0.005
                 else:
-                    frame = raw
-                if _HAS_CV2:
-                    ok, jpg = cv2.imencode('.jpg', frame,
-                                            [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
-                    if ok:
-                        with self._frame_lock:
-                            self._frame = jpg.tobytes()
-                        # событие оставляем установленным: get_frame ждёт на нём.
-                        # В исходнике set()+clear() подряд теряли пробуждение
-                        # ожидающего потока (race: кадр есть, wait() вечно спит).
-                        self._frame_ready.set()
-                if frame_interval > 0:
-                    time.sleep(max(0.0, frame_interval - 0.005))
+                    # нет зрителей/CV/raw-потребителей — редкий «фоновый» захват,
+                    # чтобы _last_raw и статус не протухали (v1.2.0)
+                    sleep_s = CAMERA_IDLE_INTERVAL_S
+                if sleep_s > 0:
+                    time.sleep(max(0.0, sleep_s))
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(f'[Camera] frame error: {e}')
@@ -494,11 +548,17 @@ class Camera:
             return None if self._last_raw is None else self._last_raw.copy()
 
     def get_frame(self):
+        """Последний MJPEG-кадр. Вызов вне /video_feed (selftest/тесты)
+        сам создаёт разовый спрос, иначе кадр мог бы не кодироваться."""
         if self._thread is None or not self._thread.is_alive():
             self.start()
-        self._frame_ready.wait(timeout=0.5)
-        with self._frame_lock:
-            return self._frame
+        self.stream_open()
+        try:
+            self._frame_ready.wait(timeout=0.5)
+            with self._frame_lock:
+                return self._frame
+        finally:
+            self.stream_close()
 
     def set_cv_mode(self, mode):
         if mode == CV_YOLO:
@@ -508,6 +568,7 @@ class Camera:
             with self.cv_thread._overlay_lock:
                 self.cv_thread.overlay_frame = None
             self.cv_thread._prev_gray = None
+            self.cv_thread._yolo_err_drawn = False
 
     def get_yolo_status(self):
         return self.cv_thread.yolo.get_status()

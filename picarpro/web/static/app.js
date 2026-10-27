@@ -1,12 +1,13 @@
 var servoDefs = [
   { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
-  { id: 2, name: 'Cam Tilt', min: 0,  max: 180, init: 90 },
+  { id: 2, name: 'Cam Tilt', min: 80, max: 170, init: 90 },
   { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
   { id: 4, name: 'Servo 4',  min: 0,  max: 180, init: 90 },
-  { id: 5, name: 'Crane Grip', min: 0, max: 190, init: 190 },
-  { id: 6, name: 'Crane Arm',  min: 0, max: 180, init: 80 },
+  { id: 5, name: 'Crane Grip', min: 100, max: 180, init: 180 },
+  { id: 6, name: 'Crane Arm',  min: 100, max: 180, init: 100 },
 ];
+// Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
 
 var hlMainOn = false;
 var hlLeftSignal = false;
@@ -26,7 +27,6 @@ var hw = {
   oled: false, camera: false, autonomous: false, crane: false,
   ds4: false, voice: false,
 };
-var docsData = null;
 var ws = null;
 var wsReconnectTimer = null;
 var usePolling = false;
@@ -68,11 +68,18 @@ function hexToRgb(hex) {
   return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
 }
 
+var lastWebActive = 0;
 function sendCommand(cmd, params) {
   params = params || {};
   if (cmd === 'move' || cmd === 'speed') {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({cmd: 'web_active', params: {active: true}}));
+    // web_active — не чаще раза в 10 с (раньше улетал с КАЖДЫМ move:
+    // двойной спам по WS при драге джойстика)
+    var nowWa = Date.now();
+    if (nowWa - lastWebActive > 10000) {
+      lastWebActive = nowWa;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({cmd: 'web_active', params: {active: true}}));
+      }
     }
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -85,7 +92,7 @@ function sendCommand(cmd, params) {
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
       'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
       'hand_color': '/cmd/hand_color', 'servo_get_limits': '/cmd/servo_get_limits',
-      'servo_set_limits': '/cmd/servo_set_limits', 'i2c_scan': '/cmd/i2c_scan',
+      'i2c_scan': '/cmd/i2c_scan',
       'web_active': '/cmd/web_active', 'clear_log': '/cmd/clear_log',
       'steady': '/cmd/steady', 'battery': '/cmd/battery',
       'aruco_nav': '/cmd/aruco_nav', 'push': '/cmd/push',
@@ -117,10 +124,32 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
     btn.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
     document.getElementById('content-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'info') loadDocs();
-    if (btn.dataset.tab === 'console') fetchConsoleHistory();
+    if (btn.dataset.tab === 'console') {
+      // очистка + перезагрузка истории: DOM консоли не растёт бесконечно
+      var out = document.getElementById('console-output');
+      if (out) out.innerHTML = '';
+      fetchConsoleHistory();
+    }
+    updateVideoFeed();
   });
 });
+
+// ---- видео: пауза MJPEG-потока, когда он не виден (главный тормоз
+// телефонов — декодирование 15 fps JPEG в фоне) --------------------
+var FEED_URL = '/video_feed';
+var FEED_OFF = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>Video paused</text></svg>";
+function updateVideoFeed() {
+  var img = document.getElementById('camera-feed');
+  if (!img) return;
+  var controlTab = document.getElementById('content-control');
+  var visible = controlTab && controlTab.classList.contains('active') && !document.hidden;
+  var want = visible ? FEED_URL : FEED_OFF;
+  if (img.dataset.feedState !== want) {
+    img.dataset.feedState = want;
+    img.src = want;
+  }
+}
+document.addEventListener('visibilitychange', updateVideoFeed);
 
 function toggleHwSection(cardId, tagId, available) {
   var tagEl = document.getElementById(tagId);
@@ -225,7 +254,11 @@ function startPolling() {
 function fetchConsoleHistory() {
   fetch('/api/logs', { headers: (function(){ var h = {}; var t = getToken(); if (t) h['X-Auth-Token'] = t; return h; })() })
     .then(function(r) { return r.json(); }).then(function(d) {
-    if (d.lines) d.lines.forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+    if (d.lines) {
+      // только последние 250 строк — на телефоне 800 DOM-узлов тормозят
+      d.lines.slice(-CONSOLE_HISTORY_LINES)
+        .forEach(function(item) { appendConsoleLine(item[1], item[0]); });
+    }
   }).catch(function() {});
 }
 
@@ -260,7 +293,7 @@ function updateStatus(d) {
     applyServoLimits(d.servo_limits);
   }
   // синхронизация углов с сервера (когда поле не в фокусе)
-  if (d.servo_angles && Array.isArray(d.servo_angles) && !servoLimitsEditMode) {
+  if (d.servo_angles && Array.isArray(d.servo_angles)) {
     d.servo_angles.forEach(function(ang, sid) {
       var inp = document.querySelector('input.servo-angle-input[data-servo="' + sid + '"]');
       if (inp && document.activeElement !== inp) {
@@ -444,7 +477,7 @@ function updateCraneGripUI() {
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
   highBtn.classList.remove('active');
-  var angleMap = { low: 0, mid: 135, high: 190 };
+  var angleMap = { low: 100, mid: 135, high: 180 };
   var labelMap = { low: 'Low', mid: 'Mid', high: 'High' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
@@ -455,11 +488,9 @@ function updateCraneGripUI() {
 }
 
 // ===================== Servo Control (степперы ±1°) =====================
-// Слайдеры заменены на степперы: точная настройка по 1 градусу с удержанием
-// (автоповтор) и прямым вводом угла. Лимиты ЗАБЛОКИРОВАНЫ по умолчанию —
-// редактируются только после нажатия «Edit Limits» и сохраняются строго
-// по кнопке «Save Limits» (двойная защита: клиент + сервер).
-var servoLimitsEditMode = false;
+// Степперы: точная настройка по 1 градусу с удержанием (автоповтор)
+// и прямым вводом угла. Лимиты — только из config.py (SERVO_LIMITS),
+// редактирование из UI удалено v1.3.0.
 
 function servoDefById(id) {
   for (var i = 0; i < servoDefs.length; i++) {
@@ -500,11 +531,7 @@ function buildServoGrid() {
       '<input type="number" class="servo-angle-input" data-servo="' + s.id + '" min="' + s.min + '" max="' + s.max + '" value="' + s.cur + '">' +
       '<button type="button" class="servo-step-btn" data-servo-inc="' + s.id + '" title="+1\u00B0 (удерживайте для автоповтора)">+</button>' +
       '</div>' +
-      '<div class="servo-limits-row"><span class="servo-limit-label">min</span>' +
-      '<input type="number" class="servo-limit-input" min="0" max="190" value="' + s.min + '" data-servo-min="' + s.id + '" disabled>' +
-      '<span class="servo-limit-label">max</span>' +
-      '<input type="number" class="servo-limit-input" min="0" max="190" value="' + s.max + '" data-servo-max="' + s.id + '" disabled>' +
-      '</div>';
+      '<div class="servo-limits-row"><span class="servo-limit-label">' + s.min + '\u2013' + s.max + '\u00B0 (config.py)</span></div>';
     grid.appendChild(item);
   });
 
@@ -544,70 +571,6 @@ function buildServoGrid() {
   });
 }
 
-// --- режим редактирования лимитов ------------------------------------------
-function setServoLimitsEditMode(on) {
-  servoLimitsEditMode = on;
-  document.querySelectorAll('.servo-limit-input').forEach(function(inp) {
-    inp.disabled = !on;
-  });
-  // на время редактирования движение серво заблокировано (защита от путаницы)
-  document.querySelectorAll('input.servo-angle-input').forEach(function(inp) {
-    inp.readOnly = on;
-  });
-  document.querySelectorAll('.servo-step-btn').forEach(function(btn) {
-    btn.disabled = on;
-  });
-  var editBtn = document.getElementById('servo-edit-limits');
-  var saveBtn = document.getElementById('servo-save-limits');
-  var cancelBtn = document.getElementById('servo-cancel-limits');
-  var note = document.getElementById('servo-limits-note');
-  if (editBtn) editBtn.style.display = on ? 'none' : '';
-  if (saveBtn) saveBtn.style.display = on ? '' : 'none';
-  if (cancelBtn) cancelBtn.style.display = on ? '' : 'none';
-  if (note) {
-    note.textContent = on
-      ? 'РЕЖИМ РЕДАКТИРОВАНИЯ: задайте min/max и нажмите «Save Limits». '
-        + 'Изменения запомнятся на сервере только после сохранения.'
-      : 'Лимиты заблокированы — случайно изменить их нельзя. '
-        + 'Для настройки нажмите кнопку «Edit Limits».';
-    note.classList.toggle('unlocked', on);
-  }
-}
-
-function saveServoLimits() {
-  document.querySelectorAll('input.servo-limit-input').forEach(function(inp) {
-    var sidAttr = inp.getAttribute('data-servo-min');
-    var isMin = sidAttr !== null;
-    var sid = parseInt(isMin ? sidAttr : inp.getAttribute('data-servo-max'), 10);
-    var minInp = document.querySelector('input[data-servo-min="' + sid + '"]');
-    var maxInp = document.querySelector('input[data-servo-max="' + sid + '"]');
-    if (!minInp || !maxInp) return;
-    var mn = parseInt(minInp.value, 10), mx = parseInt(maxInp.value, 10);
-    if (isNaN(mn) || isNaN(mx)) return;
-    if (mn > mx) { var t = mn; mn = mx; mx = t; }
-    mn = Math.max(0, Math.min(190, mn));
-    mx = Math.max(0, Math.min(190, mx));
-    sendCommand('servo_set_limits', { id: sid, min: mn, max: mx });
-    // локальное применение (сервер подтвердит через servo_get_limits)
-    var def = servoDefById(sid);
-    if (def) { def.min = mn; def.max = mx; }
-  });
-  setTimeout(function() { sendCommand('servo_get_limits', {}); }, 400);
-  setServoLimitsEditMode(false);
-  toast('Лимиты сохранены на сервере');
-}
-
-function cancelServoLimits() {
-  // возвращаем значения из servoDefs (последние подтверждённые сервером)
-  servoDefs.forEach(function(s) {
-    var minInp = document.querySelector('input[data-servo-min="' + s.id + '"]');
-    var maxInp = document.querySelector('input[data-servo-max="' + s.id + '"]');
-    if (minInp) minInp.value = s.min;
-    if (maxInp) maxInp.value = s.max;
-  });
-  setServoLimitsEditMode(false);
-}
-
 function applyServoLimits(limits) {
   for (var sid in limits) {
     var lim = limits[sid];
@@ -627,13 +590,6 @@ function applyServoLimits(limits) {
     }
     var val = document.querySelector('label .val[data-servo-val="' + sid + '"]');
     if (val) val.textContent = def.cur + '\u00B0';
-    // лимит-инпуты обновляем ТОЛЬКО когда они не в редактировании
-    if (!servoLimitsEditMode) {
-      var minInp = document.querySelector('input[data-servo-min="' + sid + '"]');
-      var maxInp = document.querySelector('input[data-servo-max="' + sid + '"]');
-      if (minInp) minInp.value = lim.min;
-      if (maxInp) maxInp.value = lim.max;
-    }
   }
 }
 
@@ -642,9 +598,15 @@ var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
 var joystickDragging = false;
 
+var joystickRectCache = null;
 function getJoystickCenter() {
-  var rect = joystickContainer.getBoundingClientRect();
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 24 };
+  // rect кэшируется на время драга: getBoundingClientRect на каждый
+  // touchmove — принудительный reflow до 120 раз/с (тормоза на телефоне)
+  if (!joystickRectCache) {
+    var rect = joystickContainer.getBoundingClientRect();
+    joystickRectCache = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 24 };
+  }
+  return joystickRectCache;
 }
 
 function getDirection(dx, dy) {
@@ -701,12 +663,14 @@ if (joystickContainer) {
   joystickContainer.addEventListener('mousedown', function(e) {
     e.preventDefault();
     joystickDragging = true;
+    joystickRectCache = null;
     joystickKnob.classList.remove('spring-back');
     updateJoystick(e.clientX, e.clientY);
   });
   joystickContainer.addEventListener('touchstart', function(e) {
     e.preventDefault();
     joystickDragging = true;
+    joystickRectCache = null;
     joystickKnob.classList.remove('spring-back');
     var t = e.touches[0];
     updateJoystick(t.clientX, t.clientY);
@@ -731,10 +695,22 @@ var camJoystickLabel = document.getElementById('cam-joystick-label');
 var camJoystickDragging = false;
 var camPan = 90, camTilt = 90;
 
+var camJoystickRectCache = null;
 function getCamJoystickCenter() {
-  var rect = camJoystickContainer.getBoundingClientRect();
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 21 };
+  if (!camJoystickRectCache) {
+    var rect = camJoystickContainer.getBoundingClientRect();
+    camJoystickRectCache = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 - 21 };
+  }
+  return camJoystickRectCache;
 }
+
+function camClamp(id, v) {
+  var def = servoDefById(id);
+  var lo = def ? def.min : 0, hi = def ? def.max : 180;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+var camLastSent = { pan: 0, tilt: 0 };
 
 function updateCamJoystick(clientX, clientY) {
   var center = getCamJoystickCenter();
@@ -746,15 +722,20 @@ function updateCamJoystick(clientX, clientY) {
   camJoystickKnob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
   var panDelta = Math.round(dx / maxR * 30);
   var tiltDelta = Math.round(dy / maxR * 30);
-  var newPan = Math.max(0, Math.min(180, 90 + panDelta));
-  var newTilt = Math.max(0, Math.min(180, 90 + tiltDelta));
-  if (newPan !== camPan) {
+  var newPan = camClamp(1, 90 + panDelta);
+  var newTilt = camClamp(2, 90 + tiltDelta);
+  // троттлинг: touchmove на телефоне стреляет до 120 раз/с — спам
+  // командами серво давал дрожание камеры и нагрев (не чаще 25 Гц)
+  var now = Date.now();
+  if (newPan !== camPan && now - camLastSent.pan > 40) {
     sendCommand('servo', { id: 1, angle: newPan });
     camPan = newPan;
+    camLastSent.pan = now;
   }
-  if (newTilt !== camTilt) {
+  if (newTilt !== camTilt && now - camLastSent.tilt > 40) {
     sendCommand('servo', { id: 2, angle: newTilt });
     camTilt = newTilt;
+    camLastSent.tilt = now;
   }
   if (camJoystickLabel) {
     if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
@@ -776,12 +757,14 @@ if (camJoystickContainer) {
   camJoystickContainer.addEventListener('mousedown', function(e) {
     e.preventDefault();
     camJoystickDragging = true;
+    camJoystickRectCache = null;
     camJoystickKnob.classList.remove('spring-back');
     updateCamJoystick(e.clientX, e.clientY);
   });
   camJoystickContainer.addEventListener('touchstart', function(e) {
     e.preventDefault();
     camJoystickDragging = true;
+    camJoystickRectCache = null;
     camJoystickKnob.classList.remove('spring-back');
     var t = e.touches[0];
     updateCamJoystick(t.clientX, t.clientY);
@@ -903,15 +886,6 @@ document.getElementById('servo-home').addEventListener('click', function() {
   craneGripPosition = 'high';
   updateCraneArmUI();
   updateCraneGripUI();
-});
-document.getElementById('servo-edit-limits').addEventListener('click', function() {
-  setServoLimitsEditMode(true);
-});
-document.getElementById('servo-save-limits').addEventListener('click', function() {
-  saveServoLimits();
-});
-document.getElementById('servo-cancel-limits').addEventListener('click', function() {
-  cancelServoLimits();
 });
 
 document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
@@ -1154,25 +1128,36 @@ function getLogLevel(text) {
   return 'info';
 }
 
+var MAX_CONSOLE_LINES = 300;
+var CONSOLE_HISTORY_LINES = 250;
+
 function appendConsoleLine(text, ts) {
   var output = document.getElementById('console-output');
   if (!output) return;
   var level = getLogLevel(text);
   logCounts[level] = (logCounts[level] || 0) + 1;
-  updateLogCounters();
-  var line = document.createElement('div');
-  line.className = 'log-line log-' + level;
-  line.dataset.level = level;
-  if (ts) {
-    var d = new Date(ts * 1000);
-    text = d.toLocaleTimeString() + ' ' + text;
+  // пока вкладка Console не активна — только счётчики: DOM консоли
+  // на телефоне не растёт из-за фоновых логов прошивки
+  var consoleTab = document.getElementById('content-console');
+  if (consoleTab && consoleTab.classList.contains('active')) {
+    var line = document.createElement('div');
+    line.className = 'log-line log-' + level;
+    line.dataset.level = level;
+    if (ts) {
+      var d = new Date(ts * 1000);
+      text = d.toLocaleTimeString() + ' ' + text;
+    }
+    line.textContent = text;
+    line.style.display = logFilters[level] ? '' : 'none';
+    output.appendChild(line);
+    while (output.children.length > MAX_CONSOLE_LINES) {
+      output.removeChild(output.firstChild);
+    }
+    if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
+    var countEl = document.getElementById('console-line-count');
+    if (countEl) countEl.textContent = output.children.length + ' lines';
   }
-  line.textContent = text;
-  line.style.display = logFilters[level] ? '' : 'none';
-  output.appendChild(line);
-  if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
-  var countEl = document.getElementById('console-line-count');
-  if (countEl) countEl.textContent = output.children.length + ' lines';
+  updateLogCounters();
 }
 
 function updateLogCounters() {
@@ -1234,116 +1219,7 @@ document.getElementById('console-clear-btn').addEventListener('click', function(
   sendCommand('clear_log', {});
 });
 
-async function loadDocs() {
-  if (docsData) { populateComponentNav(); showDocPage('overview'); return; }
-  try {
-    var [idx, pinout] = await Promise.all([
-      fetch('/docs/index.json').then(function(r) { return r.json(); }),
-      fetch('/docs/pinout.json').then(function(r) { return r.json(); }),
-    ]);
-    docsData = { index: idx, pinout: pinout, components: {} };
-    var comps = (idx.components || []).concat(idx.additional_hardware || []);
-    await Promise.all(comps.map(async function(c) {
-      try {
-        docsData.components[c.id] = await fetch('/docs/components/' + c.id + '.json').then(function(r) { return r.json(); });
-      } catch (e) {}
-    }));
-    populateComponentNav();
-    showDocPage('overview');
-  } catch (e) {
-    var main = document.getElementById('info-main');
-    if (main) main.innerHTML = '<div class="info-loading">Failed to load docs.</div>';
-  }
-}
-
-function populateComponentNav() {
-  var nav = document.getElementById('info-component-nav');
-  if (!nav || !docsData) return;
-  nav.innerHTML = '';
-  var allComps = (docsData.index.components || []).concat(docsData.index.additional_hardware || []);
-  allComps.forEach(function(c) {
-    var btn = document.createElement('button');
-    btn.className = 'info-comp-btn';
-    btn.dataset.doc = c.id;
-    btn.textContent = c.name;
-    btn.addEventListener('click', function() {
-      document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      showDocPage(c.id);
-    });
-    nav.appendChild(btn);
-  });
-}
-
-document.querySelectorAll('.info-nav-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.info-nav-btn, .info-comp-btn').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    showDocPage(btn.dataset.doc);
-  });
-});
-
-function showDocPage(page) {
-  var main = document.getElementById('info-main');
-  if (!main) return;
-  if (page === 'overview' && docsData) {
-    var idx = docsData.index;
-    var html = '<h2 class="info-title">' + (idx.title || 'PiCar Pro') + '</h2>';
-    if (idx.description) html += '<p class="info-subtitle">' + idx.description + '</p>';
-    if (idx.features) {
-      html += '<div class="info-section"><h3 class="info-section-title">Features</h3><ul class="tips-list">';
-      idx.features.forEach(function(f) { html += '<li>' + f + '</li>'; });
-      html += '</ul></div>';
-    }
-    main.innerHTML = html;
-    return;
-  }
-  if (page === 'pinout' && docsData && docsData.pinout) {
-    var p = docsData.pinout;
-    var html = '<h2 class="info-title">' + (p.title || 'Pinout') + '</h2>';
-    html += '<img src="/rpi_pinout.png" style="max-width:100%;border-radius:8px;margin-bottom:12px">';
-    if (p.pins) {
-      html += '<div class="info-section"><h3 class="info-section-title">Pin Assignments</h3>';
-      html += '<table class="pin-table"><thead><tr><th>GPIO</th><th>Name</th><th>Module</th><th>Notes</th></tr></thead><tbody>';
-      p.pins.filter(function(pin) { return pin.gpio !== null; }).forEach(function(pin) {
-        html += '<tr><td>GPIO' + pin.gpio + '</td><td>' + (pin.name || pin.function || '') + '</td><td>' + (pin.module || '') + '</td><td>' + (pin.notes || '') + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
-    }
-    main.innerHTML = html;
-    return;
-  }
-  if (docsData && docsData.components[page]) {
-    var comp = docsData.components[page];
-    var d = comp.data;
-    var html = '<h2 class="info-title">' + comp.name + '</h2>';
-    if (d.description) html += '<p class="info-subtitle">' + d.description + '</p>';
-    if (d.specs) {
-      html += '<div class="info-section"><h3 class="info-section-title">Specifications</h3><div class="specs-grid">';
-      d.specs.forEach(function(s) {
-        html += '<div class="spec-item"><span class="spec-key">' + s.key + '</span><span class="spec-val">' + s.value + '</span></div>';
-      });
-      html += '</div></div>';
-    }
-    if (d.pins) {
-      html += '<div class="info-section"><h3 class="info-section-title">Pin Connections</h3><div class="comp-pins-list">';
-      d.pins.forEach(function(p) {
-        html += '<div class="comp-pin"><div class="comp-pin-name">' + p.name + '</div><div class="comp-pin-conn">' + (p.connection || '') + '</div><div class="comp-pin-func">' + (p.function || '') + '</div></div>';
-      });
-      html += '</div></div>';
-    }
-    if (d.tips) {
-      html += '<div class="info-section"><h3 class="info-section-title">Tips</h3><ul class="tips-list">';
-      d.tips.forEach(function(t) { html += '<li>' + t + '</li>'; });
-      html += '</ul></div>';
-    }
-    if (d.i2c_address !== undefined) {
-      html += '<div class="info-section"><h3 class="info-section-title">I2C Info</h3><div class="i2c-device-grid"><div class="i2c-device"><div class="i2c-device-addr">0x' + d.i2c_address.toString(16).toUpperCase() + '</div><div class="i2c-device-name">' + comp.name + '</div></div></div></div>';
-    }
-    main.innerHTML = html;
-  }
-}
-
 buildServoGrid();
 wsConnect();
 fetchConsoleHistory();
+updateVideoFeed();

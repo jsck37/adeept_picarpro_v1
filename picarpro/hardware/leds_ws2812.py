@@ -11,6 +11,7 @@ except ImportError:
 
 _BIT0 = 0b1100
 _BIT1 = 0b1110
+_LATCH_BYTES = 90   # >= 50 мкс тишины на шине для защёлки кадра (было 60)
 
 
 def _byte_to_spi(byte):
@@ -34,10 +35,9 @@ class LEDController:
             logger.warning('[LEDs] spidev not available')
             return
         try:
-            self._spi = spidev.SpiDev()
-            self._spi.open(0, 0)
-            self._spi.max_speed_hz = 6_400_000
-            self._spi.mode = 0b00
+            if not self._open_spi():
+                logger.error('[LEDs] SPI0 open failed')
+                return
             self._initialized = True
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
@@ -45,20 +45,43 @@ class LEDController:
         except Exception as e:
             logger.error(f'[LEDs] init failed: {e}')
 
+    def _open_spi(self):
+        """Открыть SPI (с закрытием предыдущего дескриптора при retry)."""
+        try:
+            if self._spi:
+                try:
+                    self._spi.close()
+                except Exception:
+                    pass
+            self._spi = spidev.SpiDev()
+            self._spi.open(0, 0)
+            self._spi.max_speed_hz = 6_400_000
+            self._spi.mode = 0b00
+            return True
+        except Exception:
+            self._spi = None
+            return False
+
     def _show(self):
         if not self._initialized:
             return
+        data = bytearray()
+        b = LED_BRIGHTNESS / 255.0
+        for r, g, bl in self._pixels:
+            data.extend(_byte_to_spi(int(g * b)))
+            data.extend(_byte_to_spi(int(r * b)))
+            data.extend(_byte_to_spi(int(bl * b)))
+        data.extend(b'\x00' * _LATCH_BYTES)
         try:
-            data = bytearray()
-            b = LED_BRIGHTNESS / 255.0
-            for r, g, bl in self._pixels:
-                data.extend(_byte_to_spi(int(g * b)))
-                data.extend(_byte_to_spi(int(r * b)))
-                data.extend(_byte_to_spi(int(bl * b)))
-            data.extend(b'\x00' * 60)
             self._spi.writebytes(data)
         except Exception:
-            pass
+            # сбой SPI (глитч питания/драйвера): переоткрываем устройство
+            # и повторяем один раз — иначе лента гаснет навсегда
+            if self._open_spi():
+                try:
+                    self._spi.writebytes(data)
+                except Exception:
+                    pass
 
     def fill(self, r, g, b):
         self._pixels = [(r, g, b)] * LED_COUNT

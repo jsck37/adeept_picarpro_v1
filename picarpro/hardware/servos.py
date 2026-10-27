@@ -1,11 +1,10 @@
-import json, os, threading, time
+import threading, time
 from picarpro.logger import logger
 from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
     SERVO_INIT_ANGLES, SERVO_LIMITS,
     CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
-    SERVO_CAL_FILE,
 )
 
 try:
@@ -16,25 +15,9 @@ try:
 except ImportError:
     _HAS_PCA = False
 
-# путь калибровки задаётся в config.py (SERVO_CAL_FILE)
-
-
-def _load_cal():
-    try:
-        if os.path.isfile(SERVO_CAL_FILE):
-            with open(SERVO_CAL_FILE) as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-
-def _save_cal(data):
-    try:
-        with open(SERVO_CAL_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
+# Лимиты серво задаются ТОЛЬКО в config.py (SERVO_LIMITS) — v1.3.0.
+# Файл калибровки servo_cal.json упразднён: редактирование лимитов
+# из веб-интерфейса удалено, чтобы их нельзя было случайно изменить.
 
 
 class ServoController:
@@ -47,12 +30,6 @@ class ServoController:
         self._pwm_initialized = False
         self._limits = {i: dict(SERVO_LIMITS.get(i, {"min": 0, "max": 180}))
                         for i in range(SERVO_COUNT)}
-        cal = _load_cal()
-        for k, v in (cal.get('limits') or {}).items():
-            i = int(k)
-            if 0 <= i < SERVO_COUNT:
-                self._limits[i] = {'min': int(v.get('min', 0)),
-                                   'max': int(v.get('max', 180))}
         if not _HAS_PCA:
             logger.warning('[Servos] adafruit_pca9685 not available')
             return
@@ -97,6 +74,11 @@ class ServoController:
                 or sid >= SERVO_COUNT or self._servos[sid] is None):
             return False
         angle = self._clamp(sid, angle)
+        # Анти-джиттер (v1.3.0): повторная команда на тот же угол (в т.ч.
+        # keepalive-повторы джойстика каждые 150 мс) не пишет PWM в
+        # PCA9685 — лишние перезаписи регистров дают дрожание и нагрев.
+        if abs(self._angles[sid] - angle) < 0.5:
+            return True
         with self._lock:
             try:
                 self._servos[sid].angle = angle
@@ -136,18 +118,10 @@ class ServoController:
         return self._angles[sid] if 0 <= sid < SERVO_COUNT else 0
 
     def get_limits(self, sid=None):
+        """Лимиты из config.py (только чтение; редактирования больше нет)."""
         if sid is not None:
             return self._limits.get(sid, {'min': 0, 'max': 180})
         return dict(self._limits)
-
-    def set_limits(self, sid, min_angle, max_angle):
-        if 0 <= sid < SERVO_COUNT:
-            self._limits[sid] = {'min': int(min_angle), 'max': int(max_angle)}
-            cal = _load_cal()
-            cal['limits'] = {str(k): v for k, v in self._limits.items()}
-            _save_cal(cal)
-            return True
-        return False
 
     def stop_all(self):
         pass

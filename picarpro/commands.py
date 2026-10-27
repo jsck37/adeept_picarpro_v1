@@ -78,17 +78,8 @@ def process(state, data):
             r = {'ok': True}
 
     elif cmd == 'servo_get_limits':
+        # только чтение: лимиты заданы в config.py (SERVO_LIMITS)
         r = {'ok': True, 'limits': state.servos.get_limits() if state.servos else {}}
-
-    elif cmd == 'servo_set_limits':
-        sid = safe_int(p.get('id', 0), 0, 0, SERVO_COUNT - 1)
-        mn = safe_int(p.get('min', 0), 0, 0, 190)
-        mx = safe_int(p.get('max', 180), 180, 0, 190)
-        if mn > mx:
-            mn, mx = mx, mn
-        if state.servos:
-            ok = state.servos.set_limits(sid, mn, mx)
-            r = {'ok': ok, 'id': sid, 'min': mn, 'max': mx}
 
     elif cmd == 'led':
         mode = str(p.get('mode', 'off'))

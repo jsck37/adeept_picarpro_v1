@@ -63,6 +63,7 @@ class ArucoNavigator:
         self._active = False
         self._thread = None
         self._lock = threading.Lock()
+        self._demand_held = False   # v1.2.0: держим камеру в боевом ритме
         # публичный статус
         self.waypoint_index = 0
         self.finished = False
@@ -70,6 +71,22 @@ class ArucoNavigator:
         self.last_marker_area = 0
         self.last_command = 'STOP'
         self.last_seen_ts = 0.0
+
+    def _demand_open(self):
+        if not self._demand_held and self.camera is not None:
+            try:
+                self.camera.raw_demand_open()
+                self._demand_held = True
+            except Exception:
+                pass
+
+    def _demand_close(self):
+        if self._demand_held and self.camera is not None:
+            try:
+                self.camera.raw_demand_close()
+            except Exception:
+                pass
+            self._demand_held = False
 
     @property
     def active(self):
@@ -102,6 +119,7 @@ class ArucoNavigator:
         self.waypoint_index = 0
         self._running = True
         self._active = True
+        self._demand_open()   # v1.2.0: сырые кадры нужны в полном темпе
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         logger.info(f'[ArUco] nav started, waypoints={ARUCO_WAYPOINTS}')
@@ -110,6 +128,7 @@ class ArucoNavigator:
     def stop(self):
         self._active = False
         self._running = False
+        self._demand_close()
         try:
             if self.state.motors:
                 self.state.motors.stop()
@@ -184,6 +203,7 @@ class ArucoNavigator:
         finally:
             self._drive('STOP')
             self._active = False
+            self._demand_close()   # миссия прервана — спрос больше не нужен
 
     def _detect_marker_x(self, frame_rgb, target_id):
         """Вернуть X центра целевого маркера (px) или None."""
@@ -234,6 +254,7 @@ class ArucoNavigator:
         self.finished = True
         self._active = False
         self._drive('STOP')
+        self._demand_close()   # миссия завершена — камере можно idle (v1.2.0)
         if PICK_BLUE_ON_FINISH and self.state.servos:
             # порт PICK_BLUE из Demo.py: по завершении миссии — схват
             try:

@@ -9,7 +9,8 @@ import subprocess
 import threading
 import time
 
-from config import VOLTAGE_CHECK_SOURCE, LOW_VOLTAGE_THRESHOLD_V
+from config import (VOLTAGE_CHECK_SOURCE, LOW_VOLTAGE_THRESHOLD_V,
+                    VOLTAGE_CHECK_INTERVAL_S)
 
 
 def _read_cpu_temp():
@@ -167,7 +168,9 @@ class SystemInfo:
                     with SystemInfo._voltage_lock:
                         SystemInfo._voltage_state = True
                         SystemInfo._voltage_last_event = time.monotonic()
-                time.sleep(2.0)
+                # v1.2.0: период из config (3 c вместо 2 c) — каждый вызов
+                # vcgencmd это fork+exec, на Pi 3B+ это ощутимо
+                time.sleep(max(1.0, VOLTAGE_CHECK_INTERVAL_S))
 
         def _watch_auto():
             # 'auto': сначала одноразовый dmesg-скан, затем vcgencmd-поллинг

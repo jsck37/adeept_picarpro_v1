@@ -77,14 +77,18 @@ class TestServo:
         assert r['ok'] is True
         assert state.servos.get_angle(1) == 90
 
-    def test_limits_roundtrip(self, state):
-        call(state, 'servo_set_limits', {'id': 3, 'min': 20, 'max': 100})
+    def test_limits_readonly_from_config(self, state):
+        """v1.3.0: лимиты только из config.py, редактирование удалено."""
+        from config import SERVO_LIMITS
         r = call(state, 'servo_get_limits')
-        assert r['limits'][3] == {'min': 20, 'max': 100}
+        assert r['ok'] is True
+        assert r['limits'] == {
+            int(k): dict(v) for k, v in SERVO_LIMITS.items()}
 
-    def test_limits_swapped(self, state):
-        r = call(state, 'servo_set_limits', {'id': 3, 'min': 100, 'max': 20})
-        assert r['min'] == 20 and r['max'] == 100
+    def test_servo_set_limits_removed(self, state):
+        r = call(state, 'servo_set_limits', {'id': 3, 'min': 20, 'max': 100})
+        assert r['ok'] is False
+        assert 'Unknown command' in r.get('error', '')
 
 
 class TestLedBuzzer:
@@ -117,16 +121,19 @@ class TestCrane:
         assert r['closed'] is False
 
     def test_grip_positions(self, state):
-        for act, angle in (('grip_low', 0), ('grip_mid', 135),
-                           ('grip_high', 190)):
+        # v1.3.0: grip 100..180 (углы в механический стоп больше не проходят)
+        for act, angle in (('grip_low', 100), ('grip_mid', 135),
+                           ('grip_high', 180)):
             r = call(state, 'crane', {'action': act})
             assert r['ok'] is True
+            assert state.servos.get_angle(5) == angle
         assert state.crane_grip_position == 'high'
 
     def test_grip_custom_angle(self, state):
         r = call(state, 'crane', {'action': 'grip_angle', 'angle': 60})
         assert r['ok'] is True
-        assert state.servos.get_angle(5) == 60
+        # 60 ниже лимита серво 5 (min 100) — зажимается в 100
+        assert state.servos.get_angle(5) == 100
 
 
 class TestSwitchesHeadlightBlinker:

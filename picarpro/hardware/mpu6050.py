@@ -31,6 +31,10 @@ INIT_RETRY_DELAY = 0.15   # пауза между попытками (чипу �
 
 ACCEL_SCALE = 16384.0
 GYRO_SCALE = 131.0
+# Известные значения WHO_AM_I (0x68 — оригинал MPU6050; остальные — MPU9x5).
+# КЛОНЫ MPU6050 часто возвращают другие значения (0x98, 0x78, 0x39...),
+# поэтому v1.3.0: чип принимается по ACK + успешной инициализации,
+# а WHO_AM_I пишется в лог только информативно.
 WHO_AM_I_VALUES = (0x68, 0x70, 0x71, 0x72)
 POSSIBLE_ADDRS = (0x68, 0x69)
 
@@ -65,6 +69,8 @@ def i2c_scan():
 
 
 def find_mpu6050_on_bus():
+    """Поиск MPU6050: сначала стандартные адреса (любой WHO_AM_I — клоны),
+    затем полный скан по известным значениям WHO_AM_I."""
     bus = _get_smbus()
     if not bus:
         return None, None
@@ -72,8 +78,7 @@ def find_mpu6050_on_bus():
         for addr in POSSIBLE_ADDRS:
             try:
                 who = bus.read_byte_data(addr, REG_WHO_AM_I)
-                if who in WHO_AM_I_VALUES:
-                    return addr, who
+                return addr, who          # ACK на стандартном адресе — принимаем
             except Exception:
                 continue
         for addr in i2c_scan():
@@ -146,19 +151,24 @@ class MPU6050Controller:
         if not bus:
             return False
         try:
-            # WHO_AM_I может не ответить сразу после подачи питания — повторяем
+            # v1.3.0: чип определяется по ACK, а не по значению WHO_AM_I —
+            # клоны MPU6050 возвращают нестандартные ID (0x98, 0x78...) и
+            # раньше навсегда отбрасывались («not found — will retry»).
+            # WHO_AM_I читаем для лога; если шина вообще не отвечает —
+            # устройства нет по этому адресу.
             who = None
             for attempt in range(INIT_ATTEMPTS):
                 try:
                     who = bus.read_byte_data(addr, REG_WHO_AM_I)
-                    if who in WHO_AM_I_VALUES:
-                        break
+                    break
                 except Exception:
                     pass
                 time.sleep(INIT_RETRY_DELAY)
-            if who not in WHO_AM_I_VALUES:
+            if who is None:
                 bus.close()
                 return False
+            who_note = '' if who in WHO_AM_I_VALUES else \
+                f' (нестандартный ID — вероятно клон, принимаем)'
 
             # --- корректная последовательность запуска (datasheet InvenSense) ---
             # 1. DEVICE_RESET: чип по умолчанию просыпается в SLEEP (бит 0x40
@@ -186,9 +196,15 @@ class MPU6050Controller:
             bus.write_byte_data(addr, REG_CONFIG, 0x03)       # DLPF ~44 Гц
             bus.write_byte_data(addr, REG_GYRO_CONFIG, 0x00)  # ±250 °/с
             bus.write_byte_data(addr, REG_ACCEL_CONFIG, 0x00) # ±2g
-            # 5. Пробное чтение — убеждаемся, что шина отвечает данными.
+            # 5. Пробное чтение — убеждаемся, что шина отвечает ДАННЫМИ:
+            #    устройство, только ACKающее шину (не MPU), вернёт нули/FF.
             raw = bus.read_i2c_block_data(addr, REG_ACCEL_XOUT_H, 14)
             if raw is None or len(raw) != 14:
+                bus.close()
+                return False
+            if all(b == 0x00 for b in raw) or all(b == 0xFF for b in raw):
+                logger.info(f'[MPU6050] @0x{addr:02X}: шина отвечает, '
+                            f'но данные пустые ({raw[0]:02X}...) — не MPU')
                 bus.close()
                 return False
 
@@ -202,7 +218,8 @@ class MPU6050Controller:
             self._thread = threading.Thread(
                 target=self._read_loop, args=(self._gen,), daemon=True)
             self._thread.start()
-            logger.info(f'[MPU6050] OK at 0x{addr:02X} (WHO_AM_I=0x{who:02X})')
+            logger.info(f'[MPU6050] OK at 0x{addr:02X} '
+                        f'(WHO_AM_I=0x{who:02X}){who_note}')
             return True
         except Exception as e:
             logger.info(f'[MPU6050] @0x{addr:02X} init failed: {e}')

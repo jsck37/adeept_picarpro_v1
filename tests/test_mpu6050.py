@@ -7,8 +7,9 @@ import pytest
 @pytest.fixture
 def mpu(fake_i2c_devices):
     from picarpro.hardware.mpu6050 import MPU6050Controller
-    # регистрируем устройство MPU6050 на шине
-    fake_i2c_devices[0x68] = {0x75: 0x68}
+    # регистрируем устройство MPU6050 на шине (temp_raw=68 — «живой» сенсор,
+    # не пустая шина; нейтральное значение — не ломает wait-условия тестов)
+    fake_i2c_devices[0x68] = {0x75: 0x68, 0x42: 68}
     c = MPU6050Controller()
     yield c
     c.shutdown()
@@ -32,6 +33,28 @@ class TestScan:
         addr, who = find_mpu6050_on_bus()
         assert addr == 0x69
         assert who == 0x71
+
+    def test_clone_whoami_accepted(self, fake_i2c_devices):
+        """v1.3.0: клоны с нестандартным WHO_AM_I (0x98 и т.п.) принимаются
+        по ACK + живым данным — раньше «not found» навсегда."""
+        fake_i2c_devices[0x68] = {0x75: 0x98, 0x42: 68}
+        from picarpro.hardware.mpu6050 import MPU6050Controller
+        c = MPU6050Controller()
+        try:
+            assert c.initialized is True
+            assert c._addr == 0x68
+        finally:
+            c.shutdown()
+
+    def test_empty_data_rejected(self, fake_i2c_devices):
+        """Устройство ACKает шину, но данные пустые (все нули) — не MPU."""
+        fake_i2c_devices[0x68] = {0x75: 0x68}
+        from picarpro.hardware.mpu6050 import MPU6050Controller
+        c = MPU6050Controller()
+        try:
+            assert c.initialized is False
+        finally:
+            c.shutdown()
 
 
 class TestController:

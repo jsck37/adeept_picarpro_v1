@@ -40,7 +40,6 @@
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
     <button class="tab-btn" data-tab="console">Console</button>
-    <button class="tab-btn" data-tab="info">Info</button>
   </nav>
 </header>
 
@@ -176,24 +175,6 @@
                 </div>
               </div>
               <div class="ds4-col">
-                <div style="display:flex;justify-content:center;margin-bottom:6px">
-                  <svg viewBox="0 0 240 130" style="max-width:200px;width:100%" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M60 20 Q40 20 30 50 L20 100 Q20 115 35 115 L70 110 Q80 105 90 95 L150 95 Q160 105 170 110 L205 115 Q220 115 220 100 L210 50 Q200 20 180 20 Z" fill="#f1f3f4" stroke="#5f6368" stroke-width="1.5"/>
-                    <circle cx="75" cy="55" r="8" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <circle cx="165" cy="55" r="8" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <circle cx="75" cy="78" r="6" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <circle cx="165" cy="78" r="6" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <rect x="110" y="38" width="20" height="6" rx="3" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <rect x="108" y="55" width="8" height="8" rx="2" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <rect x="124" y="55" width="8" height="8" rx="2" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <rect x="112" y="70" width="16" height="5" rx="2" fill="#dadce0" stroke="#5f6368" stroke-width="1"/>
-                    <text x="45" y="48" font-size="7" fill="#1a73e8" font-weight="bold" text-anchor="middle">L2</text>
-                    <text x="195" y="48" font-size="7" fill="#1a73e8" font-weight="bold" text-anchor="middle">R2</text>
-                    <text x="45" y="73" font-size="7" fill="#1a73e8" font-weight="bold" text-anchor="middle">L1</text>
-                    <text x="195" y="73" font-size="7" fill="#1a73e8" font-weight="bold" text-anchor="middle">R1</text>
-                    <text x="120" y="33" font-size="6" fill="#5f6368" text-anchor="middle">SHARE  OPTIONS</text>
-                  </svg>
-                </div>
                 <div style="font-size:.68rem;color:#5f6368;line-height:1.6">
                   <div><b>L-stick</b> Drive &nbsp; <b>R-stick</b> Camera</div>
                   <div><b>L2/R2</b> Turbo &nbsp; <b>L1</b> Side lights</div>
@@ -292,7 +273,7 @@
               <div class="btn-group" id="crane-arm-group">
                 <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle">Grab / Release</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (190°)</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (180°)</span></div>
               <div class="btn-group" id="crane-grip-group">
                 <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
                 <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
@@ -332,13 +313,11 @@
             <div class="servo-grid" id="servo-grid"></div>
             <div class="servo-home-row">
               <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
-              <button class="btn-sm btn-edit" id="servo-edit-limits">&#128274; Edit Limits</button>
-              <button class="btn-sm btn-primary" id="servo-save-limits" style="display:none">Save Limits</button>
-              <button class="btn-sm btn-secondary" id="servo-cancel-limits" style="display:none">Cancel</button>
             </div>
             <div class="servo-limits-note" id="servo-limits-note">
-              Лимиты заблокированы — случайно изменить их нельзя.
-              Для настройки нажмите «&#128274; Edit Limits».
+              Лимиты серво заданы в config.py (SERVO_LIMITS) и заблокированы:
+              Steering 30–150, Cam Pan 0–180, Cam Tilt 80–170,
+              Crane Grip 100–180, Crane Arm 100–180.
             </div>
           </div>
         </div>
@@ -496,22 +475,6 @@
       </div>
     </div>
     <div class="console-output" id="console-output"></div>
-  </div>
-</div>
-
-<div class="tab-content" id="content-info">
-  <div class="info-layout">
-    <div class="info-sidebar" id="info-sidebar">
-      <div class="info-nav">
-        <button class="info-nav-btn active" data-doc="overview">Overview</button>
-        <button class="info-nav-btn" data-doc="pinout">Pinout</button>
-      </div>
-      <div class="info-nav-sep">Components</div>
-      <div id="info-component-nav"></div>
-    </div>
-    <div class="info-main" id="info-main">
-      <div class="info-loading">Loading documentation...</div>
-    </div>
   </div>
 </div>
 

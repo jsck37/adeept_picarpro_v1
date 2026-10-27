@@ -54,27 +54,36 @@ class ImuUdpStreamer:
         logger.info('[IMU-UDP] stopped')
 
     def _loop(self):
+        """Оптимизация v1.2.0: без подписчика спим 0.25 с (раньше — 50
+        пробуждений/с впустую); при активном стриме выдерживаем точный
+        интервал короткими ожиданиями."""
         last_send = 0.0
         while self._running:
-            now = time.time()
             host_ip = self.state.nav_tcp_host
-            if host_ip and mpu_ready(self.state) and \
-                    now - last_send >= self._interval:
-                last_send = now
-                data = self.state.mpu6050.get_data()
-                if data:
-                    pkt = json.dumps({
-                        't': now,
-                        'gz': data['gyro']['z'] * GZ_SCALE,
-                    }).encode('utf-8')
-                    try:
-                        self._sock.sendto(pkt, (host_ip, self.port))
-                    except Exception:
-                        pass
-                    if host_ip != self._last_target_ip:
-                        self._last_target_ip = host_ip
-                        logger.info(f'[IMU-UDP] subscriber: {host_ip}')
-            time.sleep(0.02)
+            if not (host_ip and mpu_ready(self.state)):
+                time.sleep(0.25)
+                continue
+            now = time.time()
+            dt = self._interval - (now - last_send)
+            if dt > 0:
+                # досыпаем до ритма, но не более 50 мс — чтобы быстро
+                # подхватить появление/пропажу подписчика
+                time.sleep(min(dt, 0.05))
+                continue
+            last_send = time.time()
+            data = self.state.mpu6050.get_data()
+            if data:
+                pkt = json.dumps({
+                    't': now,
+                    'gz': data['gyro']['z'] * GZ_SCALE,
+                }).encode('utf-8')
+                try:
+                    self._sock.sendto(pkt, (host_ip, self.port))
+                except Exception:
+                    pass
+                if host_ip != self._last_target_ip:
+                    self._last_target_ip = host_ip
+                    logger.info(f'[IMU-UDP] subscriber: {host_ip}')
 
 
 def mpu_ready(state):

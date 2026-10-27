@@ -86,9 +86,11 @@ class TestLEDController:
     def test_solid_writes_frame(self, leds):
         leds.fill(10, 20, 30)
         from tests.fakes.all_fakes import FakeSpiDev
+        from picarpro.hardware.leds_ws2812 import _LATCH_BYTES
         data = FakeSpiDev.instances[0].written[-1]
-        # 16 LED * 3 канала * 4 байта + 60 latch
-        assert len(data) == 16 * 3 * 4 + 60
+        # 16 LED * 3 канала * 4 байта + latch (>= 50 мкс)
+        assert len(data) == 16 * 3 * 4 + _LATCH_BYTES
+        assert _LATCH_BYTES * 4 / 6_400_000 >= 50e-6
 
     def test_off_mode_clears(self, leds):
         leds.fill(255, 255, 255)

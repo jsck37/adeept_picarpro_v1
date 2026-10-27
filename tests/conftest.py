@@ -51,14 +51,11 @@ def _reset_singletons(monkeypatch, tmp_path):
 @pytest.fixture
 def clean_state(monkeypatch, tmp_path):
     """SharedState с инициализированным «железом» на фейках (с MPU6050)."""
-    import config
-    import picarpro.hardware.servos as servos_mod
-    monkeypatch.setattr('config.SERVO_CAL_FILE', tmp_path / 'servo_cal.json')
-    monkeypatch.setattr(servos_mod, 'SERVO_CAL_FILE', tmp_path / 'servo_cal.json')
-
-    # на шине присутствует MPU6050 (ADS7830 отсутствует — dmesg-режим)
+    # на шине присутствует MPU6050 (ADS7830 отсутствует — dmesg-режим);
+    # 0x42 = 68 — temp_raw: «живой» сенсор (не пустая шина), но данные
+    # не удовлетворяют wait-условиям тестов (v1.3.0)
     FAKES['smbus'].reset()
-    FAKES['smbus'].shared_devices[0x68] = {0x75: 0x68}
+    FAKES['smbus'].shared_devices[0x68] = {0x75: 0x68, 0x42: 68}
 
     from picarpro.state import SharedState
     state = SharedState()

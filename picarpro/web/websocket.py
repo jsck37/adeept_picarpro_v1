@@ -15,7 +15,7 @@ import websockets
 from picarpro.logger import logger, log_buffer
 from picarpro.commands import process as process_command
 from picarpro.web.auth import check_token, token_required
-from config import WEBSOCKET_PORT
+from config import WEBSOCKET_PORT, TELEMETRY_INTERVAL_S
 
 AUTH_TIMEOUT_S = 10.0
 
@@ -125,13 +125,20 @@ async def status_broadcast(state):
                 state.ws_clients -= gone
             except Exception:
                 pass
-        await asyncio.sleep(1.0)
+        # TELEMETRY_INTERVAL_S (2 c): get_status() читает I2C/GPIO —
+        # 1 Гц не давал ничего, кроме лишней нагрузки (v1.2.0)
+        await asyncio.sleep(TELEMETRY_INTERVAL_S)
 
 
 async def _ws_main(state):
     async with websockets.serve(
         lambda ws, path=None: ws_handler(state, ws, path),
         '0.0.0.0', WEBSOCKET_PORT,
+        # v1.2.0: экономия CPU — сжатие на мелких JSON-сообщениях дороже,
+        # чем выгодно; ping реже; очередь короче
+        compression=None,
+        ping_interval=30, ping_timeout=20,
+        max_queue=4,
     ):
         logger.info(f'[Web] WebSocket on :{WEBSOCKET_PORT}')
         await status_broadcast(state)

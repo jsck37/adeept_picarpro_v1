@@ -424,6 +424,7 @@ class FakeChannel:
         self._pca = pca
         self.index = index
         self._duty = 0
+        self.writes = 0   # счётчик записей duty_cycle (тест анти-джиттера)
 
     @property
     def duty_cycle(self):
@@ -432,6 +433,7 @@ class FakeChannel:
     @duty_cycle.setter
     def duty_cycle(self, value):
         self._duty = max(0, min(0xFFFF, int(value)))
+        self.writes += 1
 
 
 class FakePCA9685:

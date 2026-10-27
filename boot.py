@@ -10,6 +10,14 @@ import sys
 import threading
 import time
 
+# v1.2.0: лимиты рабочих потоков BLAS/OMP — ДО импорта numpy/cv2.
+# По умолчанию OpenBLAS создаёт по потоку на ядро Pi с крупными
+# стеками; на 1 ГБ RAM это лишняя нагрузка. systemd-юнит задаёт те
+# же значения, setdefault не перебивает окружение сервиса.
+for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+           'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+    os.environ.setdefault(_v, '2')
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from picarpro.logger import logger
