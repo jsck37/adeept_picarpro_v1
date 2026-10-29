@@ -29,6 +29,40 @@ class TestInit:
         assert servos.get_angle(0) == 90
 
 
+class TestLazyBoot:
+    """v1.3.2: ленивая инициализация — серво не двигаются при загрузке.
+
+    Мануал Adeept: пик тока робота ~3.75 А; одновременный вывод всех
+    серво в нейтраль на старте давал просадку питания и ребут Pi.
+    """
+
+    def test_no_pwm_writes_at_boot(self, servos):
+        from tests.fakes.all_fakes import FakeAdafruitServo
+        assert all(obj.channel.writes == 0
+                   for obj in FakeAdafruitServo.instances)
+
+    def test_first_command_always_writes(self, servos):
+        """Первый после загрузки угол пишется, даже если равен init."""
+        from tests.fakes.all_fakes import FakeAdafruitServo
+        obj = FakeAdafruitServo.instances[1]
+        assert servos.set_angle(1, 90) is True      # init 90 — не дедуплицируется
+        assert obj.channel.writes == 1
+        assert servos.set_angle(1, 90) is True      # повтор — уже дедуплицируется
+        assert obj.channel.writes == 1
+
+    def test_get_angle_falls_back_to_init(self, servos):
+        assert servos.get_angle(0) == 90            # ещё не двигали
+        assert servos.get_angles() == servos._init_angles
+
+    def test_smooth_move_from_unknown(self, servos):
+        """smooth_move по не двигавшемуся серво — один прямой ход."""
+        from tests.fakes.all_fakes import FakeAdafruitServo
+        obj = FakeAdafruitServo.instances[1]
+        servos.smooth_move(1, 120, steps=5, delay=0.001)
+        assert servos.get_angle(1) == 120
+        assert obj.channel.writes == 1              # без интерполяции
+
+
 class TestSetAngle:
     def test_set_within_limits(self, servos):
         assert servos.set_angle(0, 60) is True

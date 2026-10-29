@@ -111,7 +111,7 @@ class SharedState:
         mpu_ok = self.mpu6050 is not None and self.mpu6050.initialized
         ir_l, ir_m, ir_r = (self.autonomous.get_ir_values()
                             if self.autonomous else (None, None, None))
-        servo_angles = list(self.servos._angles) if self.servos else [0] * 7
+        servo_angles = self.servos.get_angles() if self.servos else [0] * 7
         return {
             'cpu_temp': info['cpu_temp'],
             'cpu_usage': info['cpu_usage'],

@@ -3,7 +3,7 @@ from picarpro.logger import logger
 from config import (
     PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
-    SERVO_INIT_ANGLES, SERVO_LIMITS,
+    SERVO_INIT_ANGLES, SERVO_LIMITS, SERVO_MOVE_ON_BOOT,
     CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 
@@ -24,7 +24,9 @@ class ServoController:
     def __init__(self):
         self._pca = None
         self._servos = [None] * SERVO_COUNT
-        self._angles = [SERVO_INIT_ANGLE] * SERVO_COUNT
+        # v1.3.2: _angles — ФИЗИЧЕСКИ записанный в PWM угол; None значит
+        # «серво ещё не двигали с загрузки» (ленивая инициализация).
+        self._angles = [None] * SERVO_COUNT
         self._init_angles = [SERVO_INIT_ANGLE] * SERVO_COUNT
         self._lock = threading.Lock()
         self._pwm_initialized = False
@@ -54,14 +56,26 @@ class ServoController:
                         init_angle = CRANE_ARM_OPEN if i == 6 else (
                             CRANE_GRIP_HIGH if i == 5 else SERVO_INIT_ANGLE)
                     init_angle = self._clamp(i, init_angle)
-                    self._servos[i].angle = init_angle
-                    self._angles[i] = init_angle
                     self._init_angles[i] = init_angle
-                    time.sleep(0.03)
+                    if SERVO_MOVE_ON_BOOT:
+                        # Старое поведение — только для сборки качалок по
+                        # мануалу: все серво выходят в нейтраль при загрузке.
+                        self._servos[i].angle = init_angle
+                        self._angles[i] = init_angle
+                        time.sleep(0.03)
+                    # Иначе (v1.3.2) PWM НЕ пишем: каналы PCA9685 остаются
+                    # выключенными, серво не получают импульсов и не жрут
+                    # ток — пиковый бросок в момент старта сервиса устранён
+                    # (просадка питания = ребут Pi, см. мануал Adeept).
+                    time.sleep(0.005)
                 except Exception as e:
                     logger.warning(f'[Servos] S{i} init failed: {e}')
             self._pwm_initialized = True
-            logger.info(f'[Servos] PCA9685 OK ({sum(s is not None for s in self._servos)}/{SERVO_COUNT} channels)')
+            mode = ('boot neutral' if SERVO_MOVE_ON_BOOT
+                    else 'lazy: no PWM at boot')
+            logger.info(f'[Servos] PCA9685 OK '
+                        f'({sum(s is not None for s in self._servos)}/'
+                        f'{SERVO_COUNT} channels, {mode})')
         except Exception as e:
             logger.error(f'[Servos] init failed: {e}')
 
@@ -74,10 +88,13 @@ class ServoController:
                 or sid >= SERVO_COUNT or self._servos[sid] is None):
             return False
         angle = self._clamp(sid, angle)
+        cur = self._angles[sid]
         # Анти-джиттер (v1.3.0): повторная команда на тот же угол (в т.ч.
         # keepalive-повторы джойстика каждые 150 мс) не пишет PWM в
         # PCA9685 — лишние перезаписи регистров дают дрожание и нагрев.
-        if abs(self._angles[sid] - angle) < 0.5:
+        # Первый после загрузки угол пишется ВСЕГДА: физическое положение
+        # серво неизвестно (при старте серво не двигались, v1.3.2).
+        if cur is not None and abs(cur - angle) < 0.5:
             return True
         with self._lock:
             try:
@@ -96,9 +113,15 @@ class ServoController:
         if not self._pwm_initialized or sid >= SERVO_COUNT:
             return
         target = self._clamp(sid, target)
-        if abs(self._angles[sid] - target) < 1:
+        cur = self._angles[sid]
+        if cur is None:
+            # Позиция неизвестна (ленивый старт, v1.3.2) — один прямой ход
+            # вместо интерполяции из вымышленной точки.
+            self.set_angle(sid, target)
             return
-        start = self._angles[sid]
+        if abs(cur - target) < 1:
+            return
+        start = cur
         delta = (target - start) / steps
         for i in range(1, steps + 1):
             if not self.set_angle(sid, start + delta * i):
@@ -115,7 +138,16 @@ class ServoController:
             self._init_angles[sid] = self._clamp(sid, angle)
 
     def get_angle(self, sid):
-        return self._angles[sid] if 0 <= sid < SERVO_COUNT else 0
+        if not 0 <= sid < SERVO_COUNT:
+            return 0
+        # Пока серво не двигали (None) — возвращаем целевой init-угол
+        return (self._angles[sid] if self._angles[sid] is not None
+                else self._init_angles[sid])
+
+    def get_angles(self):
+        """Углы всех серво для статуса/UI: записанные, для ещё не
+        двигавшихся — целевые init-углы (v1.3.2, ленивый старт)."""
+        return [self.get_angle(i) for i in range(SERVO_COUNT)]
 
     def get_limits(self, sid=None):
         """Лимиты из config.py (только чтение; редактирования больше нет)."""
