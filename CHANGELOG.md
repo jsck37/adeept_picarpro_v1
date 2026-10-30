@@ -1,5 +1,36 @@
 # CHANGELOG — PiCar-Pro Merged Edition v1.0.0
 
+## MOD v1.3.3 — сервис Wi-Fi ждёт wlan0 (фикс «no suitable device found»)
+
+По репорту пользователя: picarpro-wifi.service при загрузке падает с
+«connection activation failed: no suitable device found for this connection
+(device eth0 not available because profile is not compatible with device)».
+Профиль hotspot'а при этом создаётся успешно — падает именно активация.
+Причина — гонка на старте: скрипт ждал только NetworkManager
+(`nmcli general status`), но не сам Wi-Fi-интерфейс. brcmfmac на Raspberry Pi
+подгружает прошивку уже ПОСЛЕ того, как NM-юнит считается запущенным, поэтому
+в момент `nmcli con up` устройства ещё не существовало: NM не находил ни
+одного Wi-Fi-устройства, единственным кандидатом оставался eth0 — к нему
+wifi-профиль несовместим по типу, что и написано в ошибке.
+
+* сгенерированный /usr/local/bin/wifi_hotspot_manager.sh теперь дожидается
+  появления Wi-Fi-интерфейса до 60 с; интерфейс определяется динамически
+  (nmcli -t -f DEVICE,TYPE dev status), а не захардкожен как wlan0 —
+  переименование интерфейса больше не ломает hotspot;
+* перед ожиданием снимается rfkill-блокировка и включается радио
+  (`rfkill unblock wifi`, `nmcli radio wifi on`): после сбоев питания NM
+  может держать Wi-Fi выключенным;
+* статус «уже подключено к известной сети» проверяется по состоянию
+  устройства (`802-11-wireless:connected`), а не по скану эфира
+  (`dev wifi list`) — скан на только что появившемся интерфейсе бывает
+  пустым и давал ложное «не подключено»;
+* при отсутствии интерфейса за 60 с или неудачной активации — понятная
+  строка в лог с командами диагностики и exit 1 (вместо молчаливого
+  «Hotspot started successfully» при упавшем hotspot);
+* picarpro-wifi.service: Restart=on-failure, RestartSec=15,
+  StartLimitIntervalSec=0 — разовый сбой больше не оставляет машинку без
+  hotspot'а до следующей перезагрузки, сервис перезапускается сам.
+
 ## MOD v1.3.2 — ленивый старт серво (устранение ребута при загрузке)
 
 Мануал Adeept (Robot HAT, «Precautions») подтверждает: пик тока робота

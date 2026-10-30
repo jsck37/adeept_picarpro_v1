@@ -337,26 +337,26 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
         ("I2C/Motor/Servo",
-         f"sudo -H pip install {pip_flag} "
+         f"sudo -H pip3 install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
          "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
-         f"sudo -H pip install {pip_flag} luma.oled rpi_ws281x"),
+         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
-         f"sudo -H pip install {pip_flag} mpu6050-raspberrypi"),
+         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
-         f"sudo -H pip install {pip_flag} evdev"),
-        ("GPIO/SPI/I2C (RPi.GPIO, spidev, smbus2)",
-         f"sudo -H pip install {pip_flag} RPi.GPIO spidev smbus2"),
+         f"sudo -H pip3 install {pip_flag} evdev"),
+        ("GPIO/SPI/I2C (текущая прошивка: RPi.GPIO, spidev, smbus2)",
+         f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 
     for group_name, cmd in pip_groups:
@@ -428,7 +428,7 @@ def stage_6_wifi_hotspot(debian_ver):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     default_ssid = "Adeept_Robot"
-    default_pass = "0123456789"
+    default_pass = "12345678"
     try:
         sys.path.insert(0, thisPath)
         from config import HOTSPOT_SSID, HOTSPOT_PASSWORD
@@ -476,35 +476,67 @@ def stage_6_wifi_hotspot(debian_ver):
         print(f"  {RED}[!]{RST} Could not save config: {e}")
 
     hotspot_script = f"""#!/bin/bash
+# PiCarPro Wi-Fi manager: home network first, fallback AP
+# v1.3.3: waits for the Wi-Fi interface itself (brcmfmac loads firmware
+# AFTER NetworkManager start -> otherwise 'no suitable device found')
 HOTSPOT_CONF="/etc/picarpro/hotspot.conf"
 HOTSPOT_CONN="picarpro-hotspot"
 HOTSPOT_SSID="{existing_ssid}"
 HOTSPOT_PASS="{existing_pass}"
 [ -f "$HOTSPOT_CONF" ] && source "$HOTSPOT_CONF"
 
+log() {{ echo "[PiCarPro-WiFi] $*"; }}
+
+# 1. Wait for NetworkManager (up to 30 s)
 for i in $(seq 1 30); do nmcli general status &>/dev/null && break; sleep 1; done
 
-CONNECTED=$(nmcli -t -f ACTIVE,SSID dev wifi list 2>/dev/null | grep '^yes:' | head -1)
-[ -n "$CONNECTED" ] && exit 0
+# 2. Make sure radio is not blocked/turned off (may happen after power glitches)
+rfkill unblock wifi 2>/dev/null
+nmcli radio wifi on 2>/dev/null
+
+# 3. Wait for the Wi-Fi interface (up to 60 s), detect it dynamically
+WIFI_DEV=""
+for i in $(seq 1 60); do
+    WIFI_DEV=$(nmcli -t -f DEVICE,TYPE dev status 2>/dev/null | grep ':802-11-wireless$' | head -1 | cut -d: -f1)
+    [ -n "$WIFI_DEV" ] && break
+    sleep 1
+done
+if [ -z "$WIFI_DEV" ]; then
+    log "ERROR: no Wi-Fi interface after 60 s (wlan0 missing / rfkill / firmware)"
+    log "Check: nmcli device status; rfkill list; dmesg | grep brcmfmac"
+    exit 1
+fi
+log "Wi-Fi interface: $WIFI_DEV"
+
+wifi_connected() {{
+    nmcli -t -f TYPE,STATE dev status 2>/dev/null | grep -q '^802-11-wireless:connected'
+}}
+
+wifi_connected && exit 0
 
 FIRST_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep '802-11-wireless' | grep -v "$HOTSPOT_CONN" | head -1 | cut -d: -f1)
 if [ -n "$FIRST_WIFI" ]; then
-    nmcli con up id "$FIRST_WIFI" &>/dev/null
+    log "Trying known Wi-Fi connection: $FIRST_WIFI"
+    nmcli con up id "$FIRST_WIFI" ifname "$WIFI_DEV" &>/dev/null
     sleep 5
 fi
 
-CONNECTED=$(nmcli -t -f ACTIVE,SSID dev wifi list 2>/dev/null | grep '^yes:' | head -1)
-if [ -z "$CONNECTED" ]; then
-    echo "[PiCarPro] Starting hotspot: $HOTSPOT_SSID"
-    if nmcli con show "$HOTSPOT_CONN" &>/dev/null; then
-        nmcli con delete "$HOTSPOT_CONN" &>/dev/null
-    fi
-    nmcli con add type wifi ifname wlan0 con-name "$HOTSPOT_CONN" autoconnect no ssid "$HOTSPOT_SSID"
-    nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg
-    nmcli con modify "$HOTSPOT_CONN" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS"
-    nmcli con modify "$HOTSPOT_CONN" ipv4.method shared ipv4.addresses 10.42.0.1/24
-    nmcli con up "$HOTSPOT_CONN"
+wifi_connected && exit 0
+
+log "Starting hotspot: $HOTSPOT_SSID"
+nmcli con delete "$HOTSPOT_CONN" &>/dev/null
+if ! nmcli con add type wifi ifname "$WIFI_DEV" con-name "$HOTSPOT_CONN" autoconnect no ssid "$HOTSPOT_SSID"; then
+    log "ERROR: could not create hotspot profile"
+    exit 1
 fi
+nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg
+nmcli con modify "$HOTSPOT_CONN" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS"
+nmcli con modify "$HOTSPOT_CONN" ipv4.method shared ipv4.addresses 10.42.0.1/24
+if ! nmcli con up "$HOTSPOT_CONN"; then
+    log "ERROR: hotspot activation failed (details: journalctl -u picarpro-wifi -e)"
+    exit 1
+fi
+log "Hotspot is up: $HOTSPOT_SSID (10.42.0.1)"
 """
 
     script_path = "/usr/local/bin/wifi_hotspot_manager.sh"
@@ -526,6 +558,10 @@ Wants=NetworkManager.service
 Type=oneshot
 ExecStart=/usr/local/bin/wifi_hotspot_manager.sh
 RemainAfterExit=yes
+# if the Wi-Fi interface was not up yet, retry instead of giving up
+Restart=on-failure
+RestartSec=15
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
