@@ -426,19 +426,26 @@ def stage_6_wifi_hotspot(debian_ver):
 
     if not is_package_installed("network-manager"):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
+    # NetworkManager shared mode (DHCP/DNS для клиентов AP) вызывает dnsmasq;
+    # без него телефон подключается к AP, но не получает IP
+    if not is_package_installed("dnsmasq-base"):
+        run_cmd("apt-get install -y --no-install-recommends dnsmasq-base", critical=False)
 
     default_ssid = "Adeept_Robot"
     default_pass = "12345678"
+    default_mode = "hotspot"
     try:
         sys.path.insert(0, thisPath)
-        from config import HOTSPOT_SSID, HOTSPOT_PASSWORD
+        from config import HOTSPOT_SSID, HOTSPOT_PASSWORD, HOTSPOT_MODE
         default_ssid = HOTSPOT_SSID
         default_pass = HOTSPOT_PASSWORD
+        default_mode = HOTSPOT_MODE
     except Exception:
         pass
     config_file = "/etc/picarpro/hotspot.conf"
     existing_ssid = default_ssid
     existing_pass = default_pass
+    existing_mode = default_mode
 
     if os.path.exists(config_file):
         try:
@@ -448,6 +455,8 @@ def stage_6_wifi_hotspot(debian_ver):
                         existing_ssid = line.strip().split("=", 1)[1].strip('"')
                     elif line.startswith("HOTSPOT_PASS="):
                         existing_pass = line.strip().split("=", 1)[1].strip('"')
+                    elif line.startswith("HOTSPOT_MODE="):
+                        existing_mode = line.strip().split("=", 1)[1].strip('"')
         except Exception:
             pass
 
@@ -466,23 +475,36 @@ def stage_6_wifi_hotspot(debian_ver):
             else:
                 existing_pass = new_pass
 
+    print(f"\n  Hotspot mode: {BOLD}{existing_mode}{RST}")
+    print("    hotspot = always AP (default, robot car) | auto = home Wi-Fi first | client = never AP")
+    mchoice = input(f"  {YLW}?{RST} Change mode? (y/N): ").strip().lower()
+    if mchoice == 'y':
+        m = input(f"  {YLW}?{RST} Mode [hotspot/auto/client] [{existing_mode}]: ").strip().lower()
+        if m in ("hotspot", "auto", "client"):
+            existing_mode = m
+        else:
+            print(f"  {RED}[!]{RST} Unknown mode, keeping {existing_mode}")
+
     try:
         os.makedirs("/etc/picarpro", exist_ok=True)
         with open(config_file, "w") as f:
             f.write(f'HOTSPOT_SSID="{existing_ssid}"\n')
             f.write(f'HOTSPOT_PASS="{existing_pass}"\n')
+            f.write(f'HOTSPOT_MODE="{existing_mode}"\n')
         print(f"  {GRN}[+]{RST} Config saved")
     except Exception as e:
         print(f"  {RED}[!]{RST} Could not save config: {e}")
 
     hotspot_script = f"""#!/bin/bash
-# PiCarPro Wi-Fi manager: home network first, fallback AP
-# v1.3.3: waits for the Wi-Fi interface itself (brcmfmac loads firmware
-# AFTER NetworkManager start -> otherwise 'no suitable device found')
+# PiCarPro Wi-Fi manager (v1.3.4)
+# HOTSPOT_MODE: hotspot = always AP (default, robot car UX)
+#               auto    = home Wi-Fi first, AP fallback
+#               client  = never AP
 HOTSPOT_CONF="/etc/picarpro/hotspot.conf"
 HOTSPOT_CONN="picarpro-hotspot"
 HOTSPOT_SSID="{existing_ssid}"
 HOTSPOT_PASS="{existing_pass}"
+HOTSPOT_MODE="hotspot"
 [ -f "$HOTSPOT_CONF" ] && source "$HOTSPOT_CONF"
 
 log() {{ echo "[PiCarPro-WiFi] $*"; }}
@@ -495,6 +517,7 @@ rfkill unblock wifi 2>/dev/null
 nmcli radio wifi on 2>/dev/null
 
 # 3. Wait for the Wi-Fi interface (up to 60 s), detect it dynamically
+#    (brcmfmac loads firmware AFTER NetworkManager start)
 WIFI_DEV=""
 for i in $(seq 1 60); do
     WIFI_DEV=$(nmcli -t -f DEVICE,TYPE dev status 2>/dev/null | grep ':802-11-wireless$' | head -1 | cut -d: -f1)
@@ -506,22 +529,36 @@ if [ -z "$WIFI_DEV" ]; then
     log "Check: nmcli device status; rfkill list; dmesg | grep brcmfmac"
     exit 1
 fi
-log "Wi-Fi interface: $WIFI_DEV"
+log "Wi-Fi interface: $WIFI_DEV (mode: $HOTSPOT_MODE)"
 
 wifi_connected() {{
     nmcli -t -f TYPE,STATE dev status 2>/dev/null | grep -q '^802-11-wireless:connected'
 }}
 
-wifi_connected && exit 0
+# hotspot already running? nothing to do (no bounce on service restart)
+nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | grep -q "^${{HOTSPOT_CONN}}:" && exit 0
 
-FIRST_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep '802-11-wireless' | grep -v "$HOTSPOT_CONN" | head -1 | cut -d: -f1)
-if [ -n "$FIRST_WIFI" ]; then
-    log "Trying known Wi-Fi connection: $FIRST_WIFI"
-    nmcli con up id "$FIRST_WIFI" ifname "$WIFI_DEV" &>/dev/null
-    sleep 5
+if [ "$HOTSPOT_MODE" = "hotspot" ]; then
+    # a live client connection would block AP activation on the same radio
+    nmcli device disconnect "$WIFI_DEV" &>/dev/null
+    sleep 1
+else
+    wifi_connected && exit 0
+
+    FIRST_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep '802-11-wireless' | grep -v "$HOTSPOT_CONN" | head -1 | cut -d: -f1)
+    if [ -n "$FIRST_WIFI" ]; then
+        log "Trying known Wi-Fi connection: $FIRST_WIFI"
+        nmcli con up id "$FIRST_WIFI" ifname "$WIFI_DEV" &>/dev/null
+        sleep 5
+    fi
+
+    wifi_connected && exit 0
+
+    if [ "$HOTSPOT_MODE" = "client" ]; then
+        log "ERROR: MODE=client and no known Wi-Fi reachable"
+        exit 1
+    fi
 fi
-
-wifi_connected && exit 0
 
 log "Starting hotspot: $HOTSPOT_SSID"
 nmcli con delete "$HOTSPOT_CONN" &>/dev/null
@@ -529,14 +566,17 @@ if ! nmcli con add type wifi ifname "$WIFI_DEV" con-name "$HOTSPOT_CONN" autocon
     log "ERROR: could not create hotspot profile"
     exit 1
 fi
-nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg
+# channel pinned to 6 (1-11 are AP-legal worldwide; auto sometimes picks
+# 12/13 which many phones never scan)
+nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6
 nmcli con modify "$HOTSPOT_CONN" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS"
 nmcli con modify "$HOTSPOT_CONN" ipv4.method shared ipv4.addresses 10.42.0.1/24
 if ! nmcli con up "$HOTSPOT_CONN"; then
     log "ERROR: hotspot activation failed (details: journalctl -u picarpro-wifi -e)"
+    log "HINT: if error mentions dnsmasq/IP config: sudo apt install dnsmasq-base"
     exit 1
 fi
-log "Hotspot is up: $HOTSPOT_SSID (10.42.0.1)"
+log "Hotspot is up: $HOTSPOT_SSID | web UI: http://10.42.0.1:5000"
 """
 
     script_path = "/usr/local/bin/wifi_hotspot_manager.sh"
