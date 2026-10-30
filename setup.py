@@ -460,7 +460,7 @@ def stage_6_wifi_hotspot(debian_ver):
 
     print(f"\n  Hotspot SSID : {BOLD}{cfg['ssid']}{RST}")
     print(f"  Hotspot pass : {BOLD}{cfg['pass']}{RST}")
-    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11 видны всем телефонам)")
+    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11)")
     print(f"  AP IP        : {BOLD}{cfg['ip']}{RST}  (SSH: <user>@{cfg['ip']}, UI: http://{cfg['ip']}:5000)")
     if input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower() == 'y':
         v = input(f"  {YLW}?{RST} SSID [{cfg['ssid']}]: ").strip()
