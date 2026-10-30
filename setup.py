@@ -337,26 +337,26 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
         ("I2C/Motor/Servo",
-         f"sudo -H pip3 install {pip_flag} "
+         f"sudo -H pip install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
          "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
-         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
+         f"sudo -H pip install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
-         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
+         f"sudo -H pip install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
-         f"sudo -H pip3 install {pip_flag} evdev"),
-        ("GPIO/SPI/I2C (текущая прошивка: RPi.GPIO, spidev, smbus2)",
-         f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
+         f"sudo -H pip install {pip_flag} evdev"),
+        ("GPIO/SPI/I2C (RPi.GPIO, spidev, smbus2)",
+         f"sudo -H pip install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 
     for group_name, cmd in pip_groups:
@@ -418,202 +418,90 @@ def stage_5_hardware_config():
 
 
 def stage_6_wifi_hotspot(debian_ver):
-    print(f"\n  {BLU}[6/7]{RST} Setting up WiFi Hotspot...")
-
-    if debian_ver < 12:
-        print(f"  {YLW}[!]{RST} Hotspot requires Bookworm+ (Debian 12+)")
-        return
+    """v1.3.5: Wi-Fi полностью переписан на hostapd + dnsmasq (без NM AP),
+    точка доступа работает всегда; SSH включается на уровне системы.
+    Вся механика — в fix_wifi_hostapd.sh (им же можно починить машину
+    без переустановки)."""
+    print(f"\n  {BLU}[6/7]{RST} Setting up WiFi Hotspot (hostapd + dnsmasq) and SSH...")
 
     if not is_package_installed("network-manager"):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
-    # NetworkManager shared mode (DHCP/DNS для клиентов AP) вызывает dnsmasq;
-    # без него телефон подключается к AP, но не получает IP
-    if not is_package_installed("dnsmasq-base"):
-        run_cmd("apt-get install -y --no-install-recommends dnsmasq-base", critical=False)
 
-    default_ssid = "Adeept_Robot"
-    default_pass = "12345678"
-    default_mode = "hotspot"
+    # --- настройки: config.py -> существующий conf -> запрос -------------
+    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "0123456789", "6", "10.42.0.1"
     try:
         sys.path.insert(0, thisPath)
-        from config import HOTSPOT_SSID, HOTSPOT_PASSWORD, HOTSPOT_MODE
-        default_ssid = HOTSPOT_SSID
-        default_pass = HOTSPOT_PASSWORD
-        default_mode = HOTSPOT_MODE
+        from config import (HOTSPOT_SSID, HOTSPOT_PASSWORD,
+                            HOTSPOT_CHANNEL, HOTSPOT_IP)
+        def_ssid = str(HOTSPOT_SSID)
+        def_pass = str(HOTSPOT_PASSWORD)
+        def_ch = str(HOTSPOT_CHANNEL)
+        def_ip = str(HOTSPOT_IP)
     except Exception:
         pass
-    config_file = "/etc/picarpro/hotspot.conf"
-    existing_ssid = default_ssid
-    existing_pass = default_pass
-    existing_mode = default_mode
 
-    if os.path.exists(config_file):
+    cfg = {"ssid": def_ssid, "pass": def_pass, "ch": def_ch, "ip": def_ip}
+    prefix_map = {"HOTSPOT_SSID=": "ssid", "HOTSPOT_PASS=": "pass",
+                  "HOTSPOT_CHANNEL=": "ch", "HOTSPOT_IP=": "ip"}
+    if os.path.exists("/etc/picarpro/hotspot.conf"):
         try:
-            with open(config_file, "r") as f:
+            with open("/etc/picarpro/hotspot.conf") as f:
                 for line in f:
-                    if line.startswith("HOTSPOT_SSID="):
-                        existing_ssid = line.strip().split("=", 1)[1].strip('"')
-                    elif line.startswith("HOTSPOT_PASS="):
-                        existing_pass = line.strip().split("=", 1)[1].strip('"')
-                    elif line.startswith("HOTSPOT_MODE="):
-                        existing_mode = line.strip().split("=", 1)[1].strip('"')
+                    line = line.strip()
+                    for pfx, key in prefix_map.items():
+                        if line.startswith(pfx):
+                            cfg[key] = line.split("=", 1)[1].strip().strip('"')
         except Exception:
             pass
 
-    print(f"\n  Hotspot SSID: {BOLD}{existing_ssid}{RST}")
-    print(f"  Hotspot pass: {BOLD}{existing_pass}{RST}")
-    choice = input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower()
+    def _safe(value, fallback):
+        # кавычки/доллар/бэктик ломают source-conf и hostapd
+        return fallback if any(c in value for c in '"\\$`') else value
 
-    if choice == 'y':
-        new_ssid = input(f"  {YLW}?{RST} SSID [{existing_ssid}]: ").strip()
-        if new_ssid:
-            existing_ssid = new_ssid
-        new_pass = input(f"  {YLW}?{RST} Password [{existing_pass}]: ").strip()
-        if new_pass:
-            if len(new_pass) < 8:
-                print(f"  {RED}[!]{RST} WPA password needs 8+ chars")
+    print(f"\n  Hotspot SSID : {BOLD}{cfg['ssid']}{RST}")
+    print(f"  Hotspot pass : {BOLD}{cfg['pass']}{RST}")
+    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11 видны всем телефонам)")
+    print(f"  AP IP        : {BOLD}{cfg['ip']}{RST}  (SSH: <user>@{cfg['ip']}, UI: http://{cfg['ip']}:5000)")
+    if input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower() == 'y':
+        v = input(f"  {YLW}?{RST} SSID [{cfg['ssid']}]: ").strip()
+        if v:
+            cfg['ssid'] = _safe(v, cfg['ssid'])
+        v = input(f"  {YLW}?{RST} Password [{cfg['pass']}]: ").strip()
+        if v:
+            if len(v) < 8:
+                print(f"  {RED}[!]{RST} WPA password needs 8+ chars, keeping current")
             else:
-                existing_pass = new_pass
-
-    print(f"\n  Hotspot mode: {BOLD}{existing_mode}{RST}")
-    print("    hotspot = always AP (default, robot car) | auto = home Wi-Fi first | client = never AP")
-    mchoice = input(f"  {YLW}?{RST} Change mode? (y/N): ").strip().lower()
-    if mchoice == 'y':
-        m = input(f"  {YLW}?{RST} Mode [hotspot/auto/client] [{existing_mode}]: ").strip().lower()
-        if m in ("hotspot", "auto", "client"):
-            existing_mode = m
-        else:
-            print(f"  {RED}[!]{RST} Unknown mode, keeping {existing_mode}")
+                cfg['pass'] = _safe(v, cfg['pass'])
+        v = input(f"  {YLW}?{RST} Channel 1-13 [{cfg['ch']}]: ").strip()
+        if v and v.isdigit() and 1 <= int(v) <= 13:
+            cfg['ch'] = v
+        v = input(f"  {YLW}?{RST} AP IP [{cfg['ip']}]: ").strip()
+        if v:
+            parts = v.split('.')
+            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                cfg['ip'] = v
 
     try:
         os.makedirs("/etc/picarpro", exist_ok=True)
-        with open(config_file, "w") as f:
-            f.write(f'HOTSPOT_SSID="{existing_ssid}"\n')
-            f.write(f'HOTSPOT_PASS="{existing_pass}"\n')
-            f.write(f'HOTSPOT_MODE="{existing_mode}"\n')
+        with open("/etc/picarpro/hotspot.conf", "w") as f:
+            f.write(f'HOTSPOT_SSID="{cfg["ssid"]}"\n')
+            f.write(f'HOTSPOT_PASS="{cfg["pass"]}"\n')
+            f.write(f'HOTSPOT_CHANNEL="{cfg["ch"]}"\n')
+            f.write(f'HOTSPOT_IP="{cfg["ip"]}"\n')
         print(f"  {GRN}[+]{RST} Config saved")
     except Exception as e:
         print(f"  {RED}[!]{RST} Could not save config: {e}")
 
-    hotspot_script = f"""#!/bin/bash
-# PiCarPro Wi-Fi manager (v1.3.4)
-# HOTSPOT_MODE: hotspot = always AP (default, robot car UX)
-#               auto    = home Wi-Fi first, AP fallback
-#               client  = never AP
-HOTSPOT_CONF="/etc/picarpro/hotspot.conf"
-HOTSPOT_CONN="picarpro-hotspot"
-HOTSPOT_SSID="{existing_ssid}"
-HOTSPOT_PASS="{existing_pass}"
-HOTSPOT_MODE="hotspot"
-[ -f "$HOTSPOT_CONF" ] && source "$HOTSPOT_CONF"
-
-log() {{ echo "[PiCarPro-WiFi] $*"; }}
-
-# 1. Wait for NetworkManager (up to 30 s)
-for i in $(seq 1 30); do nmcli general status &>/dev/null && break; sleep 1; done
-
-# 2. Make sure radio is not blocked/turned off (may happen after power glitches)
-rfkill unblock wifi 2>/dev/null
-nmcli radio wifi on 2>/dev/null
-
-# 3. Wait for the Wi-Fi interface (up to 60 s), detect it dynamically
-#    (brcmfmac loads firmware AFTER NetworkManager start)
-WIFI_DEV=""
-for i in $(seq 1 60); do
-    WIFI_DEV=$(nmcli -t -f DEVICE,TYPE dev status 2>/dev/null | grep ':802-11-wireless$' | head -1 | cut -d: -f1)
-    [ -n "$WIFI_DEV" ] && break
-    sleep 1
-done
-if [ -z "$WIFI_DEV" ]; then
-    log "ERROR: no Wi-Fi interface after 60 s (wlan0 missing / rfkill / firmware)"
-    log "Check: nmcli device status; rfkill list; dmesg | grep brcmfmac"
-    exit 1
-fi
-log "Wi-Fi interface: $WIFI_DEV (mode: $HOTSPOT_MODE)"
-
-wifi_connected() {{
-    nmcli -t -f TYPE,STATE dev status 2>/dev/null | grep -q '^802-11-wireless:connected'
-}}
-
-# hotspot already running? nothing to do (no bounce on service restart)
-nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | grep -q "^${{HOTSPOT_CONN}}:" && exit 0
-
-if [ "$HOTSPOT_MODE" = "hotspot" ]; then
-    # a live client connection would block AP activation on the same radio
-    nmcli device disconnect "$WIFI_DEV" &>/dev/null
-    sleep 1
-else
-    wifi_connected && exit 0
-
-    FIRST_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep '802-11-wireless' | grep -v "$HOTSPOT_CONN" | head -1 | cut -d: -f1)
-    if [ -n "$FIRST_WIFI" ]; then
-        log "Trying known Wi-Fi connection: $FIRST_WIFI"
-        nmcli con up id "$FIRST_WIFI" ifname "$WIFI_DEV" &>/dev/null
-        sleep 5
-    fi
-
-    wifi_connected && exit 0
-
-    if [ "$HOTSPOT_MODE" = "client" ]; then
-        log "ERROR: MODE=client and no known Wi-Fi reachable"
-        exit 1
-    fi
-fi
-
-log "Starting hotspot: $HOTSPOT_SSID"
-nmcli con delete "$HOTSPOT_CONN" &>/dev/null
-if ! nmcli con add type wifi ifname "$WIFI_DEV" con-name "$HOTSPOT_CONN" autoconnect no ssid "$HOTSPOT_SSID"; then
-    log "ERROR: could not create hotspot profile"
-    exit 1
-fi
-# channel pinned to 6 (1-11 are AP-legal worldwide; auto sometimes picks
-# 12/13 which many phones never scan)
-nmcli con modify "$HOTSPOT_CONN" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6
-nmcli con modify "$HOTSPOT_CONN" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS"
-nmcli con modify "$HOTSPOT_CONN" ipv4.method shared ipv4.addresses 10.42.0.1/24
-if ! nmcli con up "$HOTSPOT_CONN"; then
-    log "ERROR: hotspot activation failed (details: journalctl -u picarpro-wifi -e)"
-    log "HINT: if error mentions dnsmasq/IP config: sudo apt install dnsmasq-base"
-    exit 1
-fi
-log "Hotspot is up: $HOTSPOT_SSID | web UI: http://10.42.0.1:5000"
-"""
-
-    script_path = "/usr/local/bin/wifi_hotspot_manager.sh"
-    try:
-        with open(script_path, "w") as f:
-            f.write(hotspot_script)
-        os.chmod(script_path, 0o755)
-        print(f"  {GRN}[+]{RST} Hotspot script saved")
-    except Exception as e:
-        print(f"  {RED}[!]{RST} Error: {e}")
+    # --- полная перезапись Wi-Fi: hostapd + dnsmasq + SSH -----------------
+    migrator = os.path.join(thisPath, "fix_wifi_hostapd.sh")
+    if not os.path.exists(migrator):
+        print(f"  {RED}[!]{RST} fix_wifi_hostapd.sh not found next to setup.py")
         return
+    run_cmd(f'bash "{migrator}"')
 
-    hotspot_service = """[Unit]
-Description=PiCar Pro WiFi Hotspot Manager
-After=NetworkManager.service
-Wants=NetworkManager.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/wifi_hotspot_manager.sh
-RemainAfterExit=yes
-# if the Wi-Fi interface was not up yet, retry instead of giving up
-Restart=on-failure
-RestartSec=15
-StartLimitIntervalSec=0
-
-[Install]
-WantedBy=multi-user.target
-"""
-    try:
-        with open("/etc/systemd/system/picarpro-wifi.service", "w") as f:
-            f.write(hotspot_service)
-        run_cmd("systemctl daemon-reload")
-        run_cmd("systemctl enable picarpro-wifi.service", critical=False)
-        print(f"  {GRN}[+]{RST} Hotspot service enabled")
-    except Exception as e:
-        print(f"  {RED}[!]{RST} Error: {e}")
+    print(f"  {GRN}[+]{RST} AP '{cfg['ssid']}' @ ch{cfg['ch']}, Pi IP {cfg['ip']}")
+    print(f"        SSH: ssh <user>@{cfg['ip']}   UI: http://{cfg['ip']}:5000")
+    print("        Точка доступа поднимается при каждой загрузке автоматически.")
 
 
 def stage_7_systemd_service():

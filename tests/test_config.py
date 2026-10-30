@@ -70,8 +70,8 @@ class TestNetwork:
     def test_hotspot_password_min_length(self):
         assert len(config.HOTSPOT_PASSWORD) >= 8
 
-    def test_hotspot_mode_valid(self):
-        assert config.HOTSPOT_MODE in ('hotspot', 'auto', 'client')
+    def test_hotspot_channel_valid(self):
+        assert 1 <= int(config.HOTSPOT_CHANNEL) <= 13
 
 
 class TestBattery:

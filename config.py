@@ -218,16 +218,15 @@ DS4_STEER_RANGE = 60
 WEBSOCKET_PORT = 8888
 FLASK_PORT = 5000
 
-# WiFi Hotspot (wifi_hotspot_manager.sh, systemd-сервис picarpro-wifi)
-# HOTSPOT_MODE:
-#   hotspot = всегда точка доступа (по умолчанию — режим машинки: телефон
-#             подключается к роботу напрямую, веб-интерфейс http://10.42.0.1:5000)
-#   auto    = сначала домашняя Wi-Fi-сеть, при неудаче — точка доступа
-#   client  = никогда не поднимать точку доступа
+# WiFi Hotspot — hostapd + dnsmasq (системные сервисы picarpro-hotspot*).
+# Точка доступа работает ВСЕГДА, независимо от NetworkManager (v1.3.5).
+# Значения копируются установщиком в /etc/picarpro/hotspot.conf.
+# Изменить без переустановки: правьте /etc/picarpro/hotspot.conf, затем
+#   sudo systemctl restart picarpro-hotspot picarpro-hotspot-dhcp
 HOTSPOT_SSID = "Adeept_Robot"
 HOTSPOT_PASSWORD = "12345678"
-HOTSPOT_IP = "10.42.0.1"
-HOTSPOT_MODE = "hotspot"
+HOTSPOT_CHANNEL = 6        # 1-11 видны телефонам в любой стране
+HOTSPOT_IP = "10.42.0.1"   # SSH: <user>@10.42.0.1, UI: http://10.42.0.1:5000
 
 # ---------------------------------------------------------------------------
 # Безопасность

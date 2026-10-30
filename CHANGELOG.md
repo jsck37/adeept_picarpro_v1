@@ -1,5 +1,46 @@
 # CHANGELOG — PiCar-Pro Merged Edition v1.0.0
 
+## MOD v1.3.5 — Wi-Fi переписан на hostapd + dnsmasq, SSH на уровне системы
+
+По репорту пользователя: точка доступа так и не появляется (NM-вариант
+падал трижды: «no suitable device found», затем «скрипт работает, но AP
+нет»). Принято решение: NetworkManager-реализация полностью удаляется,
+Wi-Fi-подсистема переписана на классический стек hostapd + dnsmasq — то,
+чем пользовались оригинальные прошивки Adeept. hostapd говорит с драйвером
+напрямую (nl80211) и не зависит от логики NM, wpa_supplicant'а и dnsmasq'а
+самого NM.
+
+* **fix_wifi_hostapd.sh** — единый идемпотентный скрипт перезаписи Wi-Fi;
+  его вызывает установщик (stage 6), и его же можно запустить вручную на
+  живой машине БЕЗ переустановки: `sudo bash fix_wifi_hostapd.sh`;
+* **wlan0 навсегда изъят из NetworkManager**: постоянное правило
+  /etc/NetworkManager/conf.d/picarpro-unmanage-wlan0.conf + подстраховка
+  `nmcli device set wlan0 managed no` перед каждым стартом AP — NM больше
+  не может перехватить интерфейс или авто-подключиться к чужой сети;
+* **picarpro-hotspot.service**: hostapd во foreground под управлением
+  systemd, Restart=always/5с; подготовка интерфейса — в ExecStartPre
+  (ожидание wlan0 до 60 с, rfkill unblock, сброс линка, статический IP);
+  сбой подготовки = перезапуск юнита — бесконечное самовосстановление;
+* **picarpro-hotspot-dhcp.service**: собственный dnsmasq (dnsmasq-base, без
+  системного сервиса, чтобы не занимать :53) раздаёт адреса клиентам AP
+  (диапазон .50-.150 от IP машинки, router/DNS = IP машинки);
+* runtime-конфиги генерируются при каждом старте из /etc/picarpro/hotspot.conf
+  (HOTSPOT_SSID/HOTSPOT_PASS/HOTSPOT_CHANNEL/HOTSPOT_IP): правка файла +
+  restart двух сервисов применяет настройки без переустановки;
+* канал по умолчанию 6, WPA2-PSK (CCMP), ieee80211n, hw_mode=g;
+* предыдущие артефакты (picarpro-wifi.service, wifi_hotspot_manager.sh,
+  NM-профиль picarpro-hotspot, дистрибутивный hostapd.service) отключаются
+  и удаляются автоматически;
+* **SSH включён на уровне системы**: openssh-server ставится, ssh.service
+  enable + start — к машинке можно подключаться `ssh <user>@10.42.0.1`
+  сразу после подключения к точке доступа;
+* HOTSPOT_MODE удалён (режимы больше не нужны — AP всегда); вместо него
+  HOTSPOT_CHANNEL в config.py; +test_hotspot_channel_valid.
+
+Мок-тесты: генерация всех артефактов, NM-правило, юниты (Restart/ExecStartPre),
+runtime-конфиги (ssid/channel/wpa2/dhcp-range из префикса IP), enable ssh,
+негатив (пароль <8 отклоняется).
+
 ## MOD v1.3.4 — точка доступа становится основным режимом Wi-Fi
 
 По репорту пользователя: после v1.3.3 скрипт отрабатывает, но точки доступа
