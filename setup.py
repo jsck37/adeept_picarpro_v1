@@ -337,26 +337,26 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
         ("I2C/Motor/Servo",
-         f"sudo -H pip3 install {pip_flag} "
+         f"sudo -H pip install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
          "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
-         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
+         f"sudo -H pip install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
-         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
+         f"sudo -H pip install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
-         f"sudo -H pip3 install {pip_flag} evdev"),
-        ("GPIO/SPI/I2C (текущая прошивка: RPi.GPIO, spidev, smbus2)",
-         f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
+         f"sudo -H pip install {pip_flag} evdev"),
+        ("GPIO/SPI/I2C (RPi.GPIO, spidev, smbus2)",
+         f"sudo -H pip install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 
     for group_name, cmd in pip_groups:
@@ -428,7 +428,7 @@ def stage_6_wifi_hotspot(debian_ver):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     default_ssid = "Adeept_Robot"
-    default_pass = "12345678"
+    default_pass = "0123456789"
     try:
         sys.path.insert(0, thisPath)
         from config import HOTSPOT_SSID, HOTSPOT_PASSWORD
