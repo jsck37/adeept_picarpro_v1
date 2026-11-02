@@ -4,7 +4,7 @@ import time
 from picarpro.logger import logger
 from picarpro.utils.system_info import SystemInfo
 from picarpro.network import get_ip
-from config import DEFAULT_SPEED, FLASK_PORT
+from config import DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL_S
 
 
 class SharedState:
@@ -95,6 +95,102 @@ class SharedState:
         ip = get_ip()
         if self.oled and self.oled._initialized:
             self.oled.set_lines([f'{ip}:{FLASK_PORT}', 'Ready', '', ''])
+
+        self._start_hw_retry()
+
+    # ---- автовосстановление железа (v1.4.0) --------------------------------
+    # Если в момент загрузки шина I2C была занята/зависла (классика:
+    # неверно подключённый MPU6050) или SPI ещё не поднят, контроллеры
+    # остаются мёртвыми до перезапуска сервиса. Фоновый ретрай делает
+    # модули доступными сам — панель серво/LED в UI оживёт без перезапуска.
+    _HW_RETRY = [
+        # (атрибут state, модуль, класс, флаг «жив»)
+        ('oled', 'oled', 'OLEDDisplay', '_initialized'),
+        ('leds', 'leds_ws2812', 'LEDController', '_initialized'),
+        ('motors', 'motors', 'MotorController', '_initialized'),
+        ('servos', 'servos', 'ServoController', '_pwm_initialized'),
+        ('switches', 'switch', 'SwitchController', '_initialized'),
+        ('buzzer', 'buzzer', 'BuzzerController', '_initialized'),
+        ('ultrasonic', 'ultrasonic', 'UltrasonicSensor', '_initialized'),
+        # mpu6050 — собственный retry-цикл (не дублируем);
+        # ds4 — собственный watchdog и Bluetooth-логика.
+    ]
+
+    def _start_hw_retry(self):
+        self._hw_retry_thread = threading.Thread(
+            target=self._hw_retry_loop, daemon=True)
+        self._hw_retry_thread.start()
+
+    def _hw_alive(self, attr, flag):
+        obj = getattr(self, attr, None)
+        return obj is not None and bool(getattr(obj, flag, True))
+
+    def _hw_retry_step(self):
+        """Один проход ретрая: реинициализация мёртвых модулей.
+
+        Вынесено из цикла для тестируемости. Возвращает список
+        восстановленных имён."""
+        recovered = []
+        for attr, module, cls, flag in self._HW_RETRY:
+            if self._hw_alive(attr, flag):
+                continue
+            obj = self._init(module, cls)
+            if obj is not None and bool(getattr(obj, flag, False)):
+                setattr(self, attr, obj)
+                recovered.append(attr)
+                logger.info(f'[State] {attr} recovered (auto-retry v1.4.0)')
+        if recovered:
+            self._recreate_dependents()
+        return recovered
+
+    def _hw_retry_loop(self):
+        while self.running:
+            time.sleep(HW_RETRY_INTERVAL_S)
+            if not self.running:
+                break
+            try:
+                self._hw_retry_step()
+            except Exception as e:
+                logger.warning(f'[State] hw retry error: {e}')
+
+    def _recreate_dependents(self):
+        """После восстановления железа пересоздать режимы, которые при
+        загрузке держали мёртвые ссылки (только если они не активны)."""
+        try:
+            if (self.steady is None and self.mpu6050
+                    and getattr(self.mpu6050, 'initialized', False)
+                    and self._hw_alive('servos', '_pwm_initialized')):
+                from picarpro.functions.steady_camera import SteadyCameraController
+                self.steady = self._try_init(
+                    'SteadyCamera',
+                    lambda: SteadyCameraController(self.servos, self.mpu6050))
+        except Exception:
+            pass
+        try:
+            if (self.autonomous is not None
+                    and not self.autonomous.is_active()):
+                self.autonomous = self._try_init(
+                    'Autonomous', lambda: _make_autonomous(self))
+        except Exception:
+            pass
+        try:
+            if self.voice is not None and not self.voice._active:
+                self.voice = self._try_init(
+                    'Voice', lambda: _make_voice(self))
+        except Exception:
+            pass
+        # DS4-геймпад получает ссылки на железо один раз в start()
+        ds4 = self.ds4
+        if ds4 is not None:
+            for ref_attr, state_attr in (
+                    ('_motors', 'motors'), ('_servos', 'servos'),
+                    ('_leds', 'leds'), ('_buzzer', 'buzzer'),
+                    ('_switches', 'switches')):
+                try:
+                    if getattr(ds4, ref_attr, None) is not None:
+                        setattr(ds4, ref_attr, getattr(self, state_attr))
+                except Exception:
+                    pass
 
     def init_camera(self):
         if not self.camera:

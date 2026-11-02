@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Automated setup for PiCar Pro (Flask + WebSocket) on Raspberry Pi 3B+.
 
-АДАПТАЦИЯ коммита 4870e2b под текущую структуру репозитория (v1.3.1):
+АДАПТАЦИЯ коммита 4870e2b под текущую структуру репозитория (v1.4.0):
 * точка входа boot.py вместо Server/WebServer.py;
 * HOTSPOT_* читаются из config.py в корне;
 * добалены зависимости текущей прошивки: RPi.GPIO, spidev, smbus2 (pip),
@@ -9,7 +9,10 @@
 * на Trixie do_camera не вызывается (удалён из raspi-config);
 * очищается /etc/sysctl.d/99-picarpro-swap.conf от прежней версии стека
   и маскируется zramswap.service (zram-tools);
-* проверка места на диске поднята до 2600 МБ (2 ГБ под /var/swap).
+* проверка места на диске поднята до 2600 МБ (2 ГБ под /var/swap);
+* v1.4.0: в config.txt гарантированы dtparam=spi=on (WS2812-лента через
+  SPI0) и camera_auto_detect=1 (CSI-камера на Bookworm/Trixie без
+  raspi-config).
 Вся остальная логика оригинала сохранена без изменений."""
 
 import os
@@ -337,26 +340,26 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
         ("I2C/Motor/Servo",
-         f"sudo -H pip install {pip_flag} "
+         f"sudo -H pip3 install {pip_flag} "
          "adafruit-circuitpython-pca9685 "
          "adafruit-circuitpython-motor "
          "adafruit-circuitpython-busdevice"),
         ("OLED/LED",
-         f"sudo -H pip install {pip_flag} luma.oled rpi_ws281x"),
+         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
-         f"sudo -H pip install {pip_flag} mpu6050-raspberrypi"),
+         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
-         f"sudo -H pip install {pip_flag} evdev"),
-        ("GPIO/SPI/I2C (RPi.GPIO, spidev, smbus2)",
-         f"sudo -H pip install {pip_flag} RPi.GPIO spidev smbus2"),
+         f"sudo -H pip3 install {pip_flag} evdev"),
+        ("GPIO/SPI/I2C (текущая прошивка: RPi.GPIO, spidev, smbus2)",
+         f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 
     for group_name, cmd in pip_groups:
@@ -410,6 +413,12 @@ def stage_5_hardware_config():
     append_to_config("i2c_arm=on", "dtparam=i2c_arm=on", config_path)
     append_to_config("i2c_arm_baudrate", "dtparam=i2c_arm_baudrate=400000", config_path)
     append_to_config("gpu_mem=", "gpu_mem=128", config_path)
+    # v1.4.0: SPI обязателен для WS2812-ленты (spidev0.0); на ОС без
+    # raspi-config (чистый Debian) do_spi выше не сработал бы
+    append_to_config("spi=on", "dtparam=spi=on", config_path)
+    # v1.4.0: CSI-камера на Bookworm/Trixie включается авто-детектом
+    # (без этого libcamera не видит сенсор: «No camera number 0 found»)
+    append_to_config("camera_auto_detect", "camera_auto_detect=1", config_path)
 
     if get_debian_version() < 12:
         append_to_config("start_x=1", "start_x=1", config_path)
@@ -428,7 +437,7 @@ def stage_6_wifi_hotspot(debian_ver):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     # --- настройки: config.py -> существующий conf -> запрос -------------
-    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "0123456789", "6", "10.42.0.1"
+    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "12345678", "6", "10.42.0.1"
     try:
         sys.path.insert(0, thisPath)
         from config import (HOTSPOT_SSID, HOTSPOT_PASSWORD,
@@ -460,7 +469,7 @@ def stage_6_wifi_hotspot(debian_ver):
 
     print(f"\n  Hotspot SSID : {BOLD}{cfg['ssid']}{RST}")
     print(f"  Hotspot pass : {BOLD}{cfg['pass']}{RST}")
-    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11)")
+    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11 видны всем телефонам)")
     print(f"  AP IP        : {BOLD}{cfg['ip']}{RST}  (SSH: <user>@{cfg['ip']}, UI: http://{cfg['ip']}:5000)")
     if input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower() == 'y':
         v = input(f"  {YLW}?{RST} SSID [{cfg['ssid']}]: ").strip()
@@ -502,6 +511,7 @@ def stage_6_wifi_hotspot(debian_ver):
     print(f"  {GRN}[+]{RST} AP '{cfg['ssid']}' @ ch{cfg['ch']}, Pi IP {cfg['ip']}")
     print(f"        SSH: ssh <user>@{cfg['ip']}   UI: http://{cfg['ip']}:5000")
     print("        Точка доступа поднимается при каждой загрузке автоматически.")
+    return cfg
 
 
 def stage_7_systemd_service():
@@ -558,7 +568,8 @@ def main():
     stage_3_apt_packages(debian_ver, codename)
     stage_4_pip_packages(debian_ver)
     stage_5_hardware_config()
-    stage_6_wifi_hotspot(debian_ver)
+    hotspot_cfg = stage_6_wifi_hotspot(debian_ver) or {
+        'ssid': 'Adeept_Robot'}
     stage_7_systemd_service()
 
     try:
@@ -655,7 +666,7 @@ def main():
     print(f"")
     print(f"  {BOLD}Network:{RST}")
     print(f"  IP:       {current_ip}")
-    print(f"  Hotspot:  {existing_ssid if 'existing_ssid' in dir() else 'Adeept_Robot'}")
+    print(f"  Hotspot:  {hotspot_cfg['ssid']}")
     print(f"")
     print(f"  {BOLD}Server:{RST}")
     print(f"  Path:     {thisPath}")

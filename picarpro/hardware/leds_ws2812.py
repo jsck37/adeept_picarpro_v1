@@ -13,6 +13,11 @@ _BIT0 = 0b1100
 _BIT1 = 0b1110
 _LATCH_BYTES = 90   # >= 50 мкс тишины на шине для защёлки кадра (было 60)
 
+# Троттлинг диагностического лога при недоступном SPI (v1.4.0): ретраи
+# идут каждые HW_RETRY_INTERVAL_S, подсказка — раз в LED_DIAG_INTERVAL_S.
+LED_DIAG_INTERVAL_S = 300.0
+_SPI_DEV = '/dev/spidev0.0'
+
 
 def _byte_to_spi(byte):
     out = bytearray(4)
@@ -22,6 +27,8 @@ def _byte_to_spi(byte):
 
 
 class LEDController:
+    _last_diag_ts = 0.0   # классовое поле: общее для всех инстансов
+
     def __init__(self):
         self._spi = None
         self._mode = 'off'
@@ -32,18 +39,54 @@ class LEDController:
         self._pixels = [(0, 0, 0)] * LED_COUNT
         self._initialized = False
         if not _HAS_SPI:
-            logger.warning('[LEDs] spidev not available')
+            if not LEDController._throttle():
+                logger.warning('[LEDs] spidev not available')
             return
         try:
             if not self._open_spi():
-                logger.error('[LEDs] SPI0 open failed')
+                self._log_diag()
                 return
             self._initialized = True
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
             logger.info(f'[LEDs] OK — {LED_COUNT} WS2812 via SPI0')
         except Exception as e:
-            logger.error(f'[LEDs] init failed: {e}')
+            self._log_diag(e)
+
+    @classmethod
+    def _throttle(cls):
+        """True, если диагностический лог подавлен (не истёк интервал)."""
+        now = time.monotonic()
+        if now - cls._last_diag_ts < LED_DIAG_INTERVAL_S:
+            return True
+        cls._last_diag_ts = now
+        return False
+
+    @classmethod
+    def _log_diag(cls, err=None):
+        """Диагностика неработающей WS2812-ленты — не чаще
+        LED_DIAG_INTERVAL_S (v1.4.0). Лента сидит на SPI0 (GPIO10/MOSI,
+        физ. пин 19); без dtparam=spi=on устройства /dev/spidev0.0 нет."""
+        import os as _os
+        if cls._throttle():
+            return
+        if err is not None:
+            logger.error(f'[LEDs] init failed: {err}')
+        else:
+            logger.error('[LEDs] SPI0 open failed')
+        if not _os.path.exists(_SPI_DEV):
+            logger.error(
+                '[LEDs] подсказки: /dev/spidev0.0 отсутствует — включите SPI '
+                '(raspi-config Interface Options -> SPI, или строка '
+                'dtparam=spi=on в /boot/firmware/config.txt) и перезагрузите; '
+                'установщик v1.4.0 делает это сам. DIN ленты — GPIO10 (пин 19). '
+                'Модуль подхватится автоматически (авто-ретраи v1.4.0) после '
+                'появления SPI.')
+        else:
+            logger.error(
+                '[LEDs] подсказки: /dev/spidev0.0 есть — проверьте провод DIN '
+                '(GPIO10/MOSI, физ. пин 19) и питание 5V ленты; при просадке '
+                'питания лента гаснет (см. комментарий LED_COUNT в config.py).')
 
     def _open_spi(self):
         """Открыть SPI (с закрытием предыдущего дескриптора при retry)."""

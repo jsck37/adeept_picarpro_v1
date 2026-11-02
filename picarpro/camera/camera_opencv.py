@@ -1,3 +1,7 @@
+import glob
+import os
+import shutil
+import subprocess
 import threading, time, math
 from picarpro.logger import logger
 from picarpro.camera.yolo_detector import YoloDetector
@@ -25,6 +29,13 @@ except ImportError:
     _HAS_CV2 = False
     cv2 = None
     np = None
+
+# Источники камеры: 'picamera2' (CSI через libcamera) или 'v4l2' (USB/сторонняя
+# через OpenCV V4L2). Picamera2 формат "RGB888" (проверено по исходникам
+# picamera2: jpeg_encoder FORMAT_TABLE "RGB888" -> "BGR") отдаёт массив
+# В ПОРЯДКЕ BGR — как и OpenCV VideoCapture. Оба источника нормализуются
+# к настоящему RGB сразу после захвата (v1.4.0, см. _capture_loop).
+CAMERA_DIAG_INTERVAL_S = 60.0   # диагностика неудач инициализации — не чаще
 
 CV_NONE = 'none'
 CV_LINE = 'findlineCV'
@@ -372,6 +383,7 @@ class Camera:
     _instance_lock = threading.Lock()
     _instance = None
     _picam_error_logged = False
+    _last_diag_ts = 0.0   # классовое поле: троттлинг диагностики для всех инстансов
 
     @classmethod
     def get_instance(cls):
@@ -384,6 +396,8 @@ class Camera:
         self.cv_thread = CVThread()
         self.cv_thread.start()
         self._picam = None
+        self._cap = None            # OpenCV VideoCapture (USB/V4L2, v1.4.0)
+        self._source = None         # 'picamera2' | 'v4l2' | None
         self._picam_lock = threading.Lock()
         self._reconnect_count = 0
         self._frame = None
@@ -401,38 +415,152 @@ class Camera:
         self._stream_clients = 0
         self._raw_demand = 0
 
+    @classmethod
+    def _log_init_failure(cls, err):
+        """Лог неудачи инициализации с диагностикой — не чаще
+        CAMERA_DIAG_INTERVAL_S (v1.4.0). Раньше ошибка «No camera number 0
+        found» печаталась каждую секунду без единой подсказки."""
+        now = time.monotonic()
+        if now - cls._last_diag_ts < CAMERA_DIAG_INTERVAL_S:
+            return
+        cls._last_diag_ts = now
+        logger.error(f'[Camera] init failed: {err}')
+        for line in cls._collect_diagnostics():
+            logger.error(f'[Camera] diag: {line}')
+        logger.error(
+            '[Camera] hints: проверьте шлейф CSI (синяя сторона ленты — к плате, '
+            'до щелчка разъёма); в config.txt должна быть camera_auto_detect=1 '
+            '(установщик v1.4.0 добавляет сам, после правки — reboot); '
+            'проверка железа: rpicam-hello --list-cameras. '
+            'USB-камера подхватится автоматически как /dev/video0.')
+
+    @staticmethod
+    def _collect_diagnostics():
+        """Что видит система: libcamera, V4L2-устройства, config.txt, dmesg."""
+        lines = []
+        # 1) libcamera — есть ли CSI-камера на уровне стека
+        for tool in ('rpicam-hello', 'libcamera-hello'):
+            if shutil.which(tool):
+                try:
+                    r = subprocess.run(
+                        [tool, '--list-cameras'], capture_output=True,
+                        text=True, timeout=15)
+                    out = ((r.stdout or '') + (r.stderr or '')).strip()
+                    lines.append(f'{tool}: {out[:300] if out else "(пусто)"}')
+                except Exception as e:
+                    lines.append(f'{tool}: сбой ({e})')
+                break
+        # 2) V4L2-устройства
+        try:
+            devs = sorted(glob.glob('/dev/video*'))
+            lines.append('/dev/video*: '
+                         + (', '.join(devs) if devs else 'нет'))
+        except Exception:
+            pass
+        # 3) config.txt — авто-детект камеры / overlays сенсора
+        for cfg in ('/boot/firmware/config.txt', '/boot/config.txt'):
+            if not os.path.exists(cfg):
+                continue
+            try:
+                with open(cfg) as f:
+                    cam = [ln.strip() for ln in f
+                           if 'camera' in ln.lower()
+                           or 'imx219' in ln.lower() or 'imx477' in ln.lower()
+                           or 'imx708' in ln.lower() or 'ov5647' in ln.lower()]
+                lines.append(f'{cfg}: '
+                             + ('; '.join(cam[:6]) if cam
+                                else 'нет строк камеры (нужно camera_auto_detect=1)'))
+            except Exception:
+                pass
+        # 4) dmesg — ошибки CSI-шины (unicam) и сенсора
+        try:
+            r = subprocess.run(
+                'dmesg | grep -iE "unicam|imx219|imx477|imx708|ov5647" '
+                '| tail -4',
+                shell=True, capture_output=True, text=True, timeout=10)
+            out = (r.stdout or '').strip()
+            if out:
+                lines.append('dmesg: '
+                             + ' | '.join(x.strip() for x in out.splitlines()))
+        except Exception:
+            pass
+        return lines
+
+    @staticmethod
+    def _find_v4l2_device():
+        """Первый /dev/videoN (обычно 0) — для USB-камеры."""
+        for dev in sorted(glob.glob('/dev/video*')):
+            try:
+                return int(dev.rsplit('video', 1)[1])
+            except (IndexError, ValueError):
+                continue
+        return None
+
     def _init_camera(self):
         with self._picam_lock:
-            if self._picam is not None:
+            if self._picam is not None or self._cap is not None:
                 return
-            if not _HAS_PICAM:
+            # --- путь 1: Picamera2 (CSI-камера через libcamera) ---------
+            if _HAS_PICAM:
+                try:
+                    self._picam = Picamera2()
+                    cfg = self._picam.create_preview_configuration(
+                        main={'size': CAMERA_RESOLUTION, 'format': 'RGB888'})
+                    self._picam.configure(cfg)
+                    if CAMERA_FLIP_HORIZONTAL:
+                        self._picam.set_control('flip_h', True)
+                    if CAMERA_FLIP_VERTICAL:
+                        self._picam.set_control('flip_v', True)
+                    try:
+                        self._picam.set_controls({
+                            'FrameRate': CAMERA_FPS,
+                            'AeEnable': True, 'AwbEnable': True,
+                            'NoiseReductionMode': 1,
+                        })
+                    except Exception:
+                        pass
+                    self._picam.start()
+                    self._source = 'picamera2'
+                    self._reconnect_count = 0
+                    logger.info(f'[Camera] OK (picamera2/CSI) — '
+                                f'{CAMERA_RESOLUTION} @ {CAMERA_FPS}fps')
+                    return
+                except Exception as e:
+                    self._picam = None
+                    self._log_init_failure(e)
+            else:
                 if not Camera._picam_error_logged:
                     logger.error('[Camera] picamera2 not installed')
                     Camera._picam_error_logged = True
-                return
-            try:
-                self._picam = Picamera2()
-                cfg = self._picam.create_preview_configuration(
-                    main={'size': CAMERA_RESOLUTION, 'format': 'RGB888'})
-                self._picam.configure(cfg)
-                if CAMERA_FLIP_HORIZONTAL:
-                    self._picam.set_control('flip_h', True)
-                if CAMERA_FLIP_VERTICAL:
-                    self._picam.set_control('flip_v', True)
-                try:
-                    self._picam.set_controls({
-                        'FrameRate': CAMERA_FPS,
-                        'AeEnable': True, 'AwbEnable': True,
-                        'NoiseReductionMode': 1,
-                    })
-                except Exception:
-                    pass
-                self._picam.start()
-                self._reconnect_count = 0
-                logger.info(f'[Camera] OK — {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps')
-            except Exception as e:
-                logger.error(f'[Camera] init failed: {e}')
-                self._picam = None
+            # --- путь 2: USB/совместимая камера через OpenCV V4L2 -------
+            # (в тестовом окружении cv2-фейк не имеет VideoCapture —
+            #  ветка просто не активируется)
+            if _HAS_CV2 and hasattr(cv2, 'VideoCapture'):
+                idx = self._find_v4l2_device()
+                if idx is not None:
+                    try:
+                        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_RESOLUTION[0])
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_RESOLUTION[1])
+                        cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+                        if hasattr(cv2, 'VideoWriter_fourcc'):
+                            # MJPG: 640x480@15 по USB 2.0 без потерь fps
+                            cap.set(cv2.CAP_PROP_FOURCC,
+                                    cv2.VideoWriter_fourcc(*'MJPG'))
+                        if cap.isOpened():
+                            self._cap = cap
+                            self._source = 'v4l2'
+                            self._reconnect_count = 0
+                            logger.info(f'[Camera] OK (USB/V4L2 /dev/video{idx})'
+                                        f' — {CAMERA_RESOLUTION} @ {CAMERA_FPS}fps')
+                            return
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self._log_init_failure(e)
+            # оба пути не удались — retry цикл попробует снова
 
     def _restart_camera(self):
         with self._picam_lock:
@@ -444,6 +572,11 @@ class Camera:
                 try: self._picam.close()
                 except Exception: pass
                 self._picam = None
+            if self._cap:
+                try: self._cap.release()
+                except Exception: pass
+                self._cap = None
+            self._source = None
         time.sleep(backoff)
         self._init_camera()
 
@@ -486,14 +619,32 @@ class Camera:
         while self._running:
             try:
                 with self._picam_lock:
+                    source = self._source
                     picam = self._picam
-                if picam is None:
+                    cap = self._cap
+                if picam is None and cap is None:
                     self._init_camera()
-                    if self._picam is None:
+                    with self._picam_lock:
+                        source = self._source
+                        picam = self._picam
+                        cap = self._cap
+                    if picam is None and cap is None:
                         time.sleep(1.0)
                         continue
-                    picam = self._picam
-                raw = picam.capture_array()
+                if source == 'v4l2':
+                    ok, captured = cap.read()
+                    if not ok or captured is None:
+                        captured = None
+                else:
+                    captured = picam.capture_array()
+                if captured is not None and _HAS_CV2 and len(captured.shape) == 3:
+                    # Нормализация к настоящему RGB (v1.4.0): и Picamera2
+                    # "RGB888" (байты BGR — см. шапку файла), и OpenCV
+                    # VideoCapture отдают BGR. Все потребители кодовой базы
+                    # (CV-режимы, ArUco, color_scan, YOLO swapRB=True) ждут
+                    # RGB; раньше HSV-фильтры получали перепутанные каналы.
+                    captured = cv2.cvtColor(captured, cv2.COLOR_BGR2RGB)
+                raw = captured
                 if raw is None or len(raw.shape) != 3:
                     consecutive_errors += 1
                     if consecutive_errors >= MAX_ERR:
@@ -514,8 +665,10 @@ class Camera:
                         frame = raw
                     if _HAS_CV2:
                         # JPEG-кодируем только при спросе: без зрителей
-                        # imencode 640x480 съедал ядро впустую (v1.2.0)
-                        ok, jpg = cv2.imencode('.jpg', frame,
+                        # imencode 640x480 съедал ядро впустую (v1.2.0).
+                        # cv2.imencode ждёт BGR — кадр у нас RGB (v1.4.0).
+                        bgr_for_jpg = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        ok, jpg = cv2.imencode('.jpg', bgr_for_jpg,
                                                 [cv2.IMWRITE_JPEG_QUALITY, CAMERA_JPEG_QUALITY])
                         if ok:
                             with self._frame_lock:
@@ -598,3 +751,8 @@ class Camera:
                 try: self._picam.close()
                 except Exception: pass
                 self._picam = None
+            if self._cap:
+                try: self._cap.release()
+                except Exception: pass
+                self._cap = None
+            self._source = None

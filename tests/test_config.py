@@ -73,6 +73,11 @@ class TestNetwork:
     def test_hotspot_channel_valid(self):
         assert 1 <= int(config.HOTSPOT_CHANNEL) <= 13
 
+    def test_hw_retry_interval_valid(self):
+        # v1.4.0: интервал автовосстановления железа — положительное число
+        assert isinstance(config.HW_RETRY_INTERVAL_S, (int, float))
+        assert config.HW_RETRY_INTERVAL_S >= 1.0
+
 
 class TestBattery:
     def test_battery_thresholds(self):

@@ -19,8 +19,15 @@ except ImportError:
 # Файл калибровки servo_cal.json упразднён: редактирование лимитов
 # из веб-интерфейса удалено, чтобы их нельзя было случайно изменить.
 
+# Троттлинг диагностического лога при недоступном PCA9685 (v1.4.0):
+# ретраи идут каждые HW_RETRY_INTERVAL_S, но подсказка печатается
+# раз в SERVO_DIAG_INTERVAL_S — иначе журнал заливается.
+SERVO_DIAG_INTERVAL_S = 300.0
+
 
 class ServoController:
+    _last_diag_ts = 0.0   # классовое поле: общее для всех инстансов
+
     def __init__(self):
         self._pca = None
         self._servos = [None] * SERVO_COUNT
@@ -77,7 +84,26 @@ class ServoController:
                         f'({sum(s is not None for s in self._servos)}/'
                         f'{SERVO_COUNT} channels, {mode})')
         except Exception as e:
-            logger.error(f'[Servos] init failed: {e}')
+            self._log_diag(e)
+
+    @classmethod
+    def _log_diag(cls, err):
+        """Диагностика недоступного PCA9685 — не чаще SERVO_DIAG_INTERVAL_S
+        (v1.4.0): причина «сервоприводы не отображаются» в UI — модуль
+        не ответил на шине в момент старта; ретраи идут фоном, см.
+        SharedState._hw_retry_loop."""
+        import time as _time
+        now = _time.monotonic()
+        if now - cls._last_diag_ts < SERVO_DIAG_INTERVAL_S:
+            return
+        cls._last_diag_ts = now
+        logger.error(f'[Servos] PCA9685 init failed: {err}')
+        logger.error(
+            '[Servos] подсказки: i2cdetect -y 1 (PCA9685 должен быть на 0x40); '
+            'если шина I2C «висит» — проверьте подключение MPU6050/датчиков; '
+            'питание серво (V+) от батареи, не от 5V Pi. '
+            'Модуль подхватится автоматически (авто-ретраи v1.4.0) — '
+            'перезапуск сервиса не нужен.')
 
     def _clamp(self, sid, angle):
         lim = self._limits.get(sid, {'min': 0, 'max': 180})
