@@ -1,19 +1,18 @@
 import threading, time
 from picarpro.logger import logger
 from config import (
-    PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ, I2C_BUS,
+    I2C_BUS, PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
     SERVO_INIT_ANGLES, SERVO_LIMITS, SERVO_MOVE_ON_BOOT,
     CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 
 try:
-    import busio
-    from adafruit_pca9685 import PCA9685
-    from adafruit_motor import servo as adafruit_servo
-    _HAS_PCA = True
+    from smbus2 import SMBus
+    _HAS_SMBUS = True
 except ImportError:
-    _HAS_PCA = False
+    _HAS_SMBUS = False
+    SMBus = None
 
 # Лимиты серво задаются ТОЛЬКО в config.py (SERVO_LIMITS) — v1.3.0.
 # Файл калибровки servo_cal.json упразднён: редактирование лимитов
@@ -23,6 +22,128 @@ except ImportError:
 # ретраи идут каждые HW_RETRY_INTERVAL_S, но подсказка печатается
 # раз в SERVO_DIAG_INTERVAL_S — иначе журнал заливается.
 SERVO_DIAG_INTERVAL_S = 300.0
+
+# ---------------------------------------------------------------------------
+# Драйвер PCA9685 поверх smbus2 (v1.4.1).
+#
+# Раньше здесь был стек adafruit_pca9685 -> Adafruit-Blinka -> busio.
+# На Debian Trixie свежий Blinka при импорте требует отдельный пакет
+# платформы «adafruit_blinka_raspberry_pi_pwm» — без него import busio
+# падает («The platform library ... was not found»), ServoController не
+# создавался и панель серво в UI оставалась «Module not found».
+# PCA9685 — обычная I2C-микросхема: для управления серво достаточно
+# шести регистров smbus2, весь Blinka-стек (board/busio/adafruit_*)
+# больше не нужен.
+# ---------------------------------------------------------------------------
+_PCA_MODE1 = 0x00
+_PCA_MODE2 = 0x01
+_PCA_LED0_ON_L = 0x06        # на канал 4 регистра: ON_L, ON_H, OFF_L, OFF_H
+_PCA_ALL_LED_OFF_H = 0xFD    # бит 0x10 = full-off всех 16 каналов
+_PCA_PRE_SCALE = 0xFE
+_PCA_MODE1_SLEEP = 0x10
+_PCA_MODE1_AI = 0x20         # автоинкремент адреса регистра
+_PCA_MODE1_RESTART = 0x80
+_PCA_MODE2_OUTDRV = 0x04     # totem-pole выход (как в adafruit_pca9685)
+_PCA_OSC_HZ = 25_000_000.0   # внутренний генератор PCA9685
+_PCA_STEPS = 4096            # разрешение одного PWM-периода
+
+
+class PCA9685:
+    """Минимальный драйвер PCA9685 через smbus2.
+
+    Семантика частоты/каналов повторяет adafruit_pca9685, чтобы углы
+    (SERVO_MIN_PULSE..SERVO_MAX_PULSE мкс) остались прежними.
+    """
+
+    def __init__(self, bus=I2C_BUS, address=PCA9685_SERVO_ADDR,
+                 frequency=PCA9685_SERVO_FREQ):
+        self.address = address
+        self.frequency = frequency
+        self._smbus = SMBus(bus)
+        try:
+            self._write_u8(_PCA_MODE2, _PCA_MODE2_OUTDRV)
+            self._write_u8(_PCA_MODE1, _PCA_MODE1_AI)
+            self.set_frequency(frequency)
+        except Exception:
+            self.close()
+            raise
+
+    def _write_u8(self, reg, value):
+        self._smbus.write_byte_data(self.address, reg, int(value) & 0xFF)
+
+    def _read_u8(self, reg):
+        return self._smbus.read_byte_data(self.address, reg)
+
+    def set_frequency(self, frequency):
+        """Смена частоты PWM: SLEEP -> PRE_SCALE -> wake + RESTART
+        (datasheet NXP PCA9685, п. 7.3.1). 50 Гц -> prescale 121."""
+        frequency = max(24.0, min(1526.0, float(frequency)))
+        prescale = round(_PCA_OSC_HZ / (_PCA_STEPS * frequency)) - 1
+        prescale = max(3, min(255, int(prescale)))
+        old_mode1 = self._read_u8(_PCA_MODE1)
+        self._write_u8(_PCA_MODE1,
+                       (old_mode1 & ~_PCA_MODE1_RESTART) | _PCA_MODE1_SLEEP)
+        self._write_u8(_PCA_PRE_SCALE, prescale)
+        self._write_u8(_PCA_MODE1,
+                       (old_mode1 & ~_PCA_MODE1_SLEEP) | _PCA_MODE1_RESTART)
+        time.sleep(0.005)
+
+    def set_channel_pulse(self, channel, on_counts, off_counts):
+        """Установить ON/OFF-счётчики канала (0..4095) одной блочной
+        записью — один I2C-транзакция на команду серво."""
+        channel = max(0, min(15, int(channel)))
+        on_counts = max(0, min(4095, int(on_counts)))
+        off_counts = max(0, min(4095, int(off_counts)))
+        reg = _PCA_LED0_ON_L + 4 * channel
+        self._smbus.write_i2c_block_data(
+            self.address, reg,
+            [on_counts & 0xFF, (on_counts >> 8) & 0x0F,
+             off_counts & 0xFF, (off_counts >> 8) & 0x0F])
+
+    def all_channels_off(self):
+        """Full-off всех каналов (сервы перестают получать импульсы
+        и не потребляют ток — как при ленивом старте v1.3.2)."""
+        self._write_u8(_PCA_ALL_LED_OFF_H, 0x10)
+
+    def close(self):
+        try:
+            self._smbus.close()
+        except Exception:
+            pass
+
+
+class _ServoChannel:
+    """Один канал PCA9685 с семантикой adafruit_motor.Servo:
+    угол -> импульс min_pulse..max_pulse мкс -> счётчики PWM.
+    Сохраняет прежнее соответствие углов (v1.1.0+), чтобы лимиты
+    SERVO_LIMITS из config.py остались валидными."""
+
+    def __init__(self, pca, channel, min_pulse, max_pulse, actuation_range):
+        self._pca = pca
+        self.channel = channel
+        self.min_pulse = min_pulse
+        self.max_pulse = max_pulse
+        self.actuation_range = actuation_range
+        self._angle = None
+
+    @property
+    def angle(self):
+        return self._angle
+
+    @angle.setter
+    def angle(self, value):
+        if value is None:
+            self._angle = None
+            self._pca.set_channel_pulse(self.channel, 0, 0)
+            return
+        if value < 0 or value > self.actuation_range:
+            raise ValueError(
+                f'angle {value} out of range 0..{self.actuation_range}')
+        self._angle = float(value)
+        pulse_us = self.min_pulse + (self.max_pulse - self.min_pulse) \
+            * (float(value) / self.actuation_range)
+        off = int(pulse_us * self._pca.frequency / 1_000_000 * _PCA_STEPS)
+        self._pca.set_channel_pulse(self.channel, 0, off)
 
 
 class ServoController:
@@ -39,24 +160,25 @@ class ServoController:
         self._pwm_initialized = False
         self._limits = {i: dict(SERVO_LIMITS.get(i, {"min": 0, "max": 180}))
                         for i in range(SERVO_COUNT)}
-        if not _HAS_PCA:
-            logger.warning('[Servos] adafruit_pca9685 not available')
+        if not _HAS_SMBUS:
+            logger.warning('[Servos] smbus2 not available '
+                           '(pip install smbus2)')
             return
         self._init_pca9685()
 
     def _init_pca9685(self):
         try:
-            self._i2c = busio.I2C(3, 2)
-            self._pca = PCA9685(self._i2c, address=PCA9685_SERVO_ADDR)
-            self._pca.frequency = PCA9685_SERVO_FREQ
+            self._pca = PCA9685(bus=I2C_BUS, address=PCA9685_SERVO_ADDR,
+                                frequency=PCA9685_SERVO_FREQ)
             time.sleep(0.05)
             for i in range(SERVO_COUNT):
                 try:
                     lim = self._limits[i]
                     actuation_range = max(int(lim['max']), 180)
-                    self._servos[i] = adafruit_servo.Servo(
-                        self._pca.channels[i],
-                        min_pulse=SERVO_MIN_PULSE, max_pulse=SERVO_MAX_PULSE,
+                    self._servos[i] = _ServoChannel(
+                        self._pca, i,
+                        min_pulse=SERVO_MIN_PULSE,
+                        max_pulse=SERVO_MAX_PULSE,
                         actuation_range=actuation_range)
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
@@ -84,6 +206,9 @@ class ServoController:
                         f'({sum(s is not None for s in self._servos)}/'
                         f'{SERVO_COUNT} channels, {mode})')
         except Exception as e:
+            if self._pca is not None:
+                self._pca.close()
+                self._pca = None
             self._log_diag(e)
 
     @classmethod
@@ -119,7 +244,7 @@ class ServoController:
         # keepalive-повторы джойстика каждые 150 мс) не пишет PWM в
         # PCA9685 — лишние перезаписи регистров дают дрожание и нагрев.
         # Первый после загрузки угол пишется ВСЕГДА: физическое положение
-        # серво неизвестно (при старте серво не двигались, v1.3.2).
+        # серво неизвестно (при старте серво не двигали, v1.3.2).
         if cur is not None and abs(cur - angle) < 0.5:
             return True
         with self._lock:
@@ -186,9 +311,12 @@ class ServoController:
 
     def shutdown(self):
         self.stop_all()
-        if self._pwm_initialized and self._pca:
+        if self._pca is not None:
             try:
-                self._pca.deinit()
+                self._pca.all_channels_off()
             except Exception:
                 pass
+            self._pca.close()
+            self._pca = None
+        self._pwm_initialized = False
         logger.info('[Servos] shutdown')

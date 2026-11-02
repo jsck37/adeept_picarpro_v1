@@ -35,8 +35,6 @@ def _reset_singletons(monkeypatch, tmp_path):
     FAKES['gpio'].reset()
     FAKES['smbus'].reset()
     FAKES['spi'].reset()
-    FAKES['pca9685'].reset()
-    FAKES['servo'].reset()
     FAKES['ssd1306'].reset()
     FakePicamera2 = FAKES['picamera2']
     FakePicamera2.frame = None
@@ -51,11 +49,13 @@ def _reset_singletons(monkeypatch, tmp_path):
 @pytest.fixture
 def clean_state(monkeypatch, tmp_path):
     """SharedState с инициализированным «железом» на фейках (с MPU6050)."""
-    # на шине присутствует MPU6050 (ADS7830 отсутствует — dmesg-режим);
+    # на шине присутствуют MPU6050 (0x68) и PCA9685 (0x40, v1.4.1 — серво
+    # теперь через smbus2); ADS7830 отсутствует — dmesg-режим;
     # 0x42 = 68 — temp_raw: «живой» сенсор (не пустая шина), но данные
     # не удовлетворяют wait-условиям тестов (v1.3.0)
     FAKES['smbus'].reset()
     FAKES['smbus'].shared_devices[0x68] = {0x75: 0x68, 0x42: 68}
+    FAKES['smbus'].shared_devices[0x40] = {}
 
     from picarpro.state import SharedState
     state = SharedState()

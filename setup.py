@@ -4,7 +4,8 @@
 АДАПТАЦИЯ коммита 4870e2b под текущую структуру репозитория (v1.4.0):
 * точка входа boot.py вместо Server/WebServer.py;
 * HOTSPOT_* читаются из config.py в корне;
-* добалены зависимости текущей прошивки: RPi.GPIO, spidev, smbus2 (pip),
+* добалены зависимости текущей прошивки: RPi.GPIO, spidev, smbus2 (pip;
+  v1.4.1 — серво через smbus2, без adafruit/Blinka),
   python3-dev, python3-picamera2 + python3-libcamera на Debian 12+ (apt);
 * на Trixie do_camera не вызывается (удалён из raspi-config);
 * очищается /etc/sysctl.d/99-picarpro-swap.conf от прежней версии стека
@@ -343,11 +344,10 @@ def stage_4_pip_packages(debian_ver):
     run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
-        ("I2C/Motor/Servo",
-         f"sudo -H pip3 install {pip_flag} "
-         "adafruit-circuitpython-pca9685 "
-         "adafruit-circuitpython-motor "
-         "adafruit-circuitpython-busdevice"),
+        # v1.4.1: adafruit-circuitpython-* (Blinka) БОЛЬШЕ НЕ НУЖНЫ —
+        # серво работают напрямую через smbus2; на Trixie свежий Blinka
+        # падает при импорте без пакета adafruit_blinka_raspberry_pi_pwm
+        # (ошибка «The platform library ... was not found»)
         ("OLED/LED",
          f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
@@ -358,7 +358,7 @@ def stage_4_pip_packages(debian_ver):
          f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
          f"sudo -H pip3 install {pip_flag} evdev"),
-        ("GPIO/SPI/I2C (текущая прошивка: RPi.GPIO, spidev, smbus2)",
+        ("GPIO/SPI/I2C/Servo (RPi.GPIO, spidev, smbus2)",
          f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 

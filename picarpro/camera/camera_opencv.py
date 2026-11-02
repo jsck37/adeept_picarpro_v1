@@ -428,11 +428,25 @@ class Camera:
         for line in cls._collect_diagnostics():
             logger.error(f'[Camera] diag: {line}')
         logger.error(
-            '[Camera] hints: проверьте шлейф CSI (синяя сторона ленты — к плате, '
-            'до щелчка разъёма); в config.txt должна быть camera_auto_detect=1 '
-            '(установщик v1.4.0 добавляет сам, после правки — reboot); '
-            'проверка железа: rpicam-hello --list-cameras. '
-            'USB-камера подхватится автоматически как /dev/video0.')
+            '[Camera] hints (по порядку): '
+            '1) если config.txt правили после загрузки — сначала sudo reboot; '
+            '2) переткните шлейф CSI на обоих концах до щелчка фиксатора: '
+            'металлические контакты ленты — со стороны, противоположенной '
+            'подвижной заслонке разъёма (и на плате Pi, и на плате камеры), '
+            'синяя сторона — со стороны заслонки; '
+            '3) проверка железа: rpicam-hello --list-cameras; '
+            '4) если авто-детект не сработал — добавьте в /boot/firmware/'
+            'config.txt строку dtoverlay=ov5647 (камера V1) или '
+            'dtoverlay=imx219 (V2) и reboot; '
+            '5) USB-камера подхватится автоматически как /dev/video0.')
+
+    @staticmethod
+    def _uptime_seconds():
+        try:
+            with open('/proc/uptime') as f:
+                return float(f.read().split()[0])
+        except Exception:
+            return None
 
     @staticmethod
     def _collect_diagnostics():
@@ -457,21 +471,50 @@ class Camera:
                          + (', '.join(devs) if devs else 'нет'))
         except Exception:
             pass
-        # 3) config.txt — авто-детект камеры / overlays сенсора
+        # 3) config.txt — только файл, который реально читает прошивка
+        #    (v1.4.1: на Trixie это /boot/firmware/config.txt; рядом может
+        #    лежать отдельный /boot/config.txt — он НЕ читается и раньше
+        #    сбивал подсказкой «нет строк камеры»)
+        canonical = None
         for cfg in ('/boot/firmware/config.txt', '/boot/config.txt'):
-            if not os.path.exists(cfg):
-                continue
+            if os.path.exists(cfg):
+                canonical = cfg
+                break
+        if canonical:
             try:
-                with open(cfg) as f:
+                with open(canonical) as f:
                     cam = [ln.strip() for ln in f
                            if 'camera' in ln.lower()
                            or 'imx219' in ln.lower() or 'imx477' in ln.lower()
                            or 'imx708' in ln.lower() or 'ov5647' in ln.lower()]
-                lines.append(f'{cfg}: '
+                lines.append(f'{canonical}: '
                              + ('; '.join(cam[:6]) if cam
-                                else 'нет строк камеры (нужно camera_auto_detect=1)'))
+                                else 'нет строк камеры (нужно '
+                                     'camera_auto_detect=1)'))
+                # v1.4.1: файл правили ПОСЛЕ загрузки — камера появится
+                # только после reboot (частая причина «добавили строку,
+                # а rpicam-hello всё равно No cameras available»)
+                uptime = Camera._uptime_seconds()
+                if uptime is not None:
+                    boot_ts = time.time() - uptime
+                    if os.path.getmtime(canonical) > boot_ts + 5:
+                        lines.append(
+                            'config.txt изменён ПОСЛЕ последней загрузки — '
+                            'сначала sudo reboot, затем проверьте снова')
             except Exception:
                 pass
+            for other in ('/boot/firmware/config.txt', '/boot/config.txt'):
+                if other == canonical or not os.path.exists(other):
+                    continue
+                try:
+                    same = os.path.islink(other) \
+                        or os.path.samefile(other, canonical)
+                except Exception:
+                    same = True
+                if not same:
+                    lines.append(
+                        f'{other}: отдельный файл, прошивкой НЕ читается '
+                        f'(рабочий файл — {canonical})')
         # 4) dmesg — ошибки CSI-шины (unicam) и сенсора
         try:
             r = subprocess.run(
@@ -482,6 +525,14 @@ class Camera:
             if out:
                 lines.append('dmesg: '
                              + ' | '.join(x.strip() for x in out.splitlines()))
+            elif r.returncode == 0:
+                # grep ничего не нашёл: сенсор вообще не опрашивался при
+                # загрузке — не физическое подключение, так reboot
+                lines.append(
+                    'dmesg: нет упоминаний unicam/сенсора — сенсор не '
+                    'опрашивался при загрузке (шлейф не подключён или '
+                    'не до щелчка, либо reboot после правки config.txt '
+                    'ещё не делали)')
         except Exception:
             pass
         return lines

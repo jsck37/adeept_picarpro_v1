@@ -27,6 +27,9 @@ class TestHwRetry:
 
     @staticmethod
     def _state():
+        # v1.4.1: серво через smbus2 — PCA9685 должен быть на фейковой шине
+        from tests.fakes.all_fakes import make_pca9685_device
+        make_pca9685_device()
         from picarpro.state import SharedState
         state = SharedState()
         state.init_hardware()

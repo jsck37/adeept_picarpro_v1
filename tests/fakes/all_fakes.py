@@ -1,9 +1,12 @@
 """Фейки железа для pytest на обычном ПК (без Raspberry Pi).
 
 install() подменяет в sys.modules: RPi.GPIO, smbus2, spidev, picamera2,
-evdev, busio, adafruit_pca9685, adafruit_motor, luma.*, cv2.
-После этого все контроллеры picarpro считают, что железо присутствует,
-и вся логика становится тестируемой.
+evdev, luma.*, cv2. После этого все контроллеры picarpro считают,
+что железо присутствует, и вся логика становится тестируемой.
+
+v1.4.1: серво переехали с adafruit/busio на smbus2 (PCA9685 — обычное
+I2C-устройство), поэтому фейки busio/adafruit_* заменены регистровой
+моделью PCA9685 на той же фейковой шине (make_pca9685_device).
 """
 import sys
 import time
@@ -144,17 +147,23 @@ class FakeGPIO:
 # ===========================================================================
 class FakeSMBus:
     """I2C-шина с реестром устройств: {addr: {reg: value}}.
-    Отсутствующее устройство -> OSError (как в реальности)."""
+    Отсутствующее устройство -> OSError (как в реальности).
+    write_log — журнал записей для тестов анти-джиттера серво (v1.4.1)."""
 
     shared_devices = {}
+    instances = []
+    write_log = []
 
     def __init__(self, bus_id=1):
         self.bus_id = bus_id
         self.closed = False
+        FakeSMBus.instances.append(self)
 
     @classmethod
     def reset(cls):
         cls.shared_devices = {}
+        cls.instances = []
+        cls.write_log = []
 
     def _dev(self, addr):
         if self.closed:
@@ -178,6 +187,7 @@ class FakeSMBus:
     def write_byte_data(self, addr, reg, value):
         dev = self._dev(addr)
         dev[reg & 0xFF] = value & 0xFF
+        FakeSMBus.write_log.append((addr, reg & 0xFF, value & 0xFF))
 
     def read_i2c_block_data(self, addr, reg, length):
         dev = self._dev(addr)
@@ -187,9 +197,28 @@ class FakeSMBus:
         dev = self._dev(addr)
         for i, v in enumerate(values):
             dev[(reg + i) & 0xFF] = v & 0xFF
+        FakeSMBus.write_log.append(
+            (addr, reg & 0xFF, tuple(v & 0xFF for v in values)))
 
     def close(self):
         self.closed = True
+
+
+# Регистры PCA9685, которые трогает picarpro.hardware.servos (v1.4.1)
+PCA_MODE1 = 0x00
+PCA_MODE2 = 0x01
+PCA_LED0_ON_L = 0x06
+PCA_ALL_LED_OFF_H = 0xFD
+PCA_PRE_SCALE = 0xFE
+PCA_PWM_PERIOD = 4096
+
+
+def make_pca9685_device(addr=0x40):
+    """Добавить на фейковую шину PCA9685 (пустое регистровое поле).
+    Возвращает регистры устройства — тесты читают их напрямую."""
+    regs = {}
+    FakeSMBus.shared_devices[addr] = regs
+    return regs
 
 
 def make_mpu6050_device(addr=0x68, who=0x68):
@@ -411,105 +440,6 @@ class FakeInputDevice:
 
 def fake_list_devices():
     return list(FakeInputDevice.devices.keys())
-
-
-# ===========================================================================
-# busio / adafruit_pca9685 / adafruit_motor
-# ===========================================================================
-PCA_PWM_PERIOD = 4096
-
-
-class FakeChannel:
-    def __init__(self, pca, index):
-        self._pca = pca
-        self.index = index
-        self._duty = 0
-        self.writes = 0   # счётчик записей duty_cycle (тест анти-джиттера)
-
-    @property
-    def duty_cycle(self):
-        return self._duty
-
-    @duty_cycle.setter
-    def duty_cycle(self, value):
-        self._duty = max(0, min(0xFFFF, int(value)))
-        self.writes += 1
-
-
-class FakePCA9685:
-    instances = []
-
-    def __init__(self, i2c=None, address=None):
-        self.address = address
-        self._frequency = None
-        self.channels = [FakeChannel(self, i) for i in range(16)]
-        self.deinited = False
-        FakePCA9685.instances.append(self)
-
-    @classmethod
-    def reset(cls):
-        cls.instances = []
-
-    @property
-    def frequency(self):
-        return self._frequency
-
-    @frequency.setter
-    def frequency(self, value):
-        self._frequency = value
-
-    def deinit(self):
-        self.deinited = True
-
-
-class FakeI2C:
-    instances = []
-
-    def __init__(self, scl=None, sda=None):
-        self.scl, self.sda = scl, sda
-        FakeI2C.instances.append(self)
-
-    @classmethod
-    def reset(cls):
-        cls.instances = []
-
-    def deinit(self):
-        pass
-
-
-class FakeAdafruitServo:
-    """Servo-объект adafruit_motor: угол -> duty_cycle канала PCA9685."""
-    instances = []
-
-    def __init__(self, channel, min_pulse=500, max_pulse=2400,
-                 actuation_range=180):
-        self.channel = channel
-        self.min_pulse = min_pulse
-        self.max_pulse = max_pulse
-        self.actuation_range = actuation_range
-        self._angle = None
-        FakeAdafruitServo.instances.append(self)
-
-    @classmethod
-    def reset(cls):
-        cls.instances = []
-
-    @property
-    def angle(self):
-        return self._angle
-
-    @angle.setter
-    def angle(self, value):
-        if value is None:
-            self._angle = None
-            return
-        if value < 0 or value > self.actuation_range:
-            raise ValueError(f'angle {value} out of range 0..{self.actuation_range}')
-        self._angle = float(value)
-        pulse_us = self.min_pulse + (self.max_pulse - self.min_pulse) \
-            * (float(value) / self.actuation_range)
-        duty = int(pulse_us / 20000.0 * 0xFFFF)
-        self.channel.duty_cycle = duty
 
 
 # ===========================================================================
@@ -854,13 +784,6 @@ def install():
     evdev.ecodes = FakeEcodes
     sys.modules['evdev.ecodes'] = mod('ecodes_unused')
 
-    busio_mod = mod('busio', I2C=FakeI2C)
-    mod('adafruit_pca9685', PCA9685=FakePCA9685)
-    motor_mod = mod('adafruit_motor')
-    motor_mod.servo = types.SimpleNamespace(Servo=FakeAdafruitServo)
-    sys.modules['adafruit_motor.servo'] = mod(
-        'adafruit_motor.servo_inner', Servo=FakeAdafruitServo)
-
     mod('luma', core=None)
     luma_core = mod('luma.core')
     luma_core.interface = types.SimpleNamespace()
@@ -878,7 +801,5 @@ def install():
         'smbus': FakeSMBus,
         'spi': FakeSpiDev,
         'picamera2': FakePicamera2,
-        'pca9685': FakePCA9685,
-        'servo': FakeAdafruitServo,
         'ssd1306': FakeSSD1306,
     }

@@ -8,9 +8,12 @@
 RPi.GPIO
 
 # I2C / Servo (PCA9685)
-adafruit-circuitpython-pca9685
-adafruit-circuitpython-motor
-adafruit-circuitpython-busdevice
+# v1.4.1: серво работают НАПРЯМУЮ через smbus2 (собственный драйвер,
+# ~120 строк вместо стека adafruit_pca9685 -> Adafruit-Blinka -> busio).
+# Blinka больше не используется: на Debian Trixie свежий Blinka падает
+# при импорте без отдельного пакета платформы
+# adafruit_blinka_raspberry_pi_pwm («The platform library ... was not found»),
+# из-за этого ServoController не создавался и панель серво в UI была недоступна.
 
 # OLED Display (SSD1306)
 luma.oled

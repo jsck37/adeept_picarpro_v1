@@ -1,32 +1,90 @@
-"""Тесты ServoController (PCA9685 через фейки adafruit/busio)."""
+"""Тесты ServoController (v1.4.1: PCA9685 напрямую через smbus2).
+
+Фейк — регистровая модель PCA9685 на фейковой шине SMBus
+(tests.fakes.all_fakes.make_pca9685_device): тесты читают регистры
+LED0_ON/OFF каналов и журнал записей FakeSMBus.write_log.
+"""
 import pytest
+
+from tests.fakes.all_fakes import (
+    FakeSMBus, make_pca9685_device,
+    PCA_MODE1, PCA_MODE2, PCA_LED0_ON_L, PCA_ALL_LED_OFF_H, PCA_PRE_SCALE,
+)
+
+ADDR = 0x40
+# config.py: 50 Гц, импульсы 500..2400 мкс
+PRESCALE_50HZ = round(25_000_000 / (4096 * 50)) - 1   # = 121 (datasheet NXP)
+
+
+def _dev():
+    return FakeSMBus.shared_devices[ADDR]
+
+
+def chan_counts(channel):
+    """(ON, OFF) счётчики канала из регистровой модели."""
+    base = PCA_LED0_ON_L + 4 * channel
+    dev = _dev()
+    on = dev.get(base, 0) | (dev.get(base + 1, 0) << 8)
+    off = dev.get(base + 2, 0) | (dev.get(base + 3, 0) << 8)
+    return on, off
+
+
+def chan_write_count(channel):
+    """Сколько раз писали LED-регистры канала (тест анти-джиттера)."""
+    lo = PCA_LED0_ON_L + 4 * channel
+    return sum(1 for addr, reg, _ in FakeSMBus.write_log
+               if addr == ADDR and lo <= reg <= lo + 3)
+
+
+def led_write_count():
+    """Записей в LED-регистры любого канала (тест ленивого старта)."""
+    return sum(1 for addr, reg, _ in FakeSMBus.write_log
+               if addr == ADDR and PCA_LED0_ON_L <= reg < PCA_ALL_LED_OFF_H)
 
 
 @pytest.fixture
-def servos(tmp_path, monkeypatch):
+def servos():
     import picarpro.hardware.servos as mod
     from picarpro.hardware.servos import ServoController
+    make_pca9685_device()
     s = ServoController()
     yield s
     s.shutdown()
 
 
 class TestInit:
-    def test_pca_created_with_freq(self, servos):
-        from tests.fakes.all_fakes import FakePCA9685
-        assert len(FakePCA9685.instances) == 1
-        assert FakePCA9685.instances[0].frequency == 50
+    def test_pca_registers_configured(self, servos):
+        dev = _dev()
+        assert dev.get(PCA_PRE_SCALE) == PRESCALE_50HZ      # 50 Гц
+        assert dev.get(PCA_MODE2) == 0x04                   # totem-pole
+        mode1 = dev.get(PCA_MODE1)
+        # AI (автоинкремент — обязателен для блочной записи каналов)
+        # + RESTART, без SLEEP (чип «разбужен»)
+        assert mode1 & 0x20 and mode1 & 0x80 and not mode1 & 0x10
         assert servos._pwm_initialized
 
     def test_all_channels_created(self, servos):
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        assert len(FakeAdafruitServo.instances) == 7
+        assert len(servos._servos) == 7
+        assert all(s is not None for s in servos._servos)
 
     def test_init_angles_applied(self, servos):
         # каналы 5/6 -> CRANE_GRIP_HIGH=180 / CRANE_ARM_OPEN=100 (v1.3.0)
         assert servos.get_angle(5) == 180
         assert servos.get_angle(6) == 100
         assert servos.get_angle(0) == 90
+
+    def test_init_without_device_not_fatal(self):
+        """Нет PCA9685 на шине -> флаг False (авто-ретрай v1.4.0 подхватит),
+        открытый SMBus закрывается (без утечки fd при ретраях)."""
+        from picarpro.hardware.servos import ServoController
+        s = ServoController()
+        try:
+            assert s._pwm_initialized is False
+            assert s._pca is None
+            assert FakeSMBus.instances, 'SMBus не открывался'
+            assert all(bus.closed for bus in FakeSMBus.instances)
+        finally:
+            s.shutdown()
 
 
 class TestLazyBoot:
@@ -37,18 +95,14 @@ class TestLazyBoot:
     """
 
     def test_no_pwm_writes_at_boot(self, servos):
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        assert all(obj.channel.writes == 0
-                   for obj in FakeAdafruitServo.instances)
+        assert led_write_count() == 0
 
     def test_first_command_always_writes(self, servos):
         """Первый после загрузки угол пишется, даже если равен init."""
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        obj = FakeAdafruitServo.instances[1]
         assert servos.set_angle(1, 90) is True      # init 90 — не дедуплицируется
-        assert obj.channel.writes == 1
+        assert chan_write_count(1) == 1
         assert servos.set_angle(1, 90) is True      # повтор — уже дедуплицируется
-        assert obj.channel.writes == 1
+        assert chan_write_count(1) == 1
 
     def test_get_angle_falls_back_to_init(self, servos):
         assert servos.get_angle(0) == 90            # ещё не двигали
@@ -56,11 +110,9 @@ class TestLazyBoot:
 
     def test_smooth_move_from_unknown(self, servos):
         """smooth_move по не двигавшемуся серво — один прямой ход."""
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        obj = FakeAdafruitServo.instances[1]
         servos.smooth_move(1, 120, steps=5, delay=0.001)
         assert servos.get_angle(1) == 120
-        assert obj.channel.writes == 1              # без интерполяции
+        assert chan_write_count(1) == 1             # без интерполяции
 
 
 class TestSetAngle:
@@ -79,11 +131,20 @@ class TestSetAngle:
         assert servos.set_angle(-1, 90) is False
         assert servos.set_angle(99, 90) is False
 
-    def test_duty_written_to_pca(self, servos):
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        servos.set_angle(1, 60)
-        servo_obj = FakeAdafruitServo.instances[1]
-        assert servo_obj.channel.duty_cycle > 0
+    def test_pulse_counts_written(self, servos):
+        """Угол -> импульс мкс -> счётчики 0..4095 (семантика
+        adafruit_motor сохранена): 60° = 500 + 1900*60/180 = 1133.3 мкс
+        -> int(1133.3 * 50 / 1e6 * 4096) = 232."""
+        assert servos.set_angle(1, 60) is True
+        on, off = chan_counts(1)
+        assert (on, off) == (0, 232)
+
+    def test_pulse_bounds(self, servos):
+        # 0° -> 500 мкс -> 102; 180° (клешня, лимит max 180) -> 2400 мкс -> 491
+        assert servos.set_angle(1, 0) is True
+        assert chan_counts(1)[1] == 102
+        assert servos.set_angle(5, 180) is True
+        assert chan_counts(5)[1] == 491
 
 
 class TestLimits:
@@ -118,13 +179,11 @@ class TestLimits:
 
     def test_same_angle_not_rewritten(self, servos):
         """Анти-джиттер: повторная команда того же угла не пишет PWM."""
-        from tests.fakes.all_fakes import FakeAdafruitServo
-        obj = FakeAdafruitServo.instances[1]
-        writes_after_init = obj.channel.writes
         assert servos.set_angle(1, 60) is True
-        assert obj.channel.writes > writes_after_init
+        writes = chan_write_count(1)
+        assert writes == 1
         assert servos.set_angle(1, 60) is True
-        assert obj.channel.writes == writes_after_init + 1  # не выросла
+        assert chan_write_count(1) == 1                   # не выросла
 
 
 class TestMove:
@@ -148,7 +207,12 @@ class TestMove:
 
 
 class TestShutdown:
-    def test_shutdown_deinits_pca(self, servos):
-        from tests.fakes.all_fakes import FakePCA9685
+    def test_shutdown_full_off_and_close(self, servos):
+        """v1.4.1: shutdown = full-off всех каналов (сервы без импульсов)
+        + закрытие шины (вместо adafruit-деинициализации)."""
+        servos.set_angle(1, 60)
         servos.shutdown()
-        assert FakePCA9685.instances[0].deinited
+        assert _dev().get(PCA_ALL_LED_OFF_H) == 0x10
+        assert servos._pwm_initialized is False
+        # шина закрыта (последний открытый SMBus — от контроллера)
+        assert all(bus.closed for bus in FakeSMBus.instances)
