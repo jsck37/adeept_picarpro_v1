@@ -51,6 +51,47 @@ class TestOLED:
             time.sleep(0.05)
         assert FakeSSD1306.instances[0].frames
 
+    def test_marquee_scrolls_frames(self, oled):
+        """Бегущая строка рисует кадры непрерывно даже при статичных строках."""
+        import time
+        from tests.fakes.all_fakes import FakeSSD1306
+        oled.set_lines(['a', 'b', 'c'])
+        n0 = len(FakeSSD1306.instances[0].frames)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if len(FakeSSD1306.instances[0].frames) - n0 >= 6:
+                break
+            time.sleep(0.05)
+        assert len(FakeSSD1306.instances[0].frames) - n0 >= 6, \
+            'бегущая строка не прокручивается (нет серии кадров)'
+
+    def test_marquee_bitmap_built(self):
+        from PIL import Image, ImageDraw
+        from config import OLED_FONT_SIZE, OLED_MARQUEE_TEXT
+        from picarpro.hardware.oled import OLEDDisplay, MARQUEE_Y
+        _, reg = OLEDDisplay._load_fonts()
+        img, w = OLEDDisplay._build_marquee(reg.get(OLED_FONT_SIZE))
+        assert img is not None, 'битовая карта бегущей строки не собрана'
+        assert img.size[1] == 64 - MARQUEE_Y
+        assert w > 0
+        tmp = ImageDraw.Draw(Image.new('1', (8, 8)))
+        assert w >= int(tmp.textlength(OLED_MARQUEE_TEXT,
+                                       font=reg.get(OLED_FONT_SIZE)))
+
+    def test_warning_rows_fit_width(self):
+        """Предупреждение: <=2 строки, каждая помещается в 128 px."""
+        from PIL import Image, ImageDraw
+        from picarpro.hardware.oled import OLEDDisplay, _WARN_MAX_W
+        _, reg = OLEDDisplay._load_fonts()
+        draw = ImageDraw.Draw(Image.new('1', (8, 8)))
+        rows, font, size = OLEDDisplay._layout_warning(draw, reg)
+        assert 1 <= len(rows) <= 2
+        assert size in (9, 8, 7)
+        if font is not None:
+            for r in rows:
+                assert draw.textlength(r, font=font) <= _WARN_MAX_W, \
+                    f'строка предупреждения шире экрана: {r!r}'
+
     def test_shutdown(self, oled):
         from tests.fakes.all_fakes import FakeSSD1306
         oled.shutdown()

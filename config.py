@@ -270,6 +270,16 @@ STEER_MAP = {
 
 OLED_LOW_VOLTAGE_TEXT = "Low voltage warning Please check your power supply"
 
+# Размер шрифта строк данных на OLED, px.
+# 9 — максимальный размер, при котором самая длинная строка
+# «RAM:1024/2048M 100%» (120 px) помещается на экран 128 px
+# (при 12 px она занимает 160 px и проценты обрезались).
+OLED_FONT_SIZE = 9
+
+# Бегущая строка в нижней зоне OLED — ссылка на репозиторий проекта.
+# Прокручивается, только если шире экрана; '' — зона остаётся пустой.
+OLED_MARQUEE_TEXT = 'github.com/jsck37/adeept_picarpro_v1'
+
 # Движение по умолчанию
 DEFAULT_SPEED = 50
 TURN_RADIUS_MIN = 0.2
