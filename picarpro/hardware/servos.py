@@ -183,7 +183,7 @@ class ServoController:
                         actuation_range=actuation_range)
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
-                        # каналы клешни — из config (v1.6.0: захват на 5,
+                        # каналы клешни — из config (v1.6.1: захват на 6,
                         # наклон на 4); раньше каналы были захардкожены
                         init_angle = (CRANE_ARM_OPEN
                                       if i == SERVO_CRANE_ARM else

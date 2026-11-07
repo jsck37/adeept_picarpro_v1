@@ -514,13 +514,17 @@ class DS4Controller:
         if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
             return
         if abs(rx) >= DS4_DEADZONE:
+            # v1.6.1: стик вправо = камера вправо = pan МЕНЬШЕ (тот же
+            # смысл, что у стрелки вправо: pan -5). Раньше было наоборот —
+            # камера уходила влево при наклоне стика вправо.
             cur = self._servos.get_angle(SERVO_CAM_PAN)
             step = max(1, int(abs(rx) * 6 * DS4_CAM_SENSITIVITY))
-            new = min(180, cur + step) if rx > 0 else max(0, cur - step)
+            new = min(180, cur - step) if rx > 0 else max(0, cur + step)
             if new != cur:
                 self._servos.set_angle(SERVO_CAM_PAN, new)
                 self._cam_pan = new
         if abs(ry) >= DS4_DEADZONE:
+            # стик вверх = камера вверх = tilt больше (как стрелка вверх)
             cur = self._servos.get_angle(SERVO_CAM_TILT)
             step = max(1, int(abs(ry) * 5 * DS4_CAM_SENSITIVITY))
             new = min(180, cur + step) if ry > 0 else max(0, cur - step)

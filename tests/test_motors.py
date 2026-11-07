@@ -96,35 +96,36 @@ class TestSpeedProperty:
         assert motors.speed == 0
 
 
-class TestPinSemanticsV160:
-    """v1.6.0: роли пинов сверены с оригинальной прошивкой Adeept
-    (Server/Move.py): motor_right.forward = GPIO21, motor_left.forward =
-    GPIO18. Раньше пары IN1/IN2 были перевёрнуты — «передний ход не работал»
-    (оба борта крутились назад). Этот тест фиксирует КОНКРЕТНЫЕ GPIO, чтобы
-    семантика не потерялась при будущих правках config."""
+class TestPinSemantics:
+    """v1.6.1: роли пинов возвращены к заводской разводке Adeept v1
+    (урок 6 «How to Control DC Motor»: Motor_A_Pin1 = 26, Motor_A_Pin2 =
+    21; forward = Pin1 HIGH) и исходному коду jsck37 (gpiozero Motor(
+    forward=MOTOR_A_IN1=26)). В v1.6.0 пары ошибочно поменяли местами —
+    на реальном роботе инвертировались W/S («w» ехал назад).
+    Тест фиксирует КОНКРЕТНЫЕ GPIO, чтобы семантика не потерялась."""
 
     def test_forward_pins_match_adeept_original(self, motors, fake_gpio):
         motors.move(50, 'forward', 'no', 0.5)
-        assert fake_gpio.outputs[21] == fake_gpio.HIGH   # right forward
-        assert fake_gpio.outputs[26] == fake_gpio.LOW    # right backward
-        assert fake_gpio.outputs[18] == fake_gpio.HIGH   # left forward
-        assert fake_gpio.outputs[27] == fake_gpio.LOW    # left backward
+        assert fake_gpio.outputs[26] == fake_gpio.HIGH   # right forward (Pin1)
+        assert fake_gpio.outputs[21] == fake_gpio.LOW    # right backward
+        assert fake_gpio.outputs[27] == fake_gpio.HIGH   # left forward (Pin1)
+        assert fake_gpio.outputs[18] == fake_gpio.LOW    # left backward
 
     def test_backward_pins_match_adeept_original(self, motors, fake_gpio):
         motors.move(50, 'backward', 'no', 0.5)
-        assert fake_gpio.outputs[21] == fake_gpio.LOW
-        assert fake_gpio.outputs[26] == fake_gpio.HIGH
-        assert fake_gpio.outputs[18] == fake_gpio.LOW
-        assert fake_gpio.outputs[27] == fake_gpio.HIGH
+        assert fake_gpio.outputs[26] == fake_gpio.LOW
+        assert fake_gpio.outputs[21] == fake_gpio.HIGH
+        assert fake_gpio.outputs[27] == fake_gpio.LOW
+        assert fake_gpio.outputs[18] == fake_gpio.HIGH
 
     def test_invert_right_board(self, motors, fake_gpio, monkeypatch):
         """MOTOR_INVERT_RIGHT — для сборок с перепутанными проводами."""
         import picarpro.hardware.motors as mm
         monkeypatch.setattr(mm, 'MOTOR_INVERT_RIGHT', True)
         motors.move(50, 'forward', 'no', 0.5)
-        # борт A инвертирован: «вперёд» для него теперь 26 HIGH / 21 LOW
-        assert fake_gpio.outputs[26] == fake_gpio.HIGH
-        assert fake_gpio.outputs[21] == fake_gpio.LOW
+        # борт A инвертирован: «вперёд» для него теперь 21 HIGH / 26 LOW
+        assert fake_gpio.outputs[21] == fake_gpio.HIGH
+        assert fake_gpio.outputs[26] == fake_gpio.LOW
         # борт B не тронут
-        assert fake_gpio.outputs[18] == fake_gpio.HIGH
-        assert fake_gpio.outputs[27] == fake_gpio.LOW
+        assert fake_gpio.outputs[27] == fake_gpio.HIGH
+        assert fake_gpio.outputs[18] == fake_gpio.LOW

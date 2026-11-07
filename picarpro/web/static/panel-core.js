@@ -48,6 +48,37 @@
     return KEY_ACTIONS[key] || null;
   }
 
+  // Камера с клавиатуры (v1.6.1): стрелки и I/J/K/L, шаг 5°.
+  // Возвращает [dPan, dTilt] — прибавки к текущим углам; null — не камера.
+  // Спецификация владельца робота (инверсия убрана):
+  //   вверх  = tilt +5   (камера поднимается)
+  //   вниз   = tilt -5   (камера опускается)
+  //   вправо = pan  -5   (панорама вправо: на этом серво «вправо» = меньше)
+  //   влево  = pan  +5
+  // (v1.6.0: стрелки отданы камере, но tilt у них был перевёрнут —
+  // «вверх» опускал камеру; I/K повторяли ту же ошибку.)
+  var CAM_KEYS = {
+    'i': [0, 5], 'k': [0, -5], 'j': [5, 0], 'l': [-5, 0],
+    'ArrowUp': [0, 5], 'ArrowDown': [0, -5],
+    'ArrowLeft': [5, 0], 'ArrowRight': [-5, 0]
+  };
+
+  function camKeyDelta(key) {
+    return CAM_KEYS[key] || null;
+  }
+
+  // Камера с джойстика (v1.6.1): драг в ту же сторону, что стрелки.
+  // dx,dy — пиксели от центра (y вниз), r — радиус. Раньше драг вправо
+  // увеличивал pan (камера уходила влево), а драг вверх — уменьшал tilt
+  // (камера опускалась): оба направления были инвертированы.
+  function stickToCam(dx, dy, r) {
+    if (!r) return { pan: 90, tilt: 90 };
+    return {
+      pan: 90 - Math.round(dx / r * 30),
+      tilt: 90 - Math.round(dy / r * 30)
+    };
+  }
+
   // Набор зажатых логических кнопок -> команда движения.
   // Раньше отпускание ЛЮБОЙ клавиши посылало stop, даже если другая ещё
   // зажата, а W+D не давало диагональ.
@@ -87,6 +118,7 @@
   var api = {
     mergeStatus: mergeStatus, reconnectDelay: reconnectDelay,
     vectorToDir: vectorToDir, keyAction: keyAction, combineKeys: combineKeys,
+    camKeyDelta: camKeyDelta, stickToCam: stickToCam,
     makeClientId: makeClientId, driverState: driverState
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

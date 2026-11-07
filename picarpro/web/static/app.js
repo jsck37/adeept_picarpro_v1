@@ -28,9 +28,11 @@ var servoDefs = [
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 80, max: 170, init: 90 },
   { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
-  { id: 4, name: 'Crane Tilt', min: 100, max: 180, init: 180 },
-  { id: 5, name: 'Crane Grip', min: 100, max: 180, init: 100 },
-  { id: 6, name: 'Reserve',  min: 0,  max: 180, init: 90 },
+  // v1.6.1: наклон клешни — канал 4 (полный диапазон 0..180, как в
+  // v1.5.x), захват — канал 6, канал 5 (кисть) на этой сборке пуст.
+  { id: 4, name: 'Crane Tilt', min: 0,   max: 180, init: 180 },
+  { id: 5, name: 'Servo 5',    min: 0,   max: 180, init: 90 },
+  { id: 6, name: 'Crane Grab', min: 100, max: 180, init: 100 },
 ];
 // Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
 
@@ -854,8 +856,11 @@ function setCamera(newPan, newTilt) {
 }
 
 var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, function(dx, dy, r) {
-  var newPan = camClamp(1, 90 + Math.round(dx / r * 30));
-  var newTilt = camClamp(2, 90 + Math.round(dy / r * 30));
+  // v1.6.1: драг в ту же сторону, что стрелки (см. PanelCore.stickToCam):
+  // вверх — камера поднимается, вправо — панорама вправо (pan уменьшается).
+  var tgt = PanelCore.stickToCam(dx, dy, r);
+  var newPan = camClamp(1, tgt.pan);
+  var newTilt = camClamp(2, tgt.tilt);
   setCamera(newPan, newTilt);
   if (camJoystickLabel) {
     camJoystickLabel.textContent = (Math.abs(dx) < 5 && Math.abs(dy) < 5)
@@ -868,6 +873,10 @@ var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, function(dx,
 // ---- клавиатура: W/A/S/D — колёса (A/D сами по себе только руль),
 // Q/E — разворот на месте, Пробел — стоп, Esc — аварийный стоп,
 // стрелки и I/J/K/L — камера (v1.6.0: стрелки отданы камере) ----
+// Камера: стрелки и I/J/K/L, шаг 5° за нажатие. Таблица дельт — в
+// panel-core.js (PanelCore.camKeyDelta), проверяется node-тестами:
+// вверх = tilt +5, вниз = tilt -5, вправо = pan -5, влево = pan +5
+// (v1.6.1: убрана инверсия tilt у стрелок и I/K).
 var heldKeys = {};
 function typingTarget(e) {
   var t = e.target && e.target.tagName;
@@ -880,13 +889,6 @@ function applyKeyDir() {
   }
   sendMoveDir(dir, false);
 }
-// Камера: стрелки и I/J/K/L, шаг 5° за нажатие
-// (v1.6.0: стрелки → камера, раньше они вели колёса вместе с WASD)
-var camKeys = {
-  'i': [0, -5], 'k': [0, 5], 'j': [-5, 0], 'l': [5, 0],
-  'ArrowUp': [0, -5], 'ArrowDown': [0, 5],
-  'ArrowLeft': [-5, 0], 'ArrowRight': [5, 0]
-};
 document.addEventListener('keydown', function(e) {
   if (typingTarget(e) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === 'Escape') { emergencyStop(); e.preventDefault(); return; }
@@ -896,9 +898,9 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     return;
   }
-  var ck = camKeys[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  var ck = PanelCore.camKeyDelta(e.key.length === 1 ? e.key.toLowerCase() : e.key);
   if (ck) {
-    setCamera(camClamp(1, camPan - ck[0]), camClamp(2, camTilt + ck[1]));
+    setCamera(camClamp(1, camPan + ck[0]), camClamp(2, camTilt + ck[1]));
     e.preventDefault();
     return;
   }

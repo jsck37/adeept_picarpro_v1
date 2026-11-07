@@ -130,6 +130,45 @@ class TestButtons:
         assert ds4._crane_grip_index == 2
 
 
+class TestCameraStick:
+    """v1.6.1: инверсия камеры убрана. Спецификация владельца робота:
+    стик вправо = камера вправо = pan МЕНЬШЕ (как стрелка вправо: pan -5);
+    стик вверх = камера вверх = tilt больше (как стрелка вверх: tilt +5).
+    Раньше стик вправо увёл камеру влево."""
+
+    def _start(self, ds4, hw):
+        ds4.start(motors=hw.motors, servos=hw.servos, leds=hw.leds,
+                  buzzer=hw.buzzer, switches=hw.switches, shared_state=hw)
+
+    def test_pan_right_decreases(self, ds4, hw):
+        self._start(ds4, hw)
+        hw.servos.set_angle(1, 90)
+        ds4._rx, ds4._ry = 1.0, 0.0
+        ds4._apply_pan_tilt()
+        assert hw.servos.get_angle(1) < 90
+
+    def test_pan_left_increases(self, ds4, hw):
+        self._start(ds4, hw)
+        hw.servos.set_angle(1, 90)
+        ds4._rx, ds4._ry = -1.0, 0.0
+        ds4._apply_pan_tilt()
+        assert hw.servos.get_angle(1) > 90
+
+    def test_tilt_up_increases(self, ds4, hw):
+        self._start(ds4, hw)
+        hw.servos.set_angle(2, 90)
+        ds4._rx, ds4._ry = 0.0, 1.0   # +1 = стик вверх (после инверсии оси)
+        ds4._apply_pan_tilt()
+        assert hw.servos.get_angle(2) > 90
+
+    def test_tilt_down_decreases(self, ds4, hw):
+        self._start(ds4, hw)
+        hw.servos.set_angle(2, 90)
+        ds4._rx, ds4._ry = 0.0, -1.0
+        ds4._apply_pan_tilt()
+        assert hw.servos.get_angle(2) < 90
+
+
 class TestSmoothCrane:
     def test_no_thread_flood(self, ds4, hw):
         """Частые нажатия не плодят потоки сглаживания (фикс слияния)."""

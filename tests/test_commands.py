@@ -134,8 +134,11 @@ class TestCrane:
         from config import SERVO_CRANE_GRIP
         r = call(state, 'crane', {'action': 'grip_angle', 'angle': 60})
         assert r['ok'] is True
-        # 60 ниже лимита канала клешни (min 100) — зажимается в 100
-        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 100
+        # v1.6.1: у наклона (канал 4) полный диапазон 0..180 — 60 проходит
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 60
+        # выше максимума — зажимается в 180
+        call(state, 'crane', {'action': 'grip_angle', 'angle': 190})
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 180
 
 
 class TestSwitchesHeadlightBlinker:

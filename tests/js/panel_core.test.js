@@ -70,6 +70,41 @@ test('keyAction: регистр; стрелки отданы камере (v1.6.
   assert.strictEqual(C.keyAction('ArrowRight'), null);
 });
 
+test('camKeyDelta: инверсия убрана, спека владельца (v1.6.1)', () => {
+  // вверх = tilt +5 (камера поднимается), вниз = tilt -5
+  assert.deepStrictEqual(C.camKeyDelta('ArrowUp'), [0, 5]);
+  assert.deepStrictEqual(C.camKeyDelta('ArrowDown'), [0, -5]);
+  assert.deepStrictEqual(C.camKeyDelta('i'), [0, 5]);
+  assert.deepStrictEqual(C.camKeyDelta('k'), [0, -5]);
+  // вправо = pan -5 (панорама вправо), влево = pan +5
+  assert.deepStrictEqual(C.camKeyDelta('ArrowRight'), [-5, 0]);
+  assert.deepStrictEqual(C.camKeyDelta('ArrowLeft'), [5, 0]);
+  assert.deepStrictEqual(C.camKeyDelta('l'), [-5, 0]);
+  assert.deepStrictEqual(C.camKeyDelta('j'), [5, 0]);
+  // не камера
+  assert.strictEqual(C.camKeyDelta('w'), null);
+  assert.strictEqual(C.camKeyDelta('x'), null);
+});
+
+test('stickToCam: драг совпадает со стрелками (v1.6.1)', () => {
+  // драг вверх (dy<0) — камера поднимается (tilt > 90)
+  const up = C.stickToCam(0, -30, 60);
+  assert.strictEqual(up.pan, 90);
+  assert.ok(up.tilt > 90, `up.tilt=${up.tilt} должен быть > 90`);
+  // драг вниз — опускается
+  const down = C.stickToCam(0, 30, 60);
+  assert.ok(down.tilt < 90, `down.tilt=${down.tilt} должен быть < 90`);
+  // драг вправо — панорама вправо (pan < 90)
+  const right = C.stickToCam(30, 0, 60);
+  assert.ok(right.pan < 90, `right.pan=${right.pan} должен быть < 90`);
+  // драг влево — влево (pan > 90)
+  const left = C.stickToCam(-30, 0, 60);
+  assert.ok(left.pan > 90, `left.pan=${left.pan} должен быть > 90`);
+  // центр — нейтраль
+  assert.deepStrictEqual(C.stickToCam(0, 0, 60), { pan: 90, tilt: 90 });
+  assert.deepStrictEqual(C.stickToCam(10, -10, 0), { pan: 90, tilt: 90 });
+});
+
 test('driverState', () => {
   assert.strictEqual(C.driverState(null, 'me'), 'free');
   assert.strictEqual(C.driverState('me', 'me'), 'you');
