@@ -71,7 +71,12 @@ class TestNetwork:
         assert len(config.HOTSPOT_PASSWORD) >= 8
 
     def test_hotspot_channel_valid(self):
-        assert 1 <= int(config.HOTSPOT_CHANNEL) <= 13
+        ch = config.HOTSPOT_CHANNEL
+        assert ch == 'auto' or 1 <= int(ch) <= 13      # v1.5.2: допускается auto
+
+    def test_hotspot_band_and_limit_valid(self):
+        assert config.HOTSPOT_BAND in ('g', 'a')
+        assert 1 <= config.HOTSPOT_MAX_CLIENTS <= 20
 
     def test_hw_retry_interval_valid(self):
         # v1.4.0: интервал автовосстановления железа — положительное число

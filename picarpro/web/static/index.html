@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1a73e8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>PiCar Pro</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -25,6 +28,8 @@
   <div class="sb-item" id="sb-battery-item" style="display:none"><span class="sb-label">BAT</span><span class="sb-value" id="sb-battery">--</span></div>
   <div class="sb-item" id="sb-steady-item" style="display:none"><span class="sb-label">Steady</span><span class="sb-value" id="sb-steady">OFF</span></div>
   <div class="sb-sep"></div>
+  <div class="sb-item" id="sb-clients-item"><span class="sb-label">Devices</span><span class="sb-value" id="sb-clients">--</span></div>
+  <div class="sb-sep"></div>
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
@@ -41,14 +46,23 @@
     <button class="tab-btn active" data-tab="control">Control</button>
     <button class="tab-btn" data-tab="console">Console</button>
   </nav>
+  <div class="hdr-actions">
+    <span class="driver-chip" id="driver-chip" data-state="free">Control free</span>
+    <button class="take-btn" id="take-control-btn" type="button">Take control</button>
+    <button class="estop-btn" id="estop-btn" type="button" title="Emergency stop (Esc)">STOP</button>
+  </div>
 </header>
+<div class="driver-banner" id="driver-banner">
+  <span>Another device is driving. You can watch, but your commands are ignored (Stop always works).</span>
+  <button class="take-btn" id="take-control-banner-btn" type="button">Take control</button>
+</div>
 
 <div class="tab-content active" id="content-control">
   <div class="control-layout">
 
     <div class="col-left">
 
-      <div class="card">
+      <div class="card" id="card-camera">
         <div class="card-title collapsible-header open" data-target="camera-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -64,7 +78,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="card-cv">
         <div class="card-title collapsible-header open" data-target="cv-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/></svg>
@@ -226,7 +240,7 @@
 
     <div class="col-right">
 
-      <div class="card">
+      <div class="card" id="card-move">
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
@@ -242,7 +256,7 @@
                 <div class="joystick-crosshair"></div>
                 <div class="joystick-knob" id="joystick-knob"></div>
               </div>
-              <div class="joystick-label" id="joystick-label">Wheels — WASD</div>
+              <div class="joystick-label" id="joystick-label">Wheels — WASD / arrows</div>
             </div>
             <div class="joystick-area">
               <div class="cam-joystick-container" id="cam-joystick-container">
@@ -256,7 +270,7 @@
                   <span class="cam-lbl cam-lbl-right">Right</span>
                 </div>
               </div>
-              <div class="cam-joystick-label" id="cam-joystick-label">Camera — Arrows</div>
+              <div class="cam-joystick-label" id="cam-joystick-label">Camera — drag</div>
             </div>
           </div>
 
@@ -428,6 +442,45 @@
         </div>
       </div>
 
+      <div class="card" id="card-missions">
+        <div class="card-title collapsible-header open" data-target="missions-body">
+          <div style="display:flex;align-items:center;gap:8px">Missions</div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="missions-body">
+          <div class="mission-row">
+            <select id="mission-select" aria-label="Mission"></select>
+            <button class="gbtn" id="mission-start" type="button">Start</button>
+            <button class="gbtn" id="mission-stop" type="button" style="background:#ea4335;color:#fff">Stop</button>
+          </div>
+          <div class="mission-row">
+            <button class="gbtn" id="mission-rec" type="button">Record path</button>
+            <button class="gbtn" id="mission-home" type="button" disabled>Return home</button>
+            <button class="gbtn" id="mission-del" type="button" style="display:none">Delete</button>
+          </div>
+          <div class="mission-status" id="mission-status">Idle</div>
+          <div class="mission-hint">Return home retraces the recorded path by dead reckoning (approximate; no odometry).</div>
+        </div>
+      </div>
+
+      <div class="card" id="card-update">
+        <div class="card-title collapsible-header open" data-target="update-body">
+          <div style="display:flex;align-items:center;gap:8px">System update <span class="sb-value" id="upd-version">--</span></div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="update-body">
+          <div class="mission-row">
+            <input type="file" id="upd-file" accept=".gz,.tgz,.tar.gz,.zip" aria-label="Update archive">
+            <button class="gbtn" id="upd-go" type="button">Upload &amp; install</button>
+          </div>
+          <div class="mission-row">
+            <select id="upd-backups" aria-label="Backups"></select>
+            <button class="gbtn" id="upd-rollback" type="button">Roll back</button>
+          </div>
+          <div class="mission-status" id="upd-status">Upload a project archive (.tar.gz / .zip). The previous version is backed up automatically.</div>
+        </div>
+      </div>
+
       <div class="card" id="card-buzzer">
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
@@ -480,6 +533,7 @@
 
 <div class="toast-container" id="toast-container"></div>
 
+<script src="panel-core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

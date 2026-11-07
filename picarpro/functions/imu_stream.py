@@ -58,10 +58,18 @@ class ImuUdpStreamer:
         пробуждений/с впустую); при активном стриме выдерживаем точный
         интервал короткими ожиданиями."""
         last_send = 0.0
+        fast = False
         while self._running:
             host_ip = self.state.nav_tcp_host
-            if not (host_ip and mpu_ready(self.state)):
-                time.sleep(0.25)
+            ready = bool(host_ip and mpu_ready(self.state))
+            if ready != fast:
+                # гироскоп опрашивается часто только пока есть подписчик
+                fast = ready
+                mpu = self.state.mpu6050
+                if mpu is not None:
+                    (mpu.request_fast if ready else mpu.release_fast)('imu_udp')
+            if not ready:
+                time.sleep(0.5)
                 continue
             now = time.time()
             dt = self._interval - (now - last_send)

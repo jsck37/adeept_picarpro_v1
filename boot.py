@@ -21,11 +21,20 @@ for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from picarpro.logger import logger
+from picarpro import updater
 from picarpro.state import SharedState
 from picarpro.network import oled_loop
 
 
 def main():
+    # после обновления: если новая версия не продержалась UPDATE_HEALTHY_AFTER_S —
+    # откат на резервную копию и перезапуск (защита от «кирпича»)
+    try:
+        if updater.startup_check() == 'rolled_back':
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        updater.schedule_healthy_mark()
+    except Exception as e:
+        logger.warning(f'[Boot] update check skipped: {e}')
     logger.info('=' * 50)
     logger.info('  PiCar Pro — booting (merged v1/v2/jsck37)...')
     logger.info('=' * 50)

@@ -13,7 +13,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from picarpro.logger import logger  # noqa: E402
 
 PASS, FAIL, SKIP = '[ OK ]', '[FAIL]', '[SKIP]'
 results = []

@@ -134,6 +134,7 @@ class VoltageMonitor:
     def _loop(self):
         while self._running:
             v = self._reader.read_voltage()
+            alarm = False
             if v is not None:
                 with self._lock:
                     self._history.append(v)
@@ -146,14 +147,21 @@ class VoltageMonitor:
                                  / max(0.1, BATTERY_VREF - BATTERY_MIN_V) * 100.0))
                     self._battery_percent = round(percent)
                     low = median_v < BATTERY_MIN_V
-                    if low and not self._low_battery:
-                        self._trigger_alarm()
-                    self._low_battery = low
+                    alarm = low and not self._low_battery
+                    if not alarm:
+                        self._low_battery = low
+                if alarm:
+                    # колбэк (зуммер/LED) — вне блокировки: get_status()
+                    # из телеметрии не должен ждать его завершения; флаг low
+                    # выставляем уже после тревоги (low => тревога была подана)
+                    self._trigger_alarm()
+                    with self._lock:
+                        self._low_battery = True
             time.sleep(1.0)
 
     def _trigger_alarm(self):
         now = time.monotonic()
-        if now - self._last_alarm < 30.0:
+        if self._last_alarm and now - self._last_alarm < 30.0:
             return
         self._last_alarm = now
         logger.warning(f'[Voltage] low battery: {self._battery_voltage}V')

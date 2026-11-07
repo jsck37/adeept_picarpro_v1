@@ -1,4 +1,4 @@
-import threading, time
+import threading
 from picarpro.logger import logger
 from config import BUZZER_PIN
 
@@ -35,7 +35,8 @@ MELODIES = {
 class BuzzerController:
     def __init__(self):
         self._pwm = None
-        self._flag = threading.Event()
+        self._flag = threading.Event()      # set = мелодия играет
+        self._stop_evt = threading.Event()  # set = прервать немедленно
         self._thread = None
         self._initialized = False
         if not _HAS_GPIO:
@@ -58,9 +59,10 @@ class BuzzerController:
         notes = MELODIES.get(name)
         if not notes:
             return
-        self._flag.clear()
+        self._stop_evt.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1)
+        self._stop_evt.clear()
         self._flag.set()
         self._thread = threading.Thread(target=self._play, args=(notes,), daemon=True)
         self._thread.start()
@@ -68,16 +70,19 @@ class BuzzerController:
     def _play(self, notes):
         try:
             for n, d in notes:
-                if not self._flag.is_set():
+                if self._stop_evt.is_set():
                     break
                 freq = NOTES.get(n, 0) if isinstance(n, str) else n
                 if freq <= 0:
                     self._off()
                 else:
                     self._tone(freq)
-                time.sleep(d)
+                # Event.wait вместо sleep: stop() обрывает ноту сразу,
+                # а не через 0.8 с (play_melody раньше блокировал вызывающего)
+                self._stop_evt.wait(d)
         finally:
             self._off()
+            self._flag.clear()
 
     def _tone(self, freq):
         if not self._pwm:
@@ -100,6 +105,7 @@ class BuzzerController:
         self.play_melody('beep')
 
     def stop(self):
+        self._stop_evt.set()
         self._flag.clear()
         self._off()
 

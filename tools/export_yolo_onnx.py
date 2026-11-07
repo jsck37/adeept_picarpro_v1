@@ -40,7 +40,7 @@ def main():
     print(f'OK: {classes_path}')
     print('\nНа Pi пропишите в config.py:')
     print(f'  YOLO_MODEL_PATH = "/home/pi/models/{onnx_path.name}"')
-    print(f'  YOLO_CLASSES_FILE = "/home/pi/models/classes.txt"')
+    print('  YOLO_CLASSES_FILE = "/home/pi/models/classes.txt"')
     print('Проверьте docs/YOLO_GUIDE.md — там порядок загрузки и ожидаемая FPS.')
 
 

@@ -39,10 +39,20 @@ class TestLineDetection:
         frame = white_frame()
         frame[:, 100:104] = 0
         cv_thread.cv_mode = 'findlineCV'
+        cv_thread.overlay_wanted = True      # оверлей рисуется только для зрителя
         cv_thread._process(frame)
         overlay = cv_thread.get_overlay()
         assert overlay is not None
         assert overlay.shape == frame.shape
+
+    def test_overlay_skipped_without_viewer(self, cv_thread):
+        """Энергосбережение: без открытого видео оверлей не строится."""
+        frame = white_frame()
+        frame[:, 100:104] = 0
+        cv_thread.cv_mode = 'findlineCV'
+        cv_thread._process(frame)
+        assert cv_thread.get_overlay() is None
+        assert cv_thread.line_pos[0] > 0       # а детекция работает
 
     def test_callback_fired(self, cv_thread):
         got = []

@@ -20,6 +20,7 @@ import threading
 import time
 
 from picarpro.logger import logger
+from picarpro.drive import drive
 from config import (
     ARUCO_DICT_NAME, ARUCO_ROBOT_ID, ARUCO_WAYPOINTS,
     ARUCO_ANGLE_THRESHOLD_DEG, ARUCO_SPEED, ARUCO_REACH_AREA,
@@ -59,7 +60,7 @@ class ArucoNavigator:
         self.state = state
         self.camera = camera
         self._detector = _make_detector()
-        self._running = False
+        self._stop = threading.Event()
         self._active = False
         self._thread = None
         self._lock = threading.Lock()
@@ -117,17 +118,18 @@ class ArucoNavigator:
             return True, 'already running'
         self.finished = False
         self.waypoint_index = 0
-        self._running = True
+        self._stop = threading.Event()    # свой Event на запуск (нет гонки stop->start)
         self._active = True
         self._demand_open()   # v1.2.0: сырые кадры нужны в полном темпе
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(target=self._loop, args=(self._stop,),
+                                        daemon=True)
         self._thread.start()
         logger.info(f'[ArUco] nav started, waypoints={ARUCO_WAYPOINTS}')
         return True, 'ok'
 
     def stop(self):
         self._active = False
-        self._running = False
+        self._stop.set()
         self._demand_close()
         try:
             if self.state.motors:
@@ -136,21 +138,24 @@ class ArucoNavigator:
             pass
         logger.info('[ArUco] nav stopped')
 
-    def _loop(self):
+    def _loop(self, stop):
         wps = ARUCO_WAYPOINTS
         reached_counter = 0
         last_cmd = 'STOP'
         last_cmd_ts = 0.0
+        last_id = 0
         try:
-            while self._running and self._active:
-                now = time.time()
+            while not stop.is_set() and self._active:
+                now = time.monotonic()
                 if self.waypoint_index >= len(wps):
                     self._finish()
                     break
                 target_id = wps[self.waypoint_index]
-                frame = self.camera.get_raw_frame() if self.camera else None
+                # только свежие кадры, без копирования (раньше — копия каждые
+                # 50 мс при 15 к/с камеры, т.е. детекция по дублям)
+                last_id, frame = (self.camera.wait_raw_frame(last_id, 0.5)
+                                  if self.camera else (last_id, None))
                 if frame is None:
-                    time.sleep(0.05)
                     continue
 
                 center_x = self._detect_marker_x(frame, target_id)
@@ -178,7 +183,11 @@ class ArucoNavigator:
                             if self.waypoint_index >= len(wps):
                                 self._finish()
                                 break
-                            time.sleep(ARUCO_WAYPOINT_PAUSE_S)
+                            # на паузе — стоять (раньше моторы могли ещё
+                            # крутиться последней командой FORWARD)
+                            self._drive('STOP')
+                            if stop.wait(ARUCO_WAYPOINT_PAUSE_S):
+                                break
                     else:
                         reached_counter = 0
                         if angle_err > ARUCO_ANGLE_THRESHOLD_DEG:
@@ -198,8 +207,7 @@ class ArucoNavigator:
                     self.last_angle_err = 0.0
 
                 self.last_command = cmd
-                self._drive(cmd)
-                time.sleep(0.05)
+                self._drive(cmd, self.last_angle_err)
         finally:
             self._drive('STOP')
             self._active = False
@@ -208,12 +216,14 @@ class ArucoNavigator:
     def _detect_marker_x(self, frame_rgb, target_id):
         """Вернуть X центра целевого маркера (px) или None."""
         try:
-            bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            # aruco работает с одноканальным изображением: серый кадр втрое
+            # дешевле BGR при той же точности
+            gray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
             if hasattr(self._detector, 'detectMarkers'):
-                corners, ids, _ = self._detector.detectMarkers(bgr)
+                corners, ids, _ = self._detector.detectMarkers(gray)
             else:  # старый API: dictionary.detectMarkers
                 corners, ids, _ = cv2.aruco.detectMarkers(
-                    bgr, self._detector)
+                    gray, self._detector)
             self.last_marker_area = 0
             if ids is None:
                 return None
@@ -234,19 +244,16 @@ class ArucoNavigator:
             logger.warning(f'[ArUco] detect error: {e}')
             return None
 
-    def _drive(self, cmd):
-        motors = self.state.motors
-        if not motors:
-            return
+    def _drive(self, cmd, angle_err=0.0):
+        """Команда -> моторы. При большом угловом рассогласовании — разворот
+        на месте (раньше всегда дуга вперёд — робот «выезжал» мимо маркера)."""
+        if cmd in ('LEFT', 'RIGHT') and abs(angle_err) > 2.5 * ARUCO_ANGLE_THRESHOLD_DEG:
+            d = 'spin_left' if cmd == 'LEFT' else 'spin_right'
+        else:
+            d = {'FORWARD': 'forward', 'LEFT': 'forward_left',
+                 'RIGHT': 'forward_right'}.get(cmd, 'stop')
         try:
-            if cmd == 'FORWARD':
-                motors.move(ARUCO_SPEED, 'forward', 'no', 0.5)
-            elif cmd == 'LEFT':
-                motors.move(ARUCO_SPEED, 'forward', 'left', 0.3)
-            elif cmd == 'RIGHT':
-                motors.move(ARUCO_SPEED, 'forward', 'right', 0.3)
-            else:
-                motors.stop()
+            drive(self.state, d, ARUCO_SPEED if d != 'stop' else None)
         except Exception as e:
             logger.warning(f'[ArUco] drive error: {e}')
 

@@ -10,26 +10,28 @@
 * MAX_CONTENT_LENGTH ограничивает размер запроса.
 """
 import json
+import gzip
+import hashlib
 import os
 import threading
 import time
 
 from flask import (Flask, Response, jsonify, request,
-                   send_from_directory, render_template)
+                   send_from_directory)
 
 from picarpro.logger import logger, log_buffer
 from picarpro.commands import process as process_command
 from picarpro.network import get_ip, start_redirect_server
 from picarpro.web.auth import (SECURITY_HEADERS, request_authorized,
                                is_public_path, token_required,
-                               generate_secret_key, extract_request_token)
+                               generate_secret_key)
 from picarpro.routes.bluetooth import (
     scan_devices, pair_and_connect, disconnect_device,
     load_config as bt_load_config, save_config as bt_save_config,
     _load_hid_sony, validate_mac,
 )
-from config import (FLASK_PORT, WEBSOCKET_PORT, BASE_DIR, CORS_ORIGINS,
-                    TELEMETRY_INTERVAL_S)
+from config import (FLASK_PORT, BASE_DIR, CORS_ORIGINS,
+                    TELEMETRY_INTERVAL_S, MAX_CONTENT_LENGTH, UPDATE_MAX_BYTES)
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), 'static')
 DOCS_DIR = os.path.join(BASE_DIR, 'docs')
@@ -44,11 +46,51 @@ def _cors_headers(resp):
     return resp
 
 
+_STATIC_CACHE = {}    # имя -> (mtime, etag, raw, gzipped|None)
+_COMPRESSIBLE = ('text/', 'application/javascript', 'application/json')
+
+
+def _static_entry(filename, mimetype):
+    path = os.path.join(WEB_DIR, filename)
+    mtime = os.stat(path).st_mtime
+    ent = _STATIC_CACHE.get(filename)
+    if ent is None or ent[0] != mtime:
+        with open(path, 'rb') as f:
+            raw = f.read()
+        gz = (gzip.compress(raw, 6)
+              if mimetype.startswith(_COMPRESSIBLE) and len(raw) > 512 else None)
+        etag = '"%s"' % hashlib.md5(raw).hexdigest()[:16]
+        ent = _STATIC_CACHE[filename] = (mtime, etag, raw, gz)
+    return ent
+
+
+def _static(filename, mimetype, max_age=0):
+    """Статика из памяти: ETag (304 без тела), gzip для текстовых файлов
+    (app.js 50 КБ -> ~14 КБ по Wi-Fi), и ни одного рендера шаблона на запрос.
+    Для html/js/css — revalidate (после обновления проекта сразу новая
+    версия), для картинок — суточный кэш."""
+    try:
+        _, etag, raw, gz = _static_entry(filename, mimetype)
+    except OSError:
+        return Response('Not found', status=404, mimetype='text/plain')
+    headers = {'ETag': etag, 'Vary': 'Accept-Encoding',
+               'Cache-Control': (f'public, max-age={max_age}' if max_age
+                                 else 'no-cache')}
+    if request.headers.get('If-None-Match') == etag:
+        return Response(status=304, headers=headers)
+    body = raw
+    if gz is not None and 'gzip' in request.headers.get('Accept-Encoding', ''):
+        body = gz
+        headers['Content-Encoding'] = 'gzip'
+    return Response(body, mimetype=mimetype.split(';')[0], headers=headers,
+                    content_type=mimetype)
+
+
 def create_app(state):
     app = Flask(__name__, template_folder=WEB_DIR, static_folder=None)
     app.config['SECRET_KEY'] = generate_secret_key(
         str(BASE_DIR / 'instance' / 'secret_key'))
-    app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
+    app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
     @app.after_request
     def _security(resp):
@@ -69,7 +111,7 @@ def create_app(state):
     # ---- static UI --------------------------------------------------------
     @app.route('/')
     def index():
-        return render_template('index.html')
+        return _static('index.html', 'text/html; charset=utf-8')
 
     @app.route('/favicon.ico')
     def favicon():
@@ -77,17 +119,80 @@ def create_app(state):
 
     @app.route('/style.css')
     def css():
-        return send_from_directory(WEB_DIR, 'style.css', mimetype='text/css')
+        return _static('style.css', 'text/css; charset=utf-8')
 
     @app.route('/app.js')
     def js():
-        return send_from_directory(WEB_DIR, 'app.js',
-                                   mimetype='application/javascript')
+        return _static('app.js', 'application/javascript; charset=utf-8')
+
+    @app.route('/panel-core.js')
+    def js_core():
+        return _static('panel-core.js', 'application/javascript; charset=utf-8')
 
     @app.route('/rpi_pinout.png')
     def pinout_img():
-        return send_from_directory(WEB_DIR, 'rpi_pinout.png',
-                                   mimetype='image/png')
+        return _static('rpi_pinout.png', 'image/png', max_age=86400)
+
+    # ---- обновление по воздуху ------------------------------------------------
+    def _update_guard():
+        """Только водитель (или клиент без id); робот при этом останавливается."""
+        client = (request.headers.get('X-Client-Id') or '')[:32] or None
+        allowed, owner = state.control.check(client, 'update', {})
+        if not allowed:
+            return jsonify({'ok': False, 'code': 'not_driver', 'driver': owner,
+                            'error': 'Controlled by another device'}), 409
+        return None
+
+    @app.route('/api/update/info')
+    def api_update_info():
+        from picarpro import updater
+        return jsonify({'ok': True, **updater.info()})
+
+    @app.route('/api/update', methods=['POST'])
+    def api_update():
+        from picarpro import updater
+        denied = _update_guard()
+        if denied:
+            return denied
+        request.max_content_length = UPDATE_MAX_BYTES + 1024 * 1024
+        f = request.files.get('file')
+        if f is None:
+            return jsonify({'ok': False, 'error': 'file required'}), 400
+        os.makedirs(os.path.join(str(BASE_DIR), '.update_tmp'), exist_ok=True)
+        tmp_path = os.path.join(str(BASE_DIR), '.update_tmp',
+                                'upload-%d.bin' % int(time.time()))
+        try:
+            f.save(tmp_path)
+            state.emergency_stop()          # на время замены кода робот стоит
+            result = updater.apply_update(tmp_path)
+        except updater.UpdateError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+        except Exception as e:
+            logger.error(f'[Update] failed: {e}')
+            return jsonify({'ok': False, 'error': 'update failed: ' + str(e)[:120]}), 500
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        restart = request.form.get('restart', '1') != '0'
+        result['restarting'] = bool(restart and updater.schedule_restart())
+        return jsonify(result)
+
+    @app.route('/api/update/rollback', methods=['POST'])
+    def api_update_rollback():
+        from picarpro import updater
+        denied = _update_guard()
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        try:
+            state.emergency_stop()
+            result = updater.rollback(data.get('name') or None)
+        except updater.UpdateError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+        result['restarting'] = updater.schedule_restart()
+        return jsonify(result)
 
     @app.route('/docs/index.json')
     def docs_index():
@@ -126,17 +231,20 @@ def create_app(state):
         cam.stream_open()
 
         def gen():
+            # wait_frame отдаёт только НОВЫЕ кадры: раньше get_frame() сразу
+            # возвращал последний кадр, и цикл без пауз гнал дубликаты на
+            # максимальной скорости (100 % ядра и впустую трафик)
+            last_id = 0
             try:
                 while state.running:
                     try:
-                        frame = cam.get_frame()
+                        last_id, frame = cam.wait_frame(last_id, timeout=1.0)
                     except Exception:
                         frame = None
+                        time.sleep(0.05)
                     if frame:
                         yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
                                + frame + b'\r\n')
-                    else:
-                        time.sleep(0.05)
             finally:
                 cam.stream_close()
 
@@ -164,16 +272,8 @@ def create_app(state):
 
     @app.route('/api/i2c_scan')
     def api_i2c():
-        from picarpro.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
-        devs = i2c_scan()
-        addr, who = find_mpu6050_on_bus()
-        return jsonify({
-            'ok': True,
-            'devices': [f'0x{a:02X}' for a in devs],
-            'mpu6050_found': addr is not None,
-            'mpu6050_addr': f'0x{addr:02X}' if addr else None,
-            'mpu6050_who_am_i': f'0x{who:02X}' if who else None,
-        })
+        from picarpro.hardware.mpu6050 import i2c_scan_report
+        return jsonify(i2c_scan_report())
 
     @app.route('/api/logs')
     def api_logs():
@@ -188,7 +288,11 @@ def create_app(state):
             data = {}
         if not isinstance(data, dict):
             return jsonify({'ok': False, 'error': 'JSON object expected'}), 400
-        r = process_command(state, {'cmd': action, 'params': data})
+        # X-Client-Id — то же устройство, что и в WebSocket (арбитраж управления)
+        client = (request.headers.get('X-Client-Id') or '')[:32] or None
+        r = process_command(state, {'cmd': action, 'params': data}, client)
+        if client and isinstance(r, dict):
+            r.setdefault('driver', state.control.driver)
         return jsonify(r)
 
     # ---- bluetooth --------------------------------------------------------
@@ -212,29 +316,41 @@ def create_app(state):
             logger.error(f'[BT] scan error: {e}')
             return jsonify({'ok': False, 'error': str(e), 'devices': []})
 
+    def _bt_connect(mac, on_success=None):
+        """Сопряжение в фоновом потоке с таймаутом ожидания 45 с (общий код
+        /api/bt/connect и /api/bt/auto_connect, раньше — копия в каждом)."""
+        result = {'ok': False, 'message': ''}
+        done = threading.Event()
+
+        def _do():
+            try:
+                ok, msg = pair_and_connect(mac, state.ds4)
+                result['ok'] = ok
+                result['message'] = msg
+                if ok and on_success:
+                    on_success()
+            except Exception as e:
+                result['message'] = str(e)[:200]
+            finally:
+                done.set()
+
+        threading.Thread(target=_do, daemon=True).start()
+        done.wait(timeout=45)
+        return result
+
     @app.route('/api/bt/connect', methods=['POST'])
     def bt_connect():
         data = request.get_json(silent=True) or {}
         mac = validate_mac(data.get('mac', ''))
         if not mac:
             return jsonify({'ok': False, 'error': 'Valid MAC required'}), 400
-        result = {'ok': False, 'message': ''}
-        done = threading.Event()
+        def _remember():
+            cfg = bt_load_config()
+            cfg['last_gamepad_mac'] = mac
+            cfg['last_gamepad_name'] = str(data.get('name', ''))[:64]
+            bt_save_config(cfg)
 
-        def _do():
-            ok, msg = pair_and_connect(mac, state.ds4)
-            result['ok'] = ok
-            result['message'] = msg
-            if ok:
-                cfg = bt_load_config()
-                cfg['last_gamepad_mac'] = mac
-                cfg['last_gamepad_name'] = str(data.get('name', ''))[:64]
-                bt_save_config(cfg)
-            done.set()
-
-        threading.Thread(target=_do, daemon=True).start()
-        done.wait(timeout=45)
-        return jsonify(result)
+        return jsonify(_bt_connect(mac, on_success=_remember))
 
     @app.route('/api/bt/disconnect', methods=['POST'])
     def bt_disconnect():
@@ -266,18 +382,7 @@ def create_app(state):
         mac = cfg.get('last_gamepad_mac')
         if not mac:
             return jsonify({'ok': False, 'error': 'No saved gamepad MAC'})
-        result = {'ok': False, 'message': ''}
-        done = threading.Event()
-
-        def _do():
-            ok, msg = pair_and_connect(mac, state.ds4)
-            result['ok'] = ok
-            result['message'] = msg
-            done.set()
-
-        threading.Thread(target=_do, daemon=True).start()
-        done.wait(timeout=45)
-        return jsonify(result)
+        return jsonify(_bt_connect(mac))
 
     @app.route('/api/bt/load_hid_sony', methods=['POST'])
     def bt_load_hid():

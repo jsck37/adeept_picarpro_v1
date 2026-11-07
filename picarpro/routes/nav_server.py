@@ -21,8 +21,9 @@ import threading
 import time
 
 from picarpro.logger import logger
+from picarpro.drive import drive
 from config import (
-    NAV_TCP_PORT, STEER_MAP, SERVO_STEERING,
+    NAV_TCP_PORT,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED, SERVO_CRANE_ARM,
 )
 
@@ -37,6 +38,7 @@ class NavCommandHandler(socketserver.StreamRequestHandler):
         addr = self.client_address[0]
         logger.info(f'[NavTCP] host connected: {addr}')
         state.nav_tcp_host = addr
+        moving = False     # хост что-то ехать приказал и ещё не остановил
         try:
             while state.running:
                 try:
@@ -44,8 +46,12 @@ class NavCommandHandler(socketserver.StreamRequestHandler):
                     # settimeout на соединении) — io.readline не принимает timeout
                     line = self.rfile.readline()
                 except (socket.timeout, TimeoutError):
-                    # хост молчит — аварийный стоп (оригинал молча уезжал)
-                    self._safe_stop(state, 'host timeout -> STOP')
+                    # хост молчит — аварийный стоп (оригинал молча уезжал).
+                    # Один раз, а не каждые 10 с бесконечно: раньше простаивающее
+                    # соединение спамило лог и дёргало моторы под другими режимами
+                    if moving:
+                        self._safe_stop(state, 'host timeout -> STOP')
+                        moving = False
                     continue
                 if not line:
                     break
@@ -56,11 +62,18 @@ class NavCommandHandler(socketserver.StreamRequestHandler):
                 if not text:
                     continue
                 reply = self._execute(state, text)
+                cmd = text.split()[0].upper()
+                if cmd in ('FORWARD', 'BACKWARD', 'LEFT', 'RIGHT'):
+                    moving = True
+                elif cmd == 'STOP':
+                    moving = False
                 if reply:
                     try:
                         self.wfile.write((reply + '\n').encode('utf-8'))
                     except Exception:
                         break
+                if cmd == 'QUIT':       # раньше отвечали BYE, но не закрывали
+                    break
         except Exception as e:
             logger.warning(f'[NavTCP] connection error: {e}')
         finally:
@@ -82,27 +95,14 @@ class NavCommandHandler(socketserver.StreamRequestHandler):
         cmd = parts[0].upper()
         arg = parts[1] if len(parts) > 1 else None
         motors, servos = state.motors, state.servos
-        speed = state.speed
         state.nav_last_cmd = cmd
         state.nav_last_cmd_ts = time.time()
 
         if cmd in ('FORWARD', 'LEFT', 'RIGHT', 'BACKWARD', 'STOP'):
             if not motors:
                 return 'ERR no motors'
-            d = cmd.lower()
-            if d == 'stop':
-                motors.stop()
-            elif d == 'forward':
-                motors.move(speed, 'forward', 'no', 0.5)
-            elif d == 'backward':
-                motors.move(speed, 'backward', 'no', 0.5)
-            else:
-                motors.move(speed, 'forward', d, 0.3)
-            if servos and d != 'stop':
-                try:
-                    servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
-                except Exception:
-                    pass
+            state.touch()
+            drive(state, cmd.lower())
             return f'OK {cmd}'
 
         elif cmd == 'SPEED' and arg is not None:

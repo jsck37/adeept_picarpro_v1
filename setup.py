@@ -146,7 +146,7 @@ def stage_0_preflight():
     with open(LOG_FILE, "w") as log:
         log.write(f"PiCar Pro Setup Log — {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-    print(f"\n  {BLU}[0/7]{RST} Pre-flight checks...")
+    print(f"\n  {BLU}[0/8]{RST} Pre-flight checks...")
     check_disk_space(2600)   # 2048 МБ под /var/swap + запас
 
     debian_ver = get_debian_version()
@@ -162,7 +162,7 @@ def stage_0_preflight():
 
 
 def stage_1_wifi(debian_ver, codename):
-    print(f"\n  {BLU}[1/7]{RST} WiFi configuration...")
+    print(f"\n  {BLU}[1/8]{RST} WiFi configuration...")
 
     if debian_ver >= 12:
         _, conn_result = run_cmd(
@@ -213,7 +213,7 @@ def stage_1_wifi(debian_ver, codename):
 
 
 def stage_2_swap():
-    print(f"\n  {BLU}[2/7]{RST} Configuring swap file...")
+    print(f"\n  {BLU}[2/8]{RST} Configuring swap file...")
 
     _, sw_result = run_cmd("free -m | grep Swap", critical=False)
     current_swap = 0
@@ -290,7 +290,7 @@ def stage_2_swap():
 
 
 def stage_3_apt_packages(debian_ver, codename):
-    print(f"\n  {BLU}[3/7]{RST} Installing system packages...")
+    print(f"\n  {BLU}[3/8]{RST} Installing system packages...")
 
     update_ok = False
     for attempt in range(1, 4):
@@ -336,7 +336,7 @@ def stage_3_apt_packages(debian_ver, codename):
 
 
 def stage_4_pip_packages(debian_ver):
-    print(f"\n  {BLU}[4/7]{RST} Installing Python packages...")
+    print(f"\n  {BLU}[4/8]{RST} Installing Python packages...")
 
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
@@ -367,8 +367,33 @@ def stage_4_pip_packages(debian_ver):
         run_cmd(cmd, critical=False)
 
 
+def stage_4b_pigpio():
+    """Демон pigpiod для стабильного ШИМ моторов (DMA). Не критично: без него
+    моторы работают на RPi.GPIO. Pi 5 (RP1) pigpio не поддерживает."""
+    print(f"  {DIM}[*]{RST} pigpio (hardware-timed motor PWM)...")
+    try:
+        with open('/proc/device-tree/model') as f:
+            model = f.read()
+    except Exception:
+        model = ''
+    if 'Raspberry Pi 5' in model:
+        print(f"  {YLW}[!]{RST} Pi 5: pigpio не поддерживается — остаётся RPi.GPIO PWM")
+        return
+    run_cmd("apt-get install -y --no-install-recommends pigpio python3-pigpio", critical=False)
+    dropin = "/etc/systemd/system/pigpiod.service.d"
+    try:
+        os.makedirs(dropin, exist_ok=True)
+        with open(os.path.join(dropin, "picarpro.conf"), "w") as f:
+            # -l: только localhost; -s 10: выборка 10 мкс (вдвое меньше нагрузки на CPU)
+            f.write("[Service]\nExecStart=\nExecStart=/usr/bin/pigpiod -l -s 10\n")
+    except Exception as e:
+        print(f"  {YLW}[!]{RST} pigpiod drop-in: {e}")
+    run_cmd("systemctl daemon-reload", critical=False)
+    run_cmd("systemctl enable --now pigpiod", critical=False)
+
+
 def stage_5_hardware_config():
-    print(f"\n  {BLU}[5/7]{RST} Configuring hardware...")
+    print(f"\n  {BLU}[5/8]{RST} Configuring hardware...")
 
     run_cmd("raspi-config nonint do_i2c 0", critical=False)
     run_cmd("raspi-config nonint do_spi 0", critical=False)
@@ -431,27 +456,31 @@ def stage_6_wifi_hotspot(debian_ver):
     точка доступа работает всегда; SSH включается на уровне системы.
     Вся механика — в fix_wifi_hostapd.sh (им же можно починить машину
     без переустановки)."""
-    print(f"\n  {BLU}[6/7]{RST} Setting up WiFi Hotspot (hostapd + dnsmasq) and SSH...")
+    print(f"\n  {BLU}[6/8]{RST} Setting up WiFi Hotspot (hostapd + dnsmasq) and SSH...")
 
     if not is_package_installed("network-manager"):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     # --- настройки: config.py -> существующий conf -> запрос -------------
-    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "12345678", "6", "10.42.0.1"
+    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "12345678", "auto", "10.42.0.1"
+    def_band = "g"
     try:
         sys.path.insert(0, thisPath)
         from config import (HOTSPOT_SSID, HOTSPOT_PASSWORD,
-                            HOTSPOT_CHANNEL, HOTSPOT_IP)
+                            HOTSPOT_CHANNEL, HOTSPOT_IP, HOTSPOT_BAND)
         def_ssid = str(HOTSPOT_SSID)
         def_pass = str(HOTSPOT_PASSWORD)
         def_ch = str(HOTSPOT_CHANNEL)
         def_ip = str(HOTSPOT_IP)
+        def_band = str(HOTSPOT_BAND)
     except Exception:
         pass
 
-    cfg = {"ssid": def_ssid, "pass": def_pass, "ch": def_ch, "ip": def_ip}
+    cfg = {"ssid": def_ssid, "pass": def_pass, "ch": def_ch, "ip": def_ip,
+           "band": def_band}
     prefix_map = {"HOTSPOT_SSID=": "ssid", "HOTSPOT_PASS=": "pass",
-                  "HOTSPOT_CHANNEL=": "ch", "HOTSPOT_IP=": "ip"}
+                  "HOTSPOT_CHANNEL=": "ch", "HOTSPOT_IP=": "ip",
+                  "HOTSPOT_BAND=": "band"}
     if os.path.exists("/etc/picarpro/hotspot.conf"):
         try:
             with open("/etc/picarpro/hotspot.conf") as f:
@@ -469,7 +498,8 @@ def stage_6_wifi_hotspot(debian_ver):
 
     print(f"\n  Hotspot SSID : {BOLD}{cfg['ssid']}{RST}")
     print(f"  Hotspot pass : {BOLD}{cfg['pass']}{RST}")
-    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (1-11 видны всем телефонам)")
+    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (auto = наименее занятый из 1/6/11 при каждой загрузке)")
+    print(f"  AP band      : {BOLD}{cfg['band']}{RST}  (g = 2.4 ГГц, видят все; a = 5 ГГц, меньше помех)")
     print(f"  AP IP        : {BOLD}{cfg['ip']}{RST}  (SSH: <user>@{cfg['ip']}, UI: http://{cfg['ip']}:5000)")
     if input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower() == 'y':
         v = input(f"  {YLW}?{RST} SSID [{cfg['ssid']}]: ").strip()
@@ -481,9 +511,12 @@ def stage_6_wifi_hotspot(debian_ver):
                 print(f"  {RED}[!]{RST} WPA password needs 8+ chars, keeping current")
             else:
                 cfg['pass'] = _safe(v, cfg['pass'])
-        v = input(f"  {YLW}?{RST} Channel 1-13 [{cfg['ch']}]: ").strip()
-        if v and v.isdigit() and 1 <= int(v) <= 13:
+        v = input(f"  {YLW}?{RST} Channel auto|1-13 [{cfg['ch']}]: ").strip().lower()
+        if v == 'auto' or (v.isdigit() and 1 <= int(v) <= 13):
             cfg['ch'] = v
+        v = input(f"  {YLW}?{RST} Band g|a [{cfg['band']}]: ").strip().lower()
+        if v in ('g', 'a'):
+            cfg['band'] = v
         v = input(f"  {YLW}?{RST} AP IP [{cfg['ip']}]: ").strip()
         if v:
             parts = v.split('.')
@@ -497,6 +530,7 @@ def stage_6_wifi_hotspot(debian_ver):
             f.write(f'HOTSPOT_PASS="{cfg["pass"]}"\n')
             f.write(f'HOTSPOT_CHANNEL="{cfg["ch"]}"\n')
             f.write(f'HOTSPOT_IP="{cfg["ip"]}"\n')
+            f.write(f'HOTSPOT_BAND="{cfg["band"]}"\n')
         print(f"  {GRN}[+]{RST} Config saved")
     except Exception as e:
         print(f"  {RED}[!]{RST} Could not save config: {e}")
@@ -515,7 +549,7 @@ def stage_6_wifi_hotspot(debian_ver):
 
 
 def stage_7_systemd_service():
-    print(f"\n  {BLU}[7/7]{RST} Setting up auto-start service...")
+    print(f"\n  {BLU}[7/8]{RST} Setting up auto-start service...")
 
     server_path = os.path.join(thisPath, "boot.py")
     if not os.path.exists(server_path):
@@ -561,16 +595,61 @@ WantedBy=multi-user.target
         print(f"  {RED}[!]{RST} Error: {e}")
 
 
+def stage_8_yolo_model():
+    """Модель YOLO для режима yoloDetect. Нестрашно, если её нет: остальное
+    работает без неё. Пропустить: PICARPRO_SKIP_YOLO=1."""
+    print(f"\n  {BLU}[8/8]{RST} YOLO model (object detection)...")
+    if os.environ.get("PICARPRO_SKIP_YOLO") == "1":
+        print("  skipped (PICARPRO_SKIP_YOLO=1)")
+        return
+    try:
+        sys.path.insert(0, thisPath)
+        sys.path.insert(0, os.path.join(thisPath, "tools"))
+        from config import (YOLO_MODEL_PATH, YOLO_CLASSES_FILE,
+                            YOLO_MODEL_URL, YOLO_MODEL_SHA256)
+        from yolo_common import download_file, write_classes
+    except Exception as e:
+        print(f"  {YLW}[!]{RST} YOLO step skipped: {e}")
+        return
+
+    def _fix_owner(path):
+        user = os.environ.get("SUDO_USER")
+        if user:
+            run_cmd(f'chown -R {user}:{user} "{os.path.dirname(path)}"', critical=False)
+
+    if not os.path.exists(YOLO_MODEL_PATH) and YOLO_MODEL_URL:
+        print(f"  Downloading {YOLO_MODEL_URL} ...")
+        def _pb(done, total):
+            if total:
+                print(f"\r  {done * 100 // total:3d}% ", end="", flush=True)
+        if download_file(YOLO_MODEL_URL, YOLO_MODEL_PATH,
+                         sha256=YOLO_MODEL_SHA256 or None, progress=_pb):
+            print(f"\n  {GRN}[+]{RST} model saved: {YOLO_MODEL_PATH}")
+    if os.path.exists(YOLO_MODEL_PATH):
+        if not os.path.exists(YOLO_CLASSES_FILE):
+            write_classes(YOLO_CLASSES_FILE)       # COCO-80, как у стандартных моделей
+            print(f"  {GRN}[+]{RST} classes.txt created (COCO-80)")
+        _fix_owner(YOLO_MODEL_PATH)
+        print(f"  {GRN}[+]{RST} YOLO ready: {YOLO_MODEL_PATH}")
+        return
+    print(f"  {YLW}[!]{RST} YOLO model not found: {YOLO_MODEL_PATH}")
+    print("      Официального готового .onnx не существует — модель экспортируют из .pt.")
+    print("      На ПК:  pip install ultralytics && python3 tools/fetch_yolo.py --scp <user>@<ip робота>")
+    print("      или задайте YOLO_MODEL_URL в config.py и перезапустите setup.py.")
+
+
 def main():
     debian_ver, codename = stage_0_preflight()
     stage_1_wifi(debian_ver, codename)
     stage_2_swap()
     stage_3_apt_packages(debian_ver, codename)
     stage_4_pip_packages(debian_ver)
+    stage_4b_pigpio()
     stage_5_hardware_config()
     hotspot_cfg = stage_6_wifi_hotspot(debian_ver) or {
         'ssid': 'Adeept_Robot'}
     stage_7_systemd_service()
+    stage_8_yolo_model()
 
     try:
         with open('/proc/device-tree/model', 'r') as f:
@@ -645,7 +724,7 @@ def main():
     print(f"\n{BOLD}{GRN}{'=' * 55}{RST}")
     print(f"  {BOLD}{GRN}SETUP COMPLETE!{RST}")
     print(f"{BOLD}{GRN}{'=' * 55}{RST}")
-    print(f"")
+    print("")
     print(f"  {BOLD}System Information:{RST}")
     print(f"  Model:    {pi_model}")
     print(f"  CPU:      {cpu_info}")
@@ -653,29 +732,29 @@ def main():
     print(f"  Arch:     {arch}")
     print(f"  OS:       Debian {debian_ver} ({codename})")
     print(f"  Python:   {py_version}")
-    print(f"")
+    print("")
     print(f"  {BOLD}Resources:{RST}")
     print(f"  RAM:      {mem_used}MB / {mem_total}MB ({round(100*mem_used/mem_total if mem_total else 0,1)}%)")
     print(f"  Disk:     {disk_used_gb}GB / {disk_total_gb}GB ({disk_free_gb}GB free)")
-    print(f"")
+    print("")
     print(f"  {BOLD}I2C Devices:{RST}")
     if i2c_devices:
         print(f"  Found:    {', '.join('0x'+d for d in i2c_devices)}")
     else:
-        print(f"  No I2C devices detected")
-    print(f"")
+        print("  No I2C devices detected")
+    print("")
     print(f"  {BOLD}Network:{RST}")
     print(f"  IP:       {current_ip}")
     print(f"  Hotspot:  {hotspot_cfg['ssid']}")
-    print(f"")
+    print("")
     print(f"  {BOLD}Server:{RST}")
     print(f"  Path:     {thisPath}")
-    print(f"  Start:    python3 boot.py")
+    print("  Start:    python3 boot.py")
     print(f"  Web:      http://{current_ip}:5000")
     print(f"  WS:       ws://{current_ip}:8888")
-    print(f"  Service:  picarpro.service (auto-start)")
+    print("  Service:  picarpro.service (auto-start)")
     print(f"  Log:      {LOG_FILE}")
-    print(f"")
+    print("")
     print(f"  {BOLD}Next Steps:{RST}")
     print(f"  1. Reboot:  {YLW}sudo reboot{RST}")
     print(f"  2. Open:    {YLW}http://{current_ip}:5000{RST}")

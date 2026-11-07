@@ -143,6 +143,11 @@ class DS4Controller:
                 if (DS4_DEVICE_NAME.lower() in name or 'dualshock' in name
                         or 'sony interactive' in name or 'playstation' in name):
                     candidates.append(dev)
+                else:
+                    try:
+                        dev.close()
+                    except Exception:
+                        pass
             if not candidates:
                 return None
             if len(candidates) == 1:
@@ -205,12 +210,18 @@ class DS4Controller:
             logger.warning('[DS4] disconnected — will auto-reconnect')
 
     def _watchdog(self):
+        delay = 1.0
         while self._running:
             if not self._connected:
                 dev = self._find_device()
                 if dev:
                     self._connect(dev)
-                self._rescan_flag.wait(timeout=1.0)
+                    delay = 1.0
+                else:
+                    # геймпада нет: каждую секунду перебирать /dev/input
+                    # бессмысленно — плавно удлиняем паузу до 5 с
+                    delay = min(5.0, delay * 1.5)
+                self._rescan_flag.wait(timeout=delay)
                 self._rescan_flag.clear()
             else:
                 elapsed = time.monotonic() - self._last_event_time
@@ -338,24 +349,25 @@ class DS4Controller:
         if self._shared_state:
             self._shared_state.crane_grip_position = label
 
+    def _start_auto(self, mode):
+        """Запуск автономного режима с геймпада (камера подключается через
+        set_camera, а не прямой записью в приватный атрибут)."""
+        st = self._shared_state
+        if not (self._autonomous and st):
+            return
+        if not st.camera:
+            st.init_camera()
+        if st.camera:
+            self._autonomous.set_camera(st.camera)
+            ok, _ = self._autonomous.start(mode)
+            self._auto_mode_active = bool(ok)
+
     def _btn_press(self, code):
         if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):
-            if self._autonomous and self._shared_state:
-                if not self._shared_state.camera:
-                    self._shared_state.init_camera()
-                if self._shared_state.camera:
-                    self._autonomous._camera = self._shared_state.camera
-                    self._autonomous.start('trackLineCV')
-                    self._auto_mode_active = True
+            self._start_auto('trackLineCV')
             return
         if code in (ecodes.BTN_WEST, ecodes.BTN_X):
-            if self._autonomous and self._shared_state:
-                if not self._shared_state.camera:
-                    self._shared_state.init_camera()
-                if self._shared_state.camera:
-                    self._autonomous._camera = self._shared_state.camera
-                    self._autonomous.start('trackHand')
-                    self._auto_mode_active = True
+            self._start_auto('trackHand')
             return
         self._stop_auto_if_active()
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):
@@ -470,11 +482,9 @@ class DS4Controller:
             speed = self._speed
             d = 'forward' if ly >= 0 else 'backward'
         if abs(lx) < 0.1:
-            turn, radius = 'no', 0.5
-        elif lx > 0:
-            turn, radius = 'right', max(0.2, 0.5 - lx * DS4_STEER_SENSITIVITY * 0.3)
+            turn = 'no'
         else:
-            turn, radius = 'left', max(0.2, 0.5 + lx * DS4_STEER_SENSITIVITY * 0.3)
+            turn = 'right' if lx > 0 else 'left'
         if self._turbo_active or self._police_turbo_on:
             s = 100
         else:
@@ -482,39 +492,20 @@ class DS4Controller:
             s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
             s = min(100, s)
         if s > 0:
-            if self._police_turbo_on and turn != 'no':
-                self._motors_single_turn(s, d, turn)
-            elif turn != 'no':
-                self._motors_move_with_turn(s, d, turn, radius)
+            if turn == 'no':
+                left = right = 1.0
+            elif self._police_turbo_on:
+                # разворот одним бортом (стоячий борт — внутренний)
+                left, right = (0.0, 1.0) if turn == 'left' else (1.0, 0.0)
             else:
-                self._motors.move(s, d, turn, radius)
+                # чем дальше стик отклонён, тем круче дуга: раньше было
+                # наоборот (полный стик давал ПОЛОГУЮ дугу, лёгкий — крутую)
+                inner = max(0.3, 1.0 - 0.9 * min(
+                    1.0, abs(lx) * DS4_STEER_SENSITIVITY))
+                left, right = (inner, 1.0) if turn == 'left' else (1.0, inner)
+            self._motors.move_differential(s, d, left, right)
         steer = max(30, min(150, 90 - int(lx * DS4_STEER_RANGE * DS4_STEER_SENSITIVITY)))
         self._servos.set_angle(SERVO_STEERING, steer)
-
-    def _motors_single_turn(self, speed, direction, turn):
-        """Разворот на месте одним бортом — через общий move_differential."""
-        if not self._motors or not self._motors._initialized:
-            return
-        if turn == 'left':
-            left, right = 0.0, 1.0
-        else:
-            left, right = 1.0, 0.0
-        self._motors.move_differential(speed, direction, left, right)
-
-    def _motors_move_with_turn(self, speed, direction, turn, radius):
-        """Поворот с радиусом — через общий move_differential (раньше логика
-        дублировала MotorController.move)."""
-        if not self._motors or not self._motors._initialized:
-            return
-        radius = max(0.2, min(1.0, radius))
-        s = 1.0
-        if turn == 'left':
-            left = max(0.3, s * (1 - radius))
-            right = s
-        else:
-            left = s
-            right = max(0.3, s * (1 - radius))
-        self._motors.move_differential(speed, direction, left, right)
 
     def _apply_pan_tilt(self):
         if not self._servos:

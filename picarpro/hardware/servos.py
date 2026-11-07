@@ -217,9 +217,8 @@ class ServoController:
         (v1.4.0): причина «сервоприводы не отображаются» в UI — модуль
         не ответил на шине в момент старта; ретраи идут фоном, см.
         SharedState._hw_retry_loop."""
-        import time as _time
-        now = _time.monotonic()
-        if now - cls._last_diag_ts < SERVO_DIAG_INTERVAL_S:
+        now = time.monotonic()
+        if cls._last_diag_ts and now - cls._last_diag_ts < SERVO_DIAG_INTERVAL_S:
             return
         cls._last_diag_ts = now
         logger.error(f'[Servos] PCA9685 init failed: {err}')
@@ -255,6 +254,28 @@ class ServoController:
             except Exception as e:
                 logger.warning(f'[Servos] S{sid} set_angle({angle}) failed: {e}')
                 return False
+
+    def release(self, sid):
+        """Снять удержание серво (PWM выключается: нет тока и нагрева).
+
+        Следующий set_angle запишет угол заново — положение после снятия
+        считается неизвестным (_angles[sid] = None).
+        """
+        if (not self._pwm_initialized or not 0 <= sid < SERVO_COUNT
+                or self._servos[sid] is None or self._angles[sid] is None):
+            return False
+        with self._lock:
+            try:
+                self._servos[sid].angle = None
+                self._angles[sid] = None
+                return True
+            except Exception as e:
+                logger.warning(f'[Servos] S{sid} release failed: {e}')
+                return False
+
+    def is_held(self, sid):
+        """Серво сейчас получает импульсы (его двигали после загрузки/снятия)."""
+        return 0 <= sid < SERVO_COUNT and self._angles[sid] is not None
 
     def move_angle(self, sid, offset):
         if 0 <= sid < SERVO_COUNT:
@@ -306,11 +327,7 @@ class ServoController:
             return self._limits.get(sid, {'min': 0, 'max': 180})
         return dict(self._limits)
 
-    def stop_all(self):
-        pass
-
     def shutdown(self):
-        self.stop_all()
         if self._pca is not None:
             try:
                 self._pca.all_channels_off()

@@ -67,6 +67,29 @@ def reset_ip_cache():
         _ip_cache['ts'] = 0.0
 
 
+# Проверки связности, которые телефоны/ПК делают сразу после подключения к
+# Wi-Fi. Без интернета (точка доступа робота) на них отвечал редирект 302 —
+# Android считал сеть «порталом входа» и мог сам уйти с неё на мобильные
+# данные, а iOS/Windows показывали «нет интернета». Отвечаем ожидаемым
+# «всё в порядке».
+_PROBES = {
+    '/generate_204': (204, 'text/plain', b''),
+    '/gen_204': (204, 'text/plain', b''),
+    '/hotspot-detect.html': (200, 'text/html',
+        b'<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'),
+    '/library/test/success.html': (200, 'text/html',
+        b'<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'),
+    '/connecttest.txt': (200, 'text/plain', b'Microsoft Connect Test'),
+    '/ncsi.txt': (200, 'text/plain', b'Microsoft NCSI'),
+    '/success.txt': (200, 'text/plain', b'success\n'),
+}
+
+
+def probe_response(path):
+    """(код, content-type, тело) для служебной проверки связности или None."""
+    return _PROBES.get(path.split('?', 1)[0])
+
+
 def start_redirect_server(port=80, target_port=None):
     """Редирект http://host/ -> http://host:5000 (нужен root/CAP на порту 80)."""
     if target_port is None:
@@ -75,7 +98,21 @@ def start_redirect_server(port=80, target_port=None):
         from http.server import HTTPServer, BaseHTTPRequestHandler
 
         class R(BaseHTTPRequestHandler):
-            def do_GET(self):
+            def do_HEAD(self):
+                self.do_GET(head=True)
+
+            def do_GET(self, head=False):
+                probe = probe_response(self.path)
+                if probe:
+                    code, ctype, body = probe
+                    self.send_response(code)
+                    self.send_header('Content-Type', ctype)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                    if not head and body:
+                        self.wfile.write(body)
+                    return
                 host = self.headers.get('Host', '').split(':')[0]
                 self.send_response(302)
                 self.send_header('Location',
@@ -96,10 +133,10 @@ def start_redirect_server(port=80, target_port=None):
 
 def oled_loop(state):
     """Обновление OLED: IP, температура CPU, RAM, предупреждение о питании."""
-    ip = get_ip()
     port = FLASK_PORT
     while state.running:
         try:
+            ip = get_ip()    # кэш 30 с: смена сети отражается на экране
             info = SystemInfo.get_all()
             ram = info['ram']
             low_v = info['low_voltage']

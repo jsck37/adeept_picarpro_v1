@@ -302,3 +302,66 @@ input[type=range]::-moz-range-track{height:4px;background:#dadce0;border-radius:
   .color-preset:hover{transform:none;box-shadow:none}
   .status-bar .conn-dot{animation:none}
 }
+
+/* ===================== v1.5.1: несколько устройств, телефон, ландшафт ===================== */
+.hdr-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.driver-chip{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:999px;background:#e8eaed;color:#5f6368;white-space:nowrap}
+.driver-chip[data-state="you"]{background:#e6f4ea;color:#188038}
+.driver-chip[data-state="other"]{background:#fef7e0;color:#b06000}
+.take-btn{display:none;border:1px solid #1a73e8;background:#fff;color:#1a73e8;border-radius:6px;padding:4px 10px;font-weight:600;font-size:.78rem;cursor:pointer;min-height:32px}
+body.not-driver .hdr-actions .take-btn{display:inline-block}
+.estop-btn{background:#d93025;color:#fff;border:0;border-radius:999px;padding:6px 16px;min-height:34px;font-weight:800;letter-spacing:.06em;cursor:pointer;box-shadow:0 1px 4px rgba(217,48,37,.45);touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.estop-btn:active{background:#a50e0e;transform:scale(.97)}
+.driver-banner{display:none;align-items:center;justify-content:space-between;gap:10px;background:#fef7e0;color:#7a4b00;border-bottom:1px solid #f0d58a;padding:6px 16px;font-size:.8rem}
+body.not-driver .driver-banner{display:flex}
+body.not-driver .driver-banner .take-btn{display:inline-block}
+body.not-driver #card-move .dual-joystick-row{opacity:.5}
+.joystick-container,.cam-joystick-container{touch-action:none;-webkit-user-select:none;user-select:none}
+button,.gbtn,.cv-btn{touch-action:manipulation}
+
+/* безопасные зоны (вырез/«чёлка», жестовая полоса) */
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);padding-bottom:env(safe-area-inset-bottom)}
+
+/* ---- планшет / телефон: видео и джойстики рядом, остальное ниже ---- */
+@media (max-width:900px){
+  .control-layout{display:flex;flex-direction:column;gap:0}
+  .col-left,.col-right{display:contents}
+  #card-camera{order:-3}
+  #card-move{order:-2}
+  #card-cv{order:-1}
+  #card-camera .camera-wrap{max-height:36vh;margin:0 auto;display:flex;justify-content:center}
+  #card-camera .camera-wrap img{max-height:36vh;width:auto;max-width:100%;object-fit:contain}
+}
+/* телефон вертикально: видео остаётся на экране при прокрутке */
+@media (max-width:900px) and (orientation:portrait){
+  #card-camera{position:sticky;top:var(--sb-h,52px);z-index:60;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+}
+@media (max-width:600px){
+  .hdr-actions .driver-chip{display:none}
+  .header{padding:0 10px}
+  .joystick-container,.cam-joystick-container{width:min(38vw,170px);height:min(38vw,170px)}
+  .estop-btn{padding:6px 12px}
+}
+/* телефон горизонтально: видео слева, джойстики справа */
+@media (orientation:landscape) and (max-height:520px){
+  .control-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:0 10px;align-items:start;padding:6px 10px}
+  .col-left,.col-right{display:contents}
+  .control-layout .card{grid-column:1 / -1;order:0}
+  #card-camera{grid-column:1;grid-row:1;position:sticky;top:var(--sb-h,40px);order:0}
+  #card-move{grid-column:2;grid-row:1;order:0}
+  #card-camera .camera-wrap,#card-camera .camera-wrap img{max-height:calc(100vh - var(--sb-h,40px) - 70px)}
+  #card-camera .camera-wrap{margin:0 auto;display:flex;justify-content:center}
+  #card-camera .camera-wrap img{width:auto;max-width:100%;object-fit:contain}
+  .joystick-container,.cam-joystick-container{width:min(30vh,150px);height:min(30vh,150px)}
+  .header{height:38px}
+  .header-logo span{display:none}
+  .status-bar{padding:4px 12px;gap:4px 12px}
+}
+
+/* ===================== v1.5.3: миссии и обновление ===================== */
+.mission-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
+.mission-row select,.mission-row input[type=file]{flex:1;min-width:130px;max-width:100%}
+.mission-status{font-size:.82rem;color:#5f6368;margin-top:2px;word-break:break-word}
+.mission-status[data-state="running"]{color:#1a73e8}
+.mission-status[data-state="error"],.mission-status[data-state="obstacle"]{color:#d93025}
+.mission-hint{font-size:.72rem;color:#80868b;margin-top:4px}

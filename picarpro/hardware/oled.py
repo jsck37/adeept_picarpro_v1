@@ -1,6 +1,7 @@
 import threading, time
 from picarpro.logger import logger
-from config import OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT, OLED_LOW_VOLTAGE_TEXT
+from config import (I2C_BUS, OLED_I2C_ADDR, OLED_WIDTH, OLED_HEIGHT,
+                    OLED_LOW_VOLTAGE_TEXT)
 
 try:
     from luma.core.interface.serial import i2c
@@ -21,11 +22,12 @@ class OLEDDisplay:
         self._low_voltage = False
         self._blink = False
         self._initialized = False
+        self._wake = threading.Event()
         if not _HAS_OLED:
             logger.warning('[OLED] luma.oled not available')
             return
         try:
-            self._device = ssd1306(i2c(port=1, address=OLED_I2C_ADDR),
+            self._device = ssd1306(i2c(port=I2C_BUS, address=OLED_I2C_ADDR),
                                    width=OLED_WIDTH, height=OLED_HEIGHT)
             self._initialized = True
             threading.Thread(target=self._loop, daemon=True).start()
@@ -37,11 +39,14 @@ class OLEDDisplay:
         with self._lock:
             for i, l in enumerate(lines[:4]):
                 self._lines[i] = str(l)[:21]
+        self._wake.set()
 
     def set_low_voltage(self, active):
         with self._lock:
-            if active != self._low_voltage:
-                self._low_voltage = active
+            if active == self._low_voltage:
+                return
+            self._low_voltage = active
+        self._wake.set()
 
     def _loop(self):
         from PIL import Image, ImageDraw, ImageFont
@@ -67,20 +72,28 @@ class OLEDDisplay:
         else:
             warn_rows = [warn_text]
 
+        last_key = None
         while self._running:
             if not self._device:
                 time.sleep(1)
                 continue
             try:
-                img = Image.new('1', (OLED_WIDTH, OLED_HEIGHT))
-                draw = ImageDraw.Draw(img)
                 with self._lock:
                     lines = list(self._lines[:3])
                     warn = self._low_voltage
+                if warn:
+                    self._blink = not self._blink
+                key = (tuple(lines), warn, self._blink if warn else None)
+                if key == last_key:
+                    self._wake.wait(0.3 if warn else 1.0)
+                    self._wake.clear()
+                    continue
+                last_key = key
+                img = Image.new('1', (OLED_WIDTH, OLED_HEIGHT))
+                draw = ImageDraw.Draw(img)
                 for i, l in enumerate(lines[:3]):
                     draw.text((0, i * 16), l, fill=255, font=font_big)
                 if warn:
-                    self._blink = not self._blink
                     band = (0, 48, OLED_WIDTH - 1, OLED_HEIGHT - 1)
                     if self._blink:
                         draw.rectangle(band, outline=255, fill=255)
@@ -98,10 +111,12 @@ class OLEDDisplay:
                 self._device.display(img)
             except Exception:
                 pass
-            time.sleep(0.3)
+            self._wake.wait(0.3 if self._low_voltage else 1.0)
+            self._wake.clear()
 
     def shutdown(self):
         self._running = False
+        self._wake.set()
         if self._device:
             try:
                 self._device.cleanup()

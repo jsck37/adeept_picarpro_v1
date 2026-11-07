@@ -24,7 +24,7 @@ class ObstaclePusher:
     def __init__(self, state):
         self.state = state
         self._active = False
-        self._running = False
+        self._stop = threading.Event()
         self._thread = None
         self.pushes_done = 0
         self.last_distance = None
@@ -45,35 +45,49 @@ class ObstaclePusher:
             return False, 'HC-SR04 недоступен'
         if not (self.state.servos and self.state.servos._pwm_initialized):
             return False, 'серво недоступны'
-        self._running = True
+        # свой Event на каждый запуск: быстрый stop()->start() раньше оставлял
+        # старый поток живым (флаг _running снова True) — шли два цикла сразу
+        self._stop = threading.Event()
         self._active = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        ultra.acquire()
+        self._thread = threading.Thread(target=self._loop, args=(self._stop,),
+                                        daemon=True)
         self._thread.start()
         logger.info(f'[Push] started (threshold {OBSTACLE_PUSH_DISTANCE_M} м)')
         return True, 'ok'
 
     def stop(self):
+        if not self._active:
+            return True, 'ok'
         self._active = False
-        self._running = False
+        self._stop.set()
         logger.info('[Push] stopped')
         return True, 'ok'
 
-    def _loop(self):
+    def _loop(self, stop):
+        ultra = self.state.ultrasonic
         last_push = 0.0
-        while self._running:
-            try:
-                ultra = self.state.ultrasonic
-                dist = (ultra.get_last_distance()
-                        if ultra and ultra._initialized else None)
-                self.last_distance = dist
-                if (dist is not None and 0 < dist <= OBSTACLE_PUSH_DISTANCE_M
-                        and time.time() - last_push > OBSTACLE_PUSH_COOLDOWN_S):
-                    last_push = time.time()
-                    self._push_sequence()
-                time.sleep(0.2)
-            except Exception as e:
-                logger.warning(f'[Push] error: {e}')
-                time.sleep(1.0)
+        try:
+            while not stop.is_set():
+                try:
+                    cm = (ultra.get_distance_cm()
+                          if ultra and ultra._initialized else None)
+                    # датчик отдаёт САНТИМЕТРЫ, порог задан в метрах: раньше
+                    # сравнивалось «<= 0.30 см», и режим не срабатывал никогда
+                    dist = None if cm is None else cm / 100.0
+                    self.last_distance = dist
+                    now = time.monotonic()
+                    if (dist is not None and 0 < dist <= OBSTACLE_PUSH_DISTANCE_M
+                            and now - last_push > OBSTACLE_PUSH_COOLDOWN_S):
+                        last_push = now
+                        self._push_sequence()
+                    stop.wait(0.2)
+                except Exception as e:
+                    logger.warning(f'[Push] error: {e}')
+                    stop.wait(1.0)
+        finally:
+            if ultra:
+                ultra.release()
 
     def _push_sequence(self):
         """Сгребающее движение клешней (останавливает машину на время манёвра)."""

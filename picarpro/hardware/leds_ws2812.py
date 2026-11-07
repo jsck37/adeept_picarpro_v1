@@ -1,6 +1,6 @@
-import threading, time
+import os, threading, time
 from picarpro.logger import logger
-from config import LED_COUNT, LED_BRIGHTNESS
+from config import LED_COUNT, LED_BRIGHTNESS, LED_ANIM_FPS
 
 try:
     import spidev
@@ -26,6 +26,13 @@ def _byte_to_spi(byte):
     return bytes(out)
 
 
+# Таблица кодирования байта цвета в 4 SPI-байта: раньше каждый кадр гонял
+# 16x3x8 итераций чистого Python (на 50 кадр/с — заметная доля ядра Pi).
+_SPI_TABLE = tuple(_byte_to_spi(i) for i in range(256))
+_FRAME_S = 1.0 / max(1, LED_ANIM_FPS)
+_SPEED_K = _FRAME_S / 0.02    # во сколько раз кадр длиннее прежних 20 мс
+
+
 class LEDController:
     _last_diag_ts = 0.0   # классовое поле: общее для всех инстансов
 
@@ -34,6 +41,10 @@ class LEDController:
         self._mode = 'off'
         self._color = (255, 0, 0)
         self._flag = threading.Event()
+        self._wake = threading.Event()      # прерывает паузы анимации
+        self._show_lock = threading.Lock()  # SPI не терпит параллельных записей
+        self._gen = 0                       # поколение анимации (смена режима)
+        self._power_scale = 1.0             # режим экономии: множитель яркости
         self._running = True
         self._thread = None
         self._pixels = [(0, 0, 0)] * LED_COUNT
@@ -57,7 +68,7 @@ class LEDController:
     def _throttle(cls):
         """True, если диагностический лог подавлен (не истёк интервал)."""
         now = time.monotonic()
-        if now - cls._last_diag_ts < LED_DIAG_INTERVAL_S:
+        if cls._last_diag_ts and now - cls._last_diag_ts < LED_DIAG_INTERVAL_S:
             return True
         cls._last_diag_ts = now
         return False
@@ -67,14 +78,13 @@ class LEDController:
         """Диагностика неработающей WS2812-ленты — не чаще
         LED_DIAG_INTERVAL_S (v1.4.0). Лента сидит на SPI0 (GPIO10/MOSI,
         физ. пин 19); без dtparam=spi=on устройства /dev/spidev0.0 нет."""
-        import os as _os
         if cls._throttle():
             return
         if err is not None:
             logger.error(f'[LEDs] init failed: {err}')
         else:
             logger.error('[LEDs] SPI0 open failed')
-        if not _os.path.exists(_SPI_DEV):
+        if not os.path.exists(_SPI_DEV):
             logger.error(
                 '[LEDs] подсказки: /dev/spidev0.0 отсутствует — включите SPI '
                 '(raspi-config Interface Options -> SPI, или строка '
@@ -105,82 +115,102 @@ class LEDController:
             self._spi = None
             return False
 
-    def _show(self):
+    def _show(self, gen=None):
+        """Вывести self._pixels на ленту. gen — поколение анимации: кадр
+        устаревшей анимации (после смены режима) молча отбрасывается, иначе
+        «хвост» старой анимации мог зажечь ленту уже после set_mode('off')."""
         if not self._initialized:
             return
-        data = bytearray()
-        b = LED_BRIGHTNESS / 255.0
-        for r, g, bl in self._pixels:
-            data.extend(_byte_to_spi(int(g * b)))
-            data.extend(_byte_to_spi(int(r * b)))
-            data.extend(_byte_to_spi(int(bl * b)))
-        data.extend(b'\x00' * _LATCH_BYTES)
-        try:
-            self._spi.writebytes(data)
-        except Exception:
-            # сбой SPI (глитч питания/драйвера): переоткрываем устройство
-            # и повторяем один раз — иначе лента гаснет навсегда
-            if self._open_spi():
-                try:
-                    self._spi.writebytes(data)
-                except Exception:
-                    pass
+        with self._show_lock:
+            if gen is not None and gen != self._gen:
+                return
+            b = LED_BRIGHTNESS / 255.0 * self._power_scale
+            parts = []
+            for r, g, bl in self._pixels:
+                parts.append(_SPI_TABLE[int(g * b) & 255])
+                parts.append(_SPI_TABLE[int(r * b) & 255])
+                parts.append(_SPI_TABLE[int(bl * b) & 255])
+            data = b''.join(parts) + b'\x00' * _LATCH_BYTES
+            try:
+                self._spi.writebytes(data)
+            except Exception:
+                # сбой SPI (глитч питания/драйвера): переоткрываем устройство
+                # и повторяем один раз — иначе лента гаснет навсегда
+                if self._open_spi():
+                    try:
+                        self._spi.writebytes(data)
+                    except Exception:
+                        pass
 
-    def fill(self, r, g, b):
+    def fill(self, r, g, b, gen=None):
         self._pixels = [(r, g, b)] * LED_COUNT
-        self._show()
+        self._show(gen)
 
     def clear(self):
         self.fill(0, 0, 0)
 
+    def set_power_scale(self, scale):
+        """Множитель яркости 0..1 (режим экономии при низком заряде)."""
+        scale = max(0.0, min(1.0, float(scale)))
+        if abs(scale - self._power_scale) < 0.01:
+            return
+        self._power_scale = scale
+        if self._mode != 'off':
+            self._show()
+
     def set_mode(self, mode, color=(255, 0, 0)):
         self._color = color
+        with self._show_lock:
+            self._gen += 1          # все кадры старой анимации теперь «чужие»
+        self._flag.clear()
+        self._wake.set()            # не ждать конца паузы старой анимации
+        self._mode = mode
         if mode in ('off', 'solid'):
-            self._mode = mode
             if mode == 'solid':
                 self.fill(*color)
             else:
                 self.clear()
-            self._flag.clear()
         else:
-            self._flag.clear()
-            time.sleep(0.05)
-            self._mode = mode
             self._flag.set()
+
+    def _sleep(self, seconds):
+        self._wake.wait(seconds)
+
+    def _alive(self, gen, *modes):
+        return (self._flag.is_set() and gen == self._gen
+                and self._running and self._mode in modes)
 
     def _run(self):
         while self._running:
             self._flag.wait()
             if not self._running:
                 break
+            self._wake.clear()
+            gen = self._gen
             try:
                 fn = getattr(self, f'_anim_{self._mode}', None)
-                if fn:
-                    fn()
+                if fn is None:
+                    self._flag.clear()      # неизвестный режим — не крутимся вхолостую
                 else:
-                    time.sleep(0.1)
+                    fn(gen)
             except Exception:
-                time.sleep(0.1)
+                self._sleep(0.1)
 
-    def _anim_breath(self):
+    def _anim_breath(self, gen):
         r, g, b = self._color
-        while self._flag.is_set() and self._mode == 'breath':
-            for i in range(0, 256, 8):
-                if not self._flag.is_set() or self._mode != 'breath':
+        step = int(8 * _SPEED_K)
+        while self._alive(gen, 'breath'):
+            for i in list(range(0, 256, step)) + list(range(255, -1, -step)):
+                if not self._alive(gen, 'breath'):
                     return
                 s = i / 255.0
-                self.fill(int(r * s), int(g * s), int(b * s))
-                time.sleep(0.02)
-            for i in range(255, -1, -8):
-                if not self._flag.is_set() or self._mode != 'breath':
-                    return
-                s = i / 255.0
-                self.fill(int(r * s), int(g * s), int(b * s))
-                time.sleep(0.02)
+                self.fill(int(r * s), int(g * s), int(b * s), gen)
+                self._sleep(_FRAME_S)
 
-    def _anim_flow(self):
+    def _anim_flow(self, gen):
         off = 0
-        while self._flag.is_set() and self._mode in ('flow', 'flowing'):
+        step = max(1, int(_SPEED_K))
+        while self._alive(gen, 'flow', 'flowing'):
             r, g, b = self._color
             for i in range(LED_COUNT):
                 base = self._wheel((i * 256 // LED_COUNT + off) % 256)
@@ -189,44 +219,45 @@ class LEDController:
                     (base[1] * g) >> 8,
                     (base[2] * b) >> 8,
                 )
-            self._show()
-            off = (off + 1) % 256
-            time.sleep(0.02)
+            self._show(gen)
+            off = (off + step) % 256
+            self._sleep(_FRAME_S)
 
     _anim_flowing = _anim_flow
 
-    def _anim_rainbow(self):
+    def _anim_rainbow(self, gen):
         off = 0
-        while self._flag.is_set() and self._mode == 'rainbow':
+        step = max(1, int(2 * _SPEED_K))
+        while self._alive(gen, 'rainbow'):
             for i in range(LED_COUNT):
                 self._pixels[i] = self._wheel((i * 256 // LED_COUNT + off) & 255)
-            self._show()
-            off = (off + 2) % 256
-            time.sleep(0.02)
+            self._show(gen)
+            off = (off + step) % 256
+            self._sleep(_FRAME_S)
 
-    def _anim_police(self):
-        while self._flag.is_set() and self._mode == 'police':
-            for i in range(LED_COUNT):
-                self._pixels[i] = (0, 0, 255) if i % 2 == 0 else (255, 0, 0)
-            self._show()
-            time.sleep(0.15)
-            for i in range(LED_COUNT):
-                self._pixels[i] = (255, 0, 0) if i % 2 == 0 else (0, 0, 255)
-            self._show()
-            time.sleep(0.15)
+    def _anim_police(self, gen):
+        while self._alive(gen, 'police'):
+            for phase in (0, 1):
+                if not self._alive(gen, 'police'):
+                    return
+                for i in range(LED_COUNT):
+                    blue = (i + phase) % 2 == 0
+                    self._pixels[i] = (0, 0, 255) if blue else (255, 0, 0)
+                self._show(gen)
+                self._sleep(0.15)
 
-    def _anim_colorWipe(self):
+    def _anim_colorWipe(self, gen):
         r, g, b = self._color
-        while self._flag.is_set() and self._mode == 'colorWipe':
+        while self._alive(gen, 'colorWipe'):
             for i in range(LED_COUNT):
-                if not self._flag.is_set():
+                if not self._alive(gen, 'colorWipe'):
                     return
                 self._pixels[i] = (r, g, b)
-                self._show()
-                time.sleep(0.03)
-            time.sleep(0.5)
-            self.clear()
-            time.sleep(0.2)
+                self._show(gen)
+                self._sleep(0.03)
+            self._sleep(0.5)
+            self.fill(0, 0, 0, gen)
+            self._sleep(0.2)
 
     @staticmethod
     def _wheel(p):

@@ -189,7 +189,7 @@ def main():
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.connect((PI_IP, PI_PORT))
-                    send_command(sock, f"SPEED 35")
+                    send_command(sock, "SPEED 35")
                     print(f"Подключено к Pi {PI_IP}:{PI_PORT}")
                 except Exception as e:
                     print(f"Нет подключения: {e}")

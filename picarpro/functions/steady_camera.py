@@ -23,6 +23,7 @@ class SteadyCameraController:
         self._active = False
         self._running = True
         self._lock = threading.Lock()
+        self._wake = threading.Event()   # «стабилизация включена или завершение»
         self._base_tilt = 90
         self._kalman = KalmanFilter1D(
             process_variance=1e-4, measurement_variance=5e-2)
@@ -30,6 +31,12 @@ class SteadyCameraController:
         self._thread.start()
         if not STEADY_CAMERA_ENABLED:
             logger.info('[Steady] disabled by config')
+
+    def rebind(self, servos, mpu6050):
+        """Подставить новые экземпляры железа после автовосстановления."""
+        with self._lock:
+            self._servos = servos
+            self._mpu = mpu6050
 
     @property
     def active(self):
@@ -51,6 +58,8 @@ class SteadyCameraController:
                 if self._servos else 90
             self._kalman.reset()
             self._active = True
+        self._mpu.request_fast('steady')
+        self._wake.set()
         logger.info('[Steady] camera stabilization ON')
         return True, 'Steady camera on'
 
@@ -59,6 +68,9 @@ class SteadyCameraController:
             if not self._active:
                 return
             self._active = False
+        self._wake.clear()
+        if self._mpu:
+            self._mpu.release_fast('steady')
         # вернуть камеру на базовый угол
         if self._servos:
             self._servos.set_angle(SERVO_CAM_TILT, self._base_tilt)
@@ -66,6 +78,11 @@ class SteadyCameraController:
 
     def _loop(self):
         while self._running:
+            # в выключенном состоянии поток спит до start(): раньше он будил
+            # CPU 10 раз в секунду, ничего не делая
+            self._wake.wait()
+            if not self._running:
+                break
             if self._active and self._mpu and self._mpu.initialized \
                     and self._servos and self._servos._pwm_initialized:
                 data = self._mpu.get_data()
@@ -76,10 +93,9 @@ class SteadyCameraController:
                     target = max(0, min(180,
                                  int(base + pitch * STEADY_COMPENSATION_GAIN)))
                     self._servos.set_angle(SERVO_CAM_TILT, target)
-            else:
-                self._kalman.reset()
             time.sleep(STEADY_UPDATE_INTERVAL)
 
     def shutdown(self):
         self._running = False
         self.stop()
+        self._wake.set()

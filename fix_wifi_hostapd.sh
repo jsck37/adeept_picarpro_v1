@@ -136,16 +136,78 @@ ip link set "$DEV" up
 ip addr flush dev "$DEV"
 ip addr add "$HOTSPOT_IP/24" dev "$DEV"
 
-# 6. Конфиг hostapd (runtime)
+# 6. Канал/диапазон. HOTSPOT_CHANNEL=auto — выбрать наименее занятый из 1/6/11
+#    по скану эфира (раньше всегда 6, даже если на нём 10 соседских роутеров).
+# --- pick_channel begin
+pick_channel() {
+    local out
+    out=$(iw dev "$DEV" scan 2>/dev/null) || return 1
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out" | awk '
+        /freq:/   { f = $2 + 0; next }
+        /signal:/ { if (f >= 2412 && f <= 2472) {
+                        c = int((f - 2407) / 5); w = $2 + 100; if (w < 0) w = 0
+                        ap[c] += w
+                    }
+                    f = 0 }
+        END {
+            best = 6; bs = -1
+            n = split("6 1 11", cand, " ")
+            for (i = 1; i <= n; i++) {
+                ch = cand[i] + 0; sc = 0
+                for (c in ap) { d = c - ch; if (d < 0) d = -d; if (d <= 4) sc += ap[c] }
+                if (bs < 0 || sc < bs) { bs = sc; best = ch }
+            }
+            print best
+        }'
+}
+# --- pick_channel end
+
+BAND="${HOTSPOT_BAND:-g}"
+HW_MODE=g
+if [ "$BAND" = "a" ] && iw phy 2>/dev/null | grep -Eq '\* 5[0-9]{3}(\.[0-9])? MHz'; then
+    HW_MODE=a
+    case "$HOTSPOT_CHANNEL" in 36|40|44|48) ;; *) HOTSPOT_CHANNEL=36 ;; esac
+else
+    BAND=g
+    if [ "$HOTSPOT_CHANNEL" = "auto" ]; then
+        PICKED=$(pick_channel) && HOTSPOT_CHANNEL="$PICKED" || HOTSPOT_CHANNEL=6
+        log "канал выбран автоматически: $HOTSPOT_CHANNEL"
+    fi
+    case "$HOTSPOT_CHANNEL" in ''|*[!0-9]*) HOTSPOT_CHANNEL=6 ;; esac
+fi
+
+# Страна: берём из системы (raspi-config / iw reg). Не выдумываем — неверный
+# код меняет разрешённую мощность и каналы.
+CC=$(iw reg get 2>/dev/null | awk '/^country/{gsub(":","",$2); print $2; exit}')
+COUNTRY_LINES=""
+if [ -n "$CC" ] && [ "$CC" != "00" ]; then
+    COUNTRY_LINES=$'country_code='"$CC"$'\nieee80211d=1'
+fi
+
+# Энергосбережение радио выключаем: оно добавляет 20-200 мс задержки к
+# каждому пакету джойстика.
+iw dev "$DEV" set power_save off 2>/dev/null
+
+# 7. Конфиг hostapd (runtime). HT20 — осознанно: HT40 на brcmfmac нестабилен и
+#    занимает вдвое больше эфира, а для управления важны задержка и
+#    устойчивость, не пиковая скорость. DTIM=1 — широковещательные кадры
+#    доставляются в каждом биконе (меньше лага у телефонов в power-save).
 PREFIX=$(echo "$HOTSPOT_IP" | cut -d. -f1-3)
 cat > "$RUN_DIR/picarpro-hostapd.conf" << EOF
 interface=$DEV
 driver=nl80211
 ssid=$HOTSPOT_SSID
 channel=$HOTSPOT_CHANNEL
-hw_mode=g
+hw_mode=$HW_MODE
 ieee80211n=1
+ht_capab=[SHORT-GI-20]
 wmm_enabled=1
+beacon_int=100
+dtim_period=1
+max_num_sta=${HOTSPOT_MAX_CLIENTS:-5}
+ap_max_inactivity=120
+$COUNTRY_LINES
 auth_algs=1
 wpa=2
 wpa_key_mgmt=WPA-PSK
@@ -153,7 +215,9 @@ rsn_pairwise=CCMP
 wpa_passphrase=$HOTSPOT_PASS
 EOF
 
-# 7. Конфиг dnsmasq: DHCP/DNS для телефонов, подключающихся к AP
+# 8. Конфиг dnsmasq: DHCP/DNS. Имена picar / picar.lan -> Pi; домены
+#    «проверок интернета» тоже указывают на Pi, где порт 80 отвечает им
+#    ожидаемым образом (иначе Android считает сеть неработающей и уходит с неё).
 cat > "$RUN_DIR/picarpro-dnsmasq.conf" << EOF
 interface=$DEV
 bind-interfaces
@@ -165,9 +229,18 @@ no-resolv
 no-hosts
 dhcp-authoritative
 log-dhcp
+address=/picar/$HOTSPOT_IP
+address=/picar.lan/$HOTSPOT_IP
+address=/connectivitycheck.gstatic.com/$HOTSPOT_IP
+address=/connectivitycheck.android.com/$HOTSPOT_IP
+address=/clients3.google.com/$HOTSPOT_IP
+address=/captive.apple.com/$HOTSPOT_IP
+address=/www.msftconnecttest.com/$HOTSPOT_IP
+address=/dns.msftncsi.com/$HOTSPOT_IP
+address=/detectportal.firefox.com/$HOTSPOT_IP
 EOF
 
-log "$DEV готов: SSID '$HOTSPOT_SSID' канал $HOTSPOT_CHANNEL IP $HOTSPOT_IP"
+log "$DEV готов: SSID '$HOTSPOT_SSID' канал $HOTSPOT_CHANNEL ($BAND) IP $HOTSPOT_IP"
 exit 0
 PEOF
 chmod 755 "$BINDIR/picarpro-hotspot-setup.sh"

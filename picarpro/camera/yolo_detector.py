@@ -95,7 +95,7 @@ class YoloDetector:
         h, w = frame_rgb.shape[:2]
         blob = cv2.dnn.blobFromImage(
             frame_rgb, 1.0 / 255.0, (YOLO_INPUT_SIZE, YOLO_INPUT_SIZE),
-            swapRB=True, crop=False)
+            swapRB=False, crop=False)   # кадр уже RGB (см. camera_opencv)
         try:
             self._net.setInput(blob)
             out = self._net.forward()
@@ -116,16 +116,29 @@ class YoloDetector:
         """Разбор выхода ultralytics-YOLO ONNX: (1, 84, N) или (1, N, 85)."""
         if out is None or len(out) == 0:
             return []
-        pred = np.squeeze(out[0])  # (85, N) или (N, 85)
-        if pred.shape[0] < pred.shape[1]:
-            pred = pred.T          # -> (N, 85)
-        num_classes = pred.shape[1] - 5
+        pred = np.squeeze(out[0])  # (84, N) [v8/v11] или (N, 85) [v5]
+        channels_first = pred.shape[0] < pred.shape[1]
+        if channels_first:
+            pred = pred.T          # -> (N, C)
         boxes_xywh = pred[:, 0:4]
-        obj_conf = pred[:, 4]
-        cls_scores = pred[:, 5:]
-        scores = obj_conf * cls_scores.max(axis=1) if num_classes > 0 else obj_conf
-        class_ids = (cls_scores.argmax(axis=1) if num_classes > 0
-                     else np.zeros(len(pred), dtype=int))
+        if channels_first:
+            # YOLOv8/v11: [cx, cy, w, h, класс_0 ... класс_79] — столбца
+            # objectness НЕТ. Прежний код принимал оценку класса 0 за
+            # objectness и умножал её на максимум остальных — на стандартной
+            # модели yolov8n.onnx выдавалась ерунда.
+            cls_scores = pred[:, 4:]
+            scores = cls_scores.max(axis=1)
+            class_ids = cls_scores.argmax(axis=1)
+        else:
+            # YOLOv5: [cx, cy, w, h, objectness, класс_0 ...]
+            obj_conf = pred[:, 4]
+            cls_scores = pred[:, 5:]
+            if cls_scores.shape[1] > 0:
+                scores = obj_conf * cls_scores.max(axis=1)
+                class_ids = cls_scores.argmax(axis=1)
+            else:
+                scores = obj_conf
+                class_ids = np.zeros(len(pred), dtype=int)
 
         mask = scores >= YOLO_CONFIDENCE
         if not mask.any():

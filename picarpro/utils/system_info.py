@@ -1,16 +1,26 @@
 """Системная информация о Raspberry Pi.
 
-Отличие от исходной версии jsck37: показания CPU загружаются фоновым
-потоком-сэмплером и отдаются из кэша. Ранее get_cpu_usage() выполнял
-sleep(0.3) прямо в обработчике запроса статуса (задержка в каждом
-броадкасте), а get_ip() порождал до 4 subprocess в секунду.
+Показания CPU/RAM собирает ОДИН фоновый поток-сэмплер и отдаёт из кэша
+(раньше было три потока, а get_cpu_usage() спал 0.3 с прямо в обработчике
+статуса). Использование CPU считается по разнице двух соседних замеров
+/proc/stat — без пауз внутри сэмплера.
+
+Низкое напряжение определяется флагом under-voltage прошивки Pi (бит 0
+``get_throttled``): hwmon/sysfs читаются без fork, ``vcgencmd get_throttled``
+— запасной путь. Прежняя проверка «напряжение ядра < 1.2 В» была неверной:
+на Pi 4/5 ядро в простое штатно работает на 0.8-0.9 В, и тревога горела
+постоянно.
 """
+import glob
 import subprocess
 import threading
 import time
 
-from config import (VOLTAGE_CHECK_SOURCE, LOW_VOLTAGE_THRESHOLD_V,
-                    VOLTAGE_CHECK_INTERVAL_S)
+from config import VOLTAGE_CHECK_SOURCE, VOLTAGE_CHECK_INTERVAL_S
+
+_SAMPLE_INTERVAL_S = 2.0
+_THROTTLED_UNDERVOLT_NOW = 0x1
+_FIRMWARE_THROTTLED = '/sys/devices/platform/soc/soc:firmware/get_throttled'
 
 
 def _read_cpu_temp():
@@ -21,20 +31,14 @@ def _read_cpu_temp():
         return 0.0
 
 
-def _read_cpu_usage():
-    """Доля занятого CPU по /proc/stat (двумя чтениями с интервалом)."""
+def _read_cpu_times():
+    """(idle, total) из /proc/stat или None."""
     try:
-        def _read():
-            with open('/proc/stat') as f:
-                vals = [int(x) for x in f.readline().split()[1:]]
-            return vals[3], sum(vals)
-        i1, t1 = _read()
-        time.sleep(0.3)
-        i2, t2 = _read()
-        dt = t2 - t1
-        return round(100.0 * (1.0 - (i2 - i1) / dt), 1) if dt > 0 else 0.0
+        with open('/proc/stat') as f:
+            vals = [int(x) for x in f.readline().split()[1:]]
+        return vals[3] + (vals[4] if len(vals) > 4 else 0), sum(vals)
     except Exception:
-        return 0.0
+        return None
 
 
 def _read_ram_info():
@@ -61,21 +65,50 @@ def _read_ram_info():
         return {'total_mb': 0, 'used_mb': 0, 'percent': 0.0}
 
 
-def _read_core_voltage():
-    """Напряжение ядра через vcgencmd (fallback-источник)."""
-    try:
-        r = subprocess.run(['vcgencmd', 'measure_volts', 'core'],
-                           capture_output=True, text=True, timeout=2)
-        # формат: volt=1.2000V
-        for token in r.stdout.strip().split('='):
-            token = token.strip().rstrip('V')
+def _parse_hex(text):
+    text = text.strip().lower()
+    if '=' in text:                      # «throttled=0x50005»
+        text = text.split('=', 1)[1]
+    return int(text.replace('0x', ''), 16)
+
+
+def _pick_undervoltage_reader():
+    """Выбрать самый дешёвый доступный источник флага under-voltage.
+
+    Возвращает функцию () -> bool|None либо None, если источников нет
+    (не Raspberry Pi) — тогда опрос вообще не запускается.
+    """
+    for path in glob.glob('/sys/class/hwmon/hwmon*/in0_lcrit_alarm'):
+        def _hwmon(path=path):
             try:
-                return float(token)
-            except ValueError:
-                continue
+                with open(path) as f:
+                    return f.read().strip() == '1'
+            except Exception:
+                return None
+        return _hwmon
+    try:
+        with open(_FIRMWARE_THROTTLED) as f:
+            f.read()
+
+        def _firmware():
+            try:
+                with open(_FIRMWARE_THROTTLED) as f:
+                    return bool(_parse_hex(f.read()) & _THROTTLED_UNDERVOLT_NOW)
+            except Exception:
+                return None
+        return _firmware
     except Exception:
         pass
-    return None
+
+    def _vcgencmd():
+        try:
+            r = subprocess.run(['vcgencmd', 'get_throttled'],
+                               capture_output=True, text=True, timeout=2)
+            return bool(_parse_hex(r.stdout) & _THROTTLED_UNDERVOLT_NOW)
+        except Exception:
+            return None
+    # vcgencmd есть не везде — проверяем один раз, а не опрашиваем вечно
+    return _vcgencmd if _vcgencmd() is not None else None
 
 
 def _scan_dmesg_undervoltage():
@@ -88,37 +121,6 @@ def _scan_dmesg_undervoltage():
         return False
 
 
-class _CachedSampler:
-    """Фоновый сэмплер: вызывает func каждые interval секунд, кэширует результат."""
-
-    def __init__(self, func, interval):
-        self._func = func
-        self._interval = interval
-        self._value = func() if func is _read_ram_info else 0.0
-        self._lock = threading.Lock()
-        t = threading.Thread(target=self._loop, daemon=True)
-        t.start()
-
-    def _loop(self):
-        while True:
-            try:
-                v = self._func()
-                with self._lock:
-                    self._value = v
-            except Exception:
-                pass
-            time.sleep(self._interval)
-
-    def get(self):
-        with self._lock:
-            return self._value
-
-
-_cpu_temp_sampler = _CachedSampler(_read_cpu_temp, 2.0)
-_cpu_usage_sampler = _CachedSampler(_read_cpu_usage, 2.0)
-_ram_sampler = _CachedSampler(_read_ram_info, 2.0)
-
-
 class SystemInfo:
     _voltage_state = False
     _voltage_last_event = 0.0
@@ -126,24 +128,70 @@ class SystemInfo:
     _voltage_started = False
     _VOLTAGE_HOLD_S = 8.0
 
-    @staticmethod
-    def get_cpu_temp():
-        return _cpu_temp_sampler.get()
+    _sample_lock = threading.Lock()
+    _sampler_started = False
+    _cpu_temp = 0.0
+    _cpu_usage = 0.0
+    _ram = {'total_mb': 0, 'used_mb': 0, 'percent': 0.0}
 
-    @staticmethod
-    def get_cpu_usage():
-        return _cpu_usage_sampler.get()
+    # ---- фоновый сэмплер CPU/RAM ---------------------------------------
+    @classmethod
+    def _ensure_sampler(cls):
+        with cls._sample_lock:
+            if cls._sampler_started:
+                return
+            cls._sampler_started = True
+            cls._ram = _read_ram_info()
+            cls._cpu_temp = _read_cpu_temp()
+        threading.Thread(target=cls._sampler_loop, daemon=True).start()
 
+    @classmethod
+    def _sampler_loop(cls):
+        prev = _read_cpu_times()
+        while True:
+            time.sleep(_SAMPLE_INTERVAL_S)
+            try:
+                cur = _read_cpu_times()
+                usage = None
+                if prev and cur and cur[1] > prev[1]:
+                    usage = round(100.0 * (1.0 - (cur[0] - prev[0])
+                                           / (cur[1] - prev[1])), 1)
+                prev = cur
+                temp, ram = _read_cpu_temp(), _read_ram_info()
+                with cls._sample_lock:
+                    cls._cpu_temp, cls._ram = temp, ram
+                    if usage is not None:
+                        cls._cpu_usage = usage
+            except Exception:
+                pass
+
+    @classmethod
+    def get_cpu_temp(cls):
+        cls._ensure_sampler()
+        return cls._cpu_temp
+
+    @classmethod
+    def get_cpu_usage(cls):
+        cls._ensure_sampler()
+        return cls._cpu_usage
+
+    @classmethod
+    def get_ram_info(cls):
+        cls._ensure_sampler()
+        return dict(cls._ram)
+
+    # ---- мониторинг питания ----------------------------------------------
     @staticmethod
-    def get_ram_info():
-        return _ram_sampler.get()
+    def _mark_undervoltage():
+        with SystemInfo._voltage_lock:
+            SystemInfo._voltage_state = True
+            SystemInfo._voltage_last_event = time.monotonic()
 
     @staticmethod
     def _start_voltage_watcher():
         if SystemInfo._voltage_started:
             return
         SystemInfo._voltage_started = True
-
         source = VOLTAGE_CHECK_SOURCE
 
         def _watch_dmesg():
@@ -155,48 +203,27 @@ class SystemInfo:
                 )
                 for line in proc.stdout:
                     if 'Under-voltage detected' in line:
-                        with SystemInfo._voltage_lock:
-                            SystemInfo._voltage_state = True
-                            SystemInfo._voltage_last_event = time.monotonic()
+                        SystemInfo._mark_undervoltage()
             except Exception:
                 pass
 
-        def _watch_vcgencmd():
+        def _watch_flag():
+            read = _pick_undervoltage_reader()
+            if read is None:
+                return                       # не Pi: опрашивать нечего
             while True:
-                v = _read_core_voltage()
-                if v is not None and v < LOW_VOLTAGE_THRESHOLD_V:
-                    with SystemInfo._voltage_lock:
-                        SystemInfo._voltage_state = True
-                        SystemInfo._voltage_last_event = time.monotonic()
-                # v1.2.0: период из config (3 c вместо 2 c) — каждый вызов
-                # vcgencmd это fork+exec, на Pi 3B+ это ощутимо
+                if read():
+                    SystemInfo._mark_undervoltage()
                 time.sleep(max(1.0, VOLTAGE_CHECK_INTERVAL_S))
 
         def _watch_auto():
-            # 'auto': сначала одноразовый dmesg-скан, затем vcgencmd-поллинг
             if _scan_dmesg_undervoltage():
-                with SystemInfo._voltage_lock:
-                    SystemInfo._voltage_state = True
-                    SystemInfo._voltage_last_event = time.monotonic()
-            _watch_vcgencmd()
+                SystemInfo._mark_undervoltage()
+            _watch_flag()
 
-        if source == 'dmesg':
-            threading.Thread(target=_watch_dmesg, daemon=True).start()
-        elif source == 'vcgencmd':
-            threading.Thread(target=_watch_vcgencmd, daemon=True).start()
-        else:
-            threading.Thread(target=_watch_auto, daemon=True).start()
-
-        def _janitor():
-            while True:
-                time.sleep(2.0)
-                with SystemInfo._voltage_lock:
-                    if SystemInfo._voltage_state:
-                        age = time.monotonic() - SystemInfo._voltage_last_event
-                        if age > SystemInfo._VOLTAGE_HOLD_S:
-                            SystemInfo._voltage_state = False
-
-        threading.Thread(target=_janitor, daemon=True).start()
+        target = {'dmesg': _watch_dmesg, 'vcgencmd': _watch_flag}.get(
+            source, _watch_auto)
+        threading.Thread(target=target, daemon=True).start()
 
     @staticmethod
     def is_low_voltage():
@@ -206,6 +233,12 @@ class SystemInfo:
             except Exception:
                 pass
         with SystemInfo._voltage_lock:
+            # событие «гаснет» само через _VOLTAGE_HOLD_S (раньше для этого
+            # держали отдельный поток-уборщик, будивший CPU каждые 2 с)
+            if (SystemInfo._voltage_state
+                    and time.monotonic() - SystemInfo._voltage_last_event
+                    > SystemInfo._VOLTAGE_HOLD_S):
+                SystemInfo._voltage_state = False
             return SystemInfo._voltage_state
 
     @staticmethod

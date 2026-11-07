@@ -7,7 +7,7 @@ try:
     _HAS_SMBUS = True
 except ImportError:
     try:
-        import smbus as SMBus
+        from smbus import SMBus
         _HAS_SMBUS = True
     except ImportError:
         _HAS_SMBUS = False
@@ -28,6 +28,11 @@ PWR_CLKSEL_PLL = 0x01     # источник тактирования — PLL г
 
 INIT_ATTEMPTS = 3         # попыток инициализации на адрес
 INIT_RETRY_DELAY = 0.15   # пауза между попытками (чипу нужно ~100 мс после подачи питания)
+
+# Период опроса: в покое хватает 2 Гц (телеметрия раз в 2 с), 10 Гц нужны
+# только потребителям с высокой частотой (стабилизация камеры, UDP-стрим).
+READ_INTERVAL_IDLE_S = 0.5
+READ_INTERVAL_FAST_S = 0.1
 
 ACCEL_SCALE = 16384.0
 GYRO_SCALE = 131.0
@@ -96,6 +101,19 @@ def find_mpu6050_on_bus():
     return None, None
 
 
+def i2c_scan_report():
+    """Результат сканирования шины в виде словаря для UI/команды i2c_scan."""
+    devs = i2c_scan()
+    addr, who = find_mpu6050_on_bus()
+    return {
+        'ok': True,
+        'devices': [f'0x{a:02X}' for a in devs],
+        'mpu6050_found': addr is not None,
+        'mpu6050_addr': f'0x{addr:02X}' if addr else None,
+        'mpu6050_who_am_i': f'0x{who:02X}' if who else None,
+    }
+
+
 class MPU6050Controller:
     def __init__(self):
         self._bus = None
@@ -115,17 +133,31 @@ class MPU6050Controller:
         self._gyro = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self._temp = 0.0
         self._roll = self._pitch = 0.0
+        self._ts = 0.0               # time.monotonic() последнего сэмпла
+        self._fast_users = set()
         self._init_sensor()
+
+    def request_fast(self, owner):
+        """Потребителю нужен частый опрос (10 Гц); owner — любая метка."""
+        self._fast_users.add(owner)
+
+    def release_fast(self, owner):
+        self._fast_users.discard(owner)
+
+    def _probe_all(self):
+        """Пробуем стандартные адреса, затем полный скан. True — датчик найден
+        и запущен (общий код для старта и фонового retry)."""
+        for addr in POSSIBLE_ADDRS:
+            if self._try_init(addr):
+                return True
+        found_addr, _ = find_mpu6050_on_bus()
+        return bool(found_addr and self._try_init(found_addr))
 
     def _init_sensor(self):
         if not _HAS_SMBUS:
             logger.warning('[MPU6050] smbus2 not available')
             return
-        for addr in POSSIBLE_ADDRS:
-            if self._try_init(addr):
-                return
-        found_addr, _ = find_mpu6050_on_bus()
-        if found_addr and self._try_init(found_addr):
+        if self._probe_all():
             return
         logger.warning('[MPU6050] not found — will retry in background')
         self._running = True
@@ -157,7 +189,7 @@ class MPU6050Controller:
             # WHO_AM_I читаем для лога; если шина вообще не отвечает —
             # устройства нет по этому адресу.
             who = None
-            for attempt in range(INIT_ATTEMPTS):
+            for _ in range(INIT_ATTEMPTS):
                 try:
                     who = bus.read_byte_data(addr, REG_WHO_AM_I)
                     break
@@ -168,7 +200,7 @@ class MPU6050Controller:
                 bus.close()
                 return False
             who_note = '' if who in WHO_AM_I_VALUES else \
-                f' (нестандартный ID — вероятно клон, принимаем)'
+                ' (нестандартный ID — вероятно клон, принимаем)'
 
             # --- корректная последовательность запуска (datasheet InvenSense) ---
             # 1. DEVICE_RESET: чип по умолчанию просыпается в SLEEP (бит 0x40
@@ -255,6 +287,7 @@ class MPU6050Controller:
                     self._temp = round(temp_c, 1)
                     self._roll = round(roll, 1)
                     self._pitch = round(pitch, 1)
+                    self._ts = time.monotonic()
                 self._errors = 0
             except Exception:
                 if my_gen != self._gen:
@@ -264,7 +297,10 @@ class MPU6050Controller:
                     logger.error('[MPU6050] too many read errors — reinit')
                     self._reinit()
                     break  # _reinit порождает новый цикл; этот обязан завершиться
-            time.sleep(0.1)
+            # при ошибках чтения опрашиваем часто: диагноз «датчик отвалился»
+            # (30 ошибок -> reinit) должен занимать секунды, а не минуты
+            time.sleep(READ_INTERVAL_FAST_S if (self._fast_users or self._errors)
+                       else READ_INTERVAL_IDLE_S)
 
     def _retry_loop(self, gen):
         my_gen = gen
@@ -276,11 +312,7 @@ class MPU6050Controller:
             if not self._running or self.initialized or my_gen != self._gen:
                 return
             logger.info(f'[MPU6050] retry #{retry}...')
-            for addr in POSSIBLE_ADDRS:
-                if self._try_init(addr):
-                    return
-            found_addr, _ = find_mpu6050_on_bus()
-            if found_addr and self._try_init(found_addr):
+            if self._probe_all():
                 return
 
     def _reinit(self):
@@ -311,6 +343,7 @@ class MPU6050Controller:
                 'temp': self._temp,
                 'roll': self._roll,
                 'pitch': self._pitch,
+                'ts': self._ts,
             }
 
     def shutdown(self):

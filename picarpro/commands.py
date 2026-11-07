@@ -7,14 +7,15 @@
 * новые команды: steady (стабилизация камеры из v2), watchDog/findColor
   (автономные режимы из v1/v2), battery (статус питания).
 """
-from picarpro.logger import logger
+from picarpro.drive import drive
+from picarpro.control import READ_ONLY_CMDS
 from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
                                            CV_YOLO)
 from config import (
-    SERVO_COUNT, SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
+    SERVO_COUNT, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
     CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
-    SWITCH_PINS, DEFAULT_SPEED, STEER_MAP,
+    SWITCH_PINS, DEFAULT_SPEED,
 )
 
 
@@ -31,7 +32,25 @@ def safe_int(value, default=0, lo=None, hi=None):
     return v
 
 
-def process(state, data):
+def _service_cmd(svc, action):
+    """Единая обработка action=start|stop|status для фоновых сервисов."""
+    if action == 'start':
+        ok, msg = svc.start()
+        r = {'ok': ok, 'action': 'start'}
+        if not ok:
+            r['error'] = msg
+        return r
+    if action == 'stop':
+        svc.stop()
+        return {'ok': True, 'action': 'stop'}
+    r = svc.get_status()
+    r['ok'] = True
+    return r
+
+
+def process(state, data, client=None):
+    """Выполнить команду. client — идентификатор веб-устройства для арбитража
+    управления (None — внутренний вызов без ограничений)."""
     if not isinstance(data, dict):
         return {'ok': False, 'error': 'object expected'}
     cmd = str(data.get('cmd', ''))
@@ -39,24 +58,41 @@ def process(state, data):
     if not isinstance(p, dict):
         p = {}
     r = {'ok': False, 'cmd': cmd}
+    ctl = getattr(state, 'control', None)
+    if client is not None and ctl is not None:
+        if cmd == 'take_control':
+            ctl.take(client)
+            return {'ok': True, 'cmd': cmd, 'driver': client}
+        if cmd == 'release_control':
+            ctl.release(client)
+            return {'ok': True, 'cmd': cmd, 'driver': ctl.driver}
+        allowed, owner = ctl.check(client, cmd, p)
+        if not allowed:
+            return {'ok': False, 'cmd': cmd, 'code': 'not_driver',
+                    'driver': owner,
+                    'error': 'Controlled by another device'}
+    if cmd not in READ_ONLY_CMDS:
+        state.touch()               # активность для менеджера питания
 
     if cmd == 'move':
         d = str(p.get('dir', 'stop'))
-        if d == 'forward':
-            state.motors.move(state.speed, 'forward', 'no', 0.5)
-        elif d == 'backward':
-            state.motors.move(state.speed, 'backward', 'no', 0.5)
-        elif d in ('left', 'right'):
-            state.motors.move(state.speed, 'forward', d, 0.3)
-        elif d.startswith('forward_'):
-            state.motors.move(state.speed, 'forward', d.split('_')[1], 0.3)
-        elif d.startswith('backward_'):
-            state.motors.move(state.speed, 'backward', d.split('_')[1], 0.3)
-        elif d == 'stop':
-            state.motors.stop()
-        if state.servos:
-            state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
-        r = {'ok': True, 'dir': d}
+        state.touch_web()          # веб держит руль: DS4 не перехватывает
+        interrupted = d != 'stop' and state.stop_autonomy()
+        state.missions.note_move(d, state.speed)      # запись пути (если включена)
+        if not drive(state, d):
+            r = {'ok': False, 'cmd': cmd, 'error': f'bad dir: {d[:20]}'}
+        else:
+            r = {'ok': True, 'dir': d}
+            if interrupted:   # ручное управление вытесняет автономный режим
+                r['interrupted_auto'] = True
+
+    elif cmd == 'mission':
+        r = state.missions.handle(str(p.get('action', 'status')), p)
+        r['cmd'] = cmd
+
+    elif cmd == 'estop':
+        state.emergency_stop()
+        r = {'ok': True, 'cmd': cmd}
 
     elif cmd == 'speed':
         state.speed = safe_int(p.get('value', DEFAULT_SPEED),
@@ -219,17 +255,8 @@ def process(state, data):
                 state.aruco_nav = ArucoNavigator(state, state.camera)
             if not state.aruco_nav:
                 r = {'ok': False, 'error': 'Камера недоступна'}
-            elif action == 'start':
-                ok, msg = state.aruco_nav.start()
-                r = {'ok': ok, 'action': 'start'}
-                if not ok:
-                    r['error'] = msg
-            elif action == 'stop':
-                state.aruco_nav.stop()
-                r = {'ok': True, 'action': 'stop'}
             else:
-                r = state.aruco_nav.get_status()
-                r['ok'] = True
+                r = _service_cmd(state.aruco_nav, action)
 
     elif cmd == 'push':
         # расталкивание препятствий клешней (порт Phase 2)
@@ -237,17 +264,7 @@ def process(state, data):
         if not state.pusher:
             from picarpro.functions.arm_push import ObstaclePusher
             state.pusher = ObstaclePusher(state)
-        if action == 'start':
-            ok, msg = state.pusher.start()
-            r = {'ok': ok, 'action': 'start'}
-            if not ok:
-                r['error'] = msg
-        elif action == 'stop':
-            state.pusher.stop()
-            r = {'ok': True, 'action': 'stop'}
-        else:
-            r = state.pusher.get_status()
-            r['ok'] = True
+        r = _service_cmd(state.pusher, action)
 
     elif cmd == 'color_scan':
         # сканирование рукой + цветовой захват (порт colortracking.py)
@@ -261,17 +278,8 @@ def process(state, data):
                 state.color_scan = ColorArmScanner(state, state.camera)
             if not state.color_scan:
                 r = {'ok': False, 'error': 'Камера недоступна'}
-            elif action == 'start':
-                ok, msg = state.color_scan.start()
-                r = {'ok': ok, 'action': 'start'}
-                if not ok:
-                    r['error'] = msg
-            elif action == 'stop':
-                state.color_scan.stop()
-                r = {'ok': True, 'action': 'stop'}
             else:
-                r = state.color_scan.get_status()
-                r['ok'] = True
+                r = _service_cmd(state.color_scan, action)
 
     elif cmd == 'hand_color':
         state.init_camera()
@@ -299,14 +307,8 @@ def process(state, data):
             r = {'ok': True, 'color': list(c)}
 
     elif cmd == 'i2c_scan':
-        from picarpro.hardware.mpu6050 import i2c_scan, find_mpu6050_on_bus
-        devs = i2c_scan()
-        addr, who = find_mpu6050_on_bus()
-        r = {'ok': True,
-             'devices': [f'0x{a:02X}' for a in devs],
-             'mpu6050_found': addr is not None,
-             'mpu6050_addr': f'0x{addr:02X}' if addr else None,
-             'mpu6050_who_am_i': f'0x{who:02X}' if who else None}
+        from picarpro.hardware.mpu6050 import i2c_scan_report
+        r = i2c_scan_report()
 
     elif cmd == 'auto':
         func = str(p.get('func', 'stop'))
@@ -314,6 +316,8 @@ def process(state, data):
                  'trackHand', 'findColor', 'watchDog', 'keepDistance', 'stop')
         if func not in valid:
             r['error'] = f'Unknown mode: {func}'
+        elif not state.autonomous:
+            r['error'] = 'Autonomous controller not available'
         else:
             if func in ('trackLineCV', 'trackHand', 'findColor', 'watchDog'):
                 state.init_camera()

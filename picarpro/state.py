@@ -4,14 +4,22 @@ import time
 from picarpro.logger import logger
 from picarpro.utils.system_info import SystemInfo
 from picarpro.network import get_ip
-from config import DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL_S
+from picarpro.control import ControlArbiter
+from config import (SERVO_STEERING, DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL_S,
+                    WEB_ACTIVE_TTL_S)
 
 
 class SharedState:
     def __init__(self):
         self.speed = DEFAULT_SPEED
         self.running = True
-        self.web_active = False
+        self._web_active_until = 0.0     # monotonic: до какого момента веб «держит руль»
+        self._last_activity = time.monotonic()
+        self.power = None
+        self.control = ControlArbiter()
+        from picarpro.functions.missions import MissionRunner
+        self.missions = MissionRunner(self)    # сценарии/запись пути (без потоков, пока не запущены)
+        self.ws_meta = {}                # ws -> {'id','visible','last',...}
         self.left_blinker = False
         self.right_blinker = False
         self.crane_arm_closed = False
@@ -43,6 +51,93 @@ class SharedState:
         self.nav_tcp_host = None    # IP подключённого навигационного хоста
         self.nav_last_cmd = ''
         self.nav_last_cmd_ts = 0.0
+
+    # ---- активность оператора ------------------------------------------------
+    @property
+    def web_active(self):
+        """Веб-клиент недавно управлял роботом (DS4 тогда не перехватывает).
+
+        Раньше это был булев флаг, который выставлялся первой же командой из
+        веба и больше НИКОГДА не сбрасывался — геймпад переставал работать
+        до перезапуска сервиса. Теперь «захват» истекает через WEB_ACTIVE_TTL_S.
+        """
+        return time.monotonic() < self._web_active_until
+
+    @web_active.setter
+    def web_active(self, value):
+        self._web_active_until = (time.monotonic() + WEB_ACTIVE_TTL_S
+                                  if value else 0.0)
+
+    def autonomy_active(self):
+        """Выполняется ли автономный режим/миссия (сам ведёт робота)."""
+        if self.autonomous is not None and self.autonomous.is_active():
+            return True
+        if self.missions is not None and self.missions.is_active():
+            return True
+        for svc in (self.aruco_nav, self.color_scan, self.pusher):
+            if svc is None:
+                continue
+            try:
+                if svc.get_status().get('active'):
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def stop_autonomy(self):
+        """Остановить автономный режим/миссии. True — что-то было остановлено."""
+        was = self.autonomy_active()
+        if not was:
+            return False
+        for svc in (self.autonomous, self.aruco_nav, self.color_scan, self.pusher,
+                    self.missions):
+            if svc is None:
+                continue
+            try:
+                svc.stop()
+            except Exception:
+                pass
+        return True
+
+    def emergency_stop(self):
+        """Аварийный стоп: моторы, автономные режимы и миссии, зуммер."""
+        self.stop_autonomy()
+        if self.motors:
+            self.motors.stop()
+        if self.servos:
+            try:
+                self.servos.set_angle(SERVO_STEERING, 90)
+            except Exception:
+                pass
+        logger.warning('[State] EMERGENCY STOP')
+
+    def on_last_client_gone(self):
+        """Последний веб-клиент отключился (обрыв Wi-Fi, закрыли вкладку).
+
+        Если робот при этом ехал по ручной команде, без этого он ехал бы до
+        упора: UI шлёт «move» только при изменении, «keepalive» нет.
+        Автономные режимы и геймпад (он сам шлёт события) не трогаем.
+        """
+        if self.ws_clients or self.motors is None:
+            return False
+        if self.autonomy_active():
+            return False
+        if self.ds4 is not None and self.ds4.connected and not self.web_active:
+            return False
+        if getattr(self.motors, 'is_moving', False):
+            self.motors.stop()
+            logger.warning('[State] last web client gone — motors stopped')
+            return True
+        return False
+
+    def touch(self):
+        """Отметить активность (для менеджера питания)."""
+        self._last_activity = time.monotonic()
+
+    def touch_web(self):
+        """Команда управления из веба: продлить захват руля."""
+        self.touch()
+        self.web_active = True
 
     def _try_init(self, name, factory):
         try:
@@ -96,6 +191,8 @@ class SharedState:
         if self.oled and self.oled._initialized:
             self.oled.set_lines([f'{ip}:{FLASK_PORT}', 'Ready', '', ''])
 
+        from picarpro.power import PowerManager
+        self.power = self._try_init('Power', lambda: PowerManager(self))
         self._start_hw_retry()
 
     # ---- автовосстановление железа (v1.4.0) --------------------------------
@@ -167,16 +264,24 @@ class SharedState:
         except Exception:
             pass
         try:
-            if (self.autonomous is not None
-                    and not self.autonomous.is_active()):
-                self.autonomous = self._try_init(
-                    'Autonomous', lambda: _make_autonomous(self))
+            if self.autonomous is not None and not self.autonomous.is_active():
+                # rebind вместо пересоздания: раньше каждое восстановление
+                # оставляло работающий поток старого контроллера и теряло
+                # привязку камеры (CV-режимы после этого отвечали
+                # «Camera not available»)
+                self.autonomous.rebind(self.motors, self.servos,
+                                       self.ultrasonic, self.mpu6050)
         except Exception:
             pass
         try:
             if self.voice is not None and not self.voice._active:
-                self.voice = self._try_init(
-                    'Voice', lambda: _make_voice(self))
+                self.voice.servos = self.servos
+                self.voice.motors = self.motors
+        except Exception:
+            pass
+        try:
+            if self.steady is not None and not self.steady.active:
+                self.steady.rebind(self.servos, self.mpu6050)
         except Exception:
             pass
         # DS4-геймпад получает ссылки на железо один раз в start()
@@ -223,6 +328,9 @@ class SharedState:
             'radar_data': self.autonomous.get_radar_data() if self.autonomous else [],
             'steady_active': self.steady.active if self.steady else False,
             'speed': self.speed,
+            'low_power': bool(self.power and self.power.low_power),
+            'clients': len(self.ws_clients),
+            'driver': self.control.driver,
             'hw': {
                 'motors': self.motors._initialized if self.motors else False,
                 'servos': self.servos._pwm_initialized if self.servos else False,
@@ -272,11 +380,15 @@ class SharedState:
                      {'active': False, 'pushes_done': 0}),
             'color_scan': (self.color_scan.get_status() if self.color_scan else
                            {'active': False, 'mode': 'IDLE'}),
+            'mission': self.missions.get_status(),
         }
 
     def shutdown(self):
         self.running = False
         logger.info('[State] shutting down...')
+        if self.power:
+            try: self.power.shutdown()
+            except Exception: pass
         if self.aruco_nav:
             try: self.aruco_nav.stop()
             except Exception: pass
@@ -326,7 +438,10 @@ def _make_autonomous(state):
         if state.leds:
             state.leds.set_mode('police', (255, 0, 0))
 
-    ctrl = AutonomousController(state.motors, state.servos, state.ultrasonic)
+    ctrl = AutonomousController(state.motors, state.servos, state.ultrasonic,
+                                state.mpu6050)
+    if state.camera:
+        ctrl.set_camera(state.camera)
     ctrl.set_alarm_callback(_alarm)
     return ctrl
 

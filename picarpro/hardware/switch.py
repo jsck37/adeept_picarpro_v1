@@ -1,4 +1,4 @@
-import threading, time
+import threading
 from picarpro.logger import logger
 from config import SWITCH_PINS, HEADLIGHT_PIN
 
@@ -18,7 +18,8 @@ class SwitchController:
         self._headlight_on = False
         self._initialized = False
         self._blink_threads = [None, None]
-        self._blink_flags = [threading.Event(), threading.Event()]
+        self._blink_flags = [threading.Event(), threading.Event()]   # set = мигает
+        self._blink_stop = [threading.Event(), threading.Event()]    # set = прервать
         if not _HAS_GPIO:
             logger.warning('[Switch] RPi.GPIO not available')
             return
@@ -77,8 +78,10 @@ class SwitchController:
         if idx < 0 or idx >= len(self._leds) or not self._initialized:
             return
         self._blink_flags[idx].clear()
+        self._blink_stop[idx].set()
         if self._blink_threads[idx] and self._blink_threads[idx].is_alive():
             self._blink_threads[idx].join(timeout=0.6)
+        self._blink_stop[idx].clear()
         if active:
             self._blink_flags[idx].set()
             self._blink_threads[idx] = threading.Thread(
@@ -98,19 +101,21 @@ class SwitchController:
                 self._states[idx] = True
             except Exception:
                 pass
-            time.sleep(0.4)
-            if not self._blink_flags[idx].is_set():
+            if self._blink_stop[idx].wait(0.4):
                 break
             try:
                 GPIO.output(self._leds[idx], GPIO.LOW)
                 self._states[idx] = False
             except Exception:
                 pass
-            time.sleep(0.4)
+            if self._blink_stop[idx].wait(0.4):
+                break
 
     def shutdown(self):
         for f in self._blink_flags:
             f.clear()
+        for e in self._blink_stop:
+            e.set()
         for t in self._blink_threads:
             if t and t.is_alive():
                 t.join(timeout=1.0)

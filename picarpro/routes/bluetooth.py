@@ -32,7 +32,10 @@ class BluetoothctlSession:
     """Долгоживущая сессия bluetoothctl с защитой потоков."""
 
     def __init__(self):
-        self._lock = threading.Lock()
+        # RLock: _ensure_running() держит блокировку и вызывает _send(), который
+        # снова вызывает _ensure_running() — с обычным Lock сессия зависала
+        # навсегда при первом же обращении (скан/подключение BT не работали)
+        self._lock = threading.RLock()
         self._proc = None
         self._ensure_running()
 

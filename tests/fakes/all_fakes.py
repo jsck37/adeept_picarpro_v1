@@ -8,6 +8,7 @@ v1.4.1: серво переехали с adafruit/busio на smbus2 (PCA9685 —
 I2C-устройство), поэтому фейки busio/adafruit_* заменены регистровой
 моделью PCA9685 на той же фейковой шине (make_pca9685_device).
 """
+import os
 import sys
 import time
 import types
@@ -283,31 +284,64 @@ class FakeSpiDev:
 # ===========================================================================
 # picamera2
 # ===========================================================================
+class FakeMJPEGEncoder:
+    """Заглушка picamera2.encoders.MJPEGEncoder."""
+
+
+class FakeFileOutput:
+    """Заглушка picamera2.outputs.FileOutput: хранит приёмник кадров."""
+
+    def __init__(self, f=None):
+        self.f = f
+
+
 class FakePicamera2:
     """Управляемая фейковая камера: классовый кадр + режим отказа."""
     frame = None            # numpy array (H, W, 3) uint8
     fail_capture_after = None
     fail_start = False
+    silent_encoder = False  # энкодер запускается, но кадров не выдаёт
+    fail_encoder = False    # start_encoder бросает исключение
 
     instance = None
+
+    def start_encoder(self, encoder, output, **kw):
+        import threading as _th
+        if FakePicamera2.fail_encoder:
+            raise RuntimeError('no hardware encoder')
+        self.encoder_running = True
+        self.encoder_starts = getattr(self, 'encoder_starts', 0) + 1
+
+        def _emit():
+            n = 0
+            while self.encoder_running and not FakePicamera2.silent_encoder:
+                output.f.write(b'\xff\xd8hw-frame-%d\xff\xd9' % n)
+                n += 1
+                time.sleep(0.03)
+        self._enc_thread = _th.Thread(target=_emit, daemon=True)
+        self._enc_thread.start()
+
+    def stop_encoder(self):
+        self.encoder_running = False
 
     def __init__(self):
         self.configured = False
         self.started = False
         self.closed = False
+        self.encoder_running = False
         self.controls = {}
         self._captures = 0
         FakePicamera2.instance = self
 
     def create_preview_configuration(self, main=None, **kw):
-        return {'main': main}
+        return {'main': main, **kw}
 
     def configure(self, cfg):
         self.configured = True
         self.config = cfg
 
-    def set_control(self, name, value):
-        self.controls[name] = value
+    # В настоящем Picamera2 метода set_control() НЕТ (только set_controls) —
+    # фейк его намеренно не имитирует, иначе такая ошибка в коде проходит тесты.
 
     def set_controls(self, controls):
         self.controls.update(controls)
@@ -382,8 +416,11 @@ class FakeInputDevice:
     def __init__(self, path=None, name='Wireless Controller'):
         self.path = path or '/dev/input/event9'
         self.name = name
-        self.fd = FakeInputDevice.next_fd
-        FakeInputDevice.next_fd += 1
+        # настоящий дескриптор (pipe): ядро-читатель делает select() по fd, а
+        # выдуманные номера 10, 11... в разных окружениях pytest то заняты
+        # чужими файлами, то не существуют — тест становился нестабильным
+        self._pipe_r, self._pipe_w = os.pipe()
+        self.fd = self._pipe_r
         self.grabbed = False
         self.closed = False
         self.event_queue = []
@@ -423,6 +460,11 @@ class FakeInputDevice:
     def close(self):
         self.closed = True
         FakeInputDevice.devices.pop(self.path, None)
+        for fd in (self._pipe_r, self._pipe_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def read(self):
         events, self.event_queue = self.event_queue, []
@@ -489,6 +531,8 @@ class FakeCV2:
     COLOR_RGB2GRAY = 'RGB2GRAY'
     COLOR_GRAY2BGR = 'GRAY2BGR'
     COLOR_BGR2HSV = 'BGR2HSV'
+    COLOR_RGB2HSV = 'RGB2HSV'
+    INTER_AREA = 3
     COLOR_HSV2BGR = 'HSV2BGR'
     MORPH_RECT = 1
     MORPH_ELLIPSE = 2
@@ -517,6 +561,8 @@ class FakeCV2:
             return np.stack([src, src, src], axis=-1).astype(np.uint8)
         if code == cls.COLOR_BGR2HSV:
             return cls._bgr2hsv(src)
+        if code == cls.COLOR_RGB2HSV:
+            return cls._bgr2hsv(src[..., ::-1])
         if code == cls.COLOR_HSV2BGR:
             return cls._hsv2bgr(src)
         raise ValueError(f'unknown code {code}')
@@ -604,6 +650,19 @@ class FakeCV2:
                 best_var = var
                 best_t = t
         return best_t
+
+    @classmethod
+    def resize(cls, src, size, interpolation=None):
+        """Уменьшение/увеличение «ближайшим соседом» (достаточно для тестов)."""
+        w, h = size
+        sh, sw = src.shape[:2]
+        ys = (np.arange(h) * sh // h).astype(int)
+        xs = (np.arange(w) * sw // w).astype(int)
+        return src[ys][:, xs].copy()
+
+    @staticmethod
+    def countNonZero(src):
+        return int(np.count_nonzero(src))
 
     @classmethod
     def absdiff(cls, a, b):
@@ -778,6 +837,8 @@ def install():
     mod('smbus2', SMBus=FakeSMBus)
     mod('spidev', SpiDev=FakeSpiDev)
     mod('picamera2', Picamera2=FakePicamera2)
+    mod('picamera2.encoders', MJPEGEncoder=FakeMJPEGEncoder)
+    mod('picamera2.outputs', FileOutput=FakeFileOutput)
 
     evdev = mod('evdev', InputDevice=FakeInputDevice,
                 list_devices=fake_list_devices)
