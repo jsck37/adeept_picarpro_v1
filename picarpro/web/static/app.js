@@ -112,8 +112,8 @@ function sendCommand(cmd, params) {
   } else {
     var urlMap = {
       'move': '/cmd/move', 'speed': '/cmd/speed', 'servo': '/cmd/servo',
-      'servo_home': '/cmd/servo_home', 'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
-      'buzzer_stop': '/cmd/buzzer_stop', 'switch': '/cmd/switch',
+      'led': '/cmd/led', 'buzzer': '/cmd/buzzer',
+      'buzzer_stop': '/cmd/buzzer_stop',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
       'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
       'hand_color': '/cmd/hand_color', 'servo_get_limits': '/cmd/servo_get_limits',
@@ -169,7 +169,7 @@ function restoreCollapsed() {
     // первый запуск на телефоне: оставляем видео, режимы и движение,
     // остальное свёрнуто
     closed = ['ds4-body', 'voice-body', 'servo-body', 'mpu-body', 'hl-body',
-              'led-body', 'buzzer-body', 'cv-body', 'update-body'];
+              'led-body', 'buzzer-body', 'cv-body'];
   }
   (closed || []).forEach(function(id) {
     var body = document.getElementById(id);
@@ -569,15 +569,19 @@ function updateStatus(d) {
   }
   if (d.left_blinker !== undefined) {
     hlLeftSignal = d.left_blinker;
-    document.getElementById('hl-left-signal').className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+    document.getElementById('hl-left-signal').className = 'signal-btn ' + (hlLeftSignal ? 'on' : 'off');
     var lStat = document.getElementById('blinker-left-status');
     if (lStat) { lStat.textContent = hlLeftSignal ? 'ON' : 'OFF'; lStat.style.color = hlLeftSignal ? '#fbbc04' : '#9aa0a6'; }
+    var lDot = document.getElementById('blinker-left-dot');
+    if (lDot) lDot.dataset.on = hlLeftSignal ? '1' : '0';
   }
   if (d.right_blinker !== undefined) {
     hlRightSignal = d.right_blinker;
-    document.getElementById('hl-right-signal').className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
+    document.getElementById('hl-right-signal').className = 'signal-btn ' + (hlRightSignal ? 'on' : 'off');
     var rStat = document.getElementById('blinker-right-status');
     if (rStat) { rStat.textContent = hlRightSignal ? 'ON' : 'OFF'; rStat.style.color = hlRightSignal ? '#fbbc04' : '#9aa0a6'; }
+    var rDot = document.getElementById('blinker-right-dot');
+    if (rDot) rDot.dataset.on = hlRightSignal ? '1' : '0';
   }
   if (d.voice) {
     var v = d.voice;
@@ -679,7 +683,7 @@ function buildServoGrid() {
       '<input type="number" class="servo-angle-input" data-servo="' + s.id + '" min="' + s.min + '" max="' + s.max + '" value="' + s.cur + '">' +
       '<button type="button" class="servo-step-btn" data-servo-inc="' + s.id + '" title="+1\u00B0 (удерживайте для автоповтора)">+</button>' +
       '</div>' +
-      '<div class="servo-limits-row"><span class="servo-limit-label">' + s.min + '\u2013' + s.max + '\u00B0 (config.py)</span></div>';
+      '<div class="servo-limits-row"><span class="servo-limit-label">' + s.min + '\u2013' + s.max + '\u00B0</span></div>';
     grid.appendChild(item);
   });
 
@@ -1005,14 +1009,6 @@ if (speedSlider) {
   speedSlider.addEventListener('change', function() { sendCommand('speed', { value: parseInt(speedSlider.value) }); });
 }
 
-document.getElementById('servo-home').addEventListener('click', function() {
-  sendCommand('servo_home', {});
-  craneArmClosed = false;
-  craneGripPosition = 'high';
-  updateCraneArmUI();
-  updateCraneGripUI();
-});
-
 document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     craneArmClosed = !craneArmClosed;
@@ -1042,39 +1038,36 @@ document.getElementById('hl-left-signal').addEventListener('click', function() {
   hlLeftSignal = !hlLeftSignal;
   if (hlLeftSignal) {
     hlRightSignal = false;
-    document.getElementById('hl-right-signal').className = 'headlight-btn off';
+    document.getElementById('hl-right-signal').className = 'signal-btn off';
+    var rDot = document.getElementById('blinker-right-dot');
+    if (rDot) rDot.dataset.on = '0';
+    var rStat = document.getElementById('blinker-right-status');
+    if (rStat) { rStat.textContent = 'OFF'; rStat.style.color = '#9aa0a6'; }
   }
   sendCommand('blinker', { side: 'left', active: hlLeftSignal });
-  this.className = 'headlight-btn ' + (hlLeftSignal ? 'on' : 'off');
+  this.className = 'signal-btn ' + (hlLeftSignal ? 'on' : 'off');
+  var lDot = document.getElementById('blinker-left-dot');
+  if (lDot) lDot.dataset.on = hlLeftSignal ? '1' : '0';
+  var lStat = document.getElementById('blinker-left-status');
+  if (lStat) { lStat.textContent = hlLeftSignal ? 'ON' : 'OFF'; lStat.style.color = hlLeftSignal ? '#fbbc04' : '#9aa0a6'; }
 });
 
 document.getElementById('hl-right-signal').addEventListener('click', function() {
   hlRightSignal = !hlRightSignal;
   if (hlRightSignal) {
     hlLeftSignal = false;
-    document.getElementById('hl-left-signal').className = 'headlight-btn off';
+    document.getElementById('hl-left-signal').className = 'signal-btn off';
+    var lDot = document.getElementById('blinker-left-dot');
+    if (lDot) lDot.dataset.on = '0';
+    var lStat = document.getElementById('blinker-left-status');
+    if (lStat) { lStat.textContent = 'OFF'; lStat.style.color = '#9aa0a6'; }
   }
   sendCommand('blinker', { side: 'right', active: hlRightSignal });
-  this.className = 'headlight-btn ' + (hlRightSignal ? 'on' : 'off');
-});
-
-document.getElementById('hl-left').addEventListener('click', function() {
-  var currentState = this.classList.contains('on');
-  sendCommand('switch', { id: 0, state: !currentState });
-  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
-});
-document.getElementById('hl-right').addEventListener('click', function() {
-  var currentState = this.classList.contains('on');
-  sendCommand('switch', { id: 1, state: !currentState });
-  this.className = 'headlight-btn ' + (!currentState ? 'on' : 'off');
-});
-document.getElementById('hl-both').addEventListener('click', function() {
-  var bothOn = document.getElementById('hl-left').classList.contains('on') && document.getElementById('hl-right').classList.contains('on');
-  var ns = !bothOn;
-  sendCommand('switch', { id: 0, state: ns }); sendCommand('switch', { id: 1, state: ns });
-  document.getElementById('hl-left').className = 'headlight-btn ' + (ns ? 'on' : 'off');
-  document.getElementById('hl-right').className = 'headlight-btn ' + (ns ? 'on' : 'off');
-  this.className = 'headlight-btn ' + (ns ? 'on' : 'off');
+  this.className = 'signal-btn ' + (hlRightSignal ? 'on' : 'off');
+  var rDot = document.getElementById('blinker-right-dot');
+  if (rDot) rDot.dataset.on = hlRightSignal ? '1' : '0';
+  var rStat = document.getElementById('blinker-right-status');
+  if (rStat) { rStat.textContent = hlRightSignal ? 'ON' : 'OFF'; rStat.style.color = hlRightSignal ? '#fbbc04' : '#9aa0a6'; }
 });
 
 var ledColorInput = document.getElementById('led-color');
@@ -1373,6 +1366,7 @@ function updateMissionButtons() {
   document.getElementById('mission-stop').disabled = !st.active;
   document.getElementById('mission-home').disabled = st.active || st.recording || !st.has_path;
   document.getElementById('mission-rec').textContent = st.recording ? 'Stop & save' : 'Record path';
+  document.getElementById('mission-rec').dataset.rec = st.recording ? '1' : '0';
   document.getElementById('mission-del').style.display =
     (sel && sel.dataset.builtin === '0') ? '' : 'none';
 }
@@ -1392,7 +1386,8 @@ function renderMissionStatus(s) {
     else if (st === 'obstacle') txt = 'Stopped: obstacle ahead';
     else if (st === 'error') txt = 'Error: ' + (s.error || 'unknown');
     el.textContent = txt;
-    el.dataset.state = missionState.active ? 'running' : st;
+    el.dataset.state = missionState.active ? 'running'
+      : (missionState.recording ? 'recording' : st);
   }
   updateMissionButtons();
 }
@@ -1473,6 +1468,15 @@ function updateResult(r) {
   if (r.restarting) { updMsg('Updated ' + r.from + ' \u2192 ' + r.to + '.' + note, 'running'); waitForRestart(r.to); }
   else updMsg('Updated ' + r.from + ' \u2192 ' + r.to + '. Restart the service manually.' + note, 'done');
   loadUpdateInfo();
+}
+
+// Кастомный выбор файла: показываем имя выбранного архива в псевдо-кнопке
+var updFileInput = document.getElementById('upd-file');
+if (updFileInput) {
+  updFileInput.addEventListener('change', function() {
+    var nameEl = document.getElementById('upd-file-name');
+    if (nameEl) nameEl.textContent = this.files.length ? this.files[0].name : 'Choose .tar.gz / .zip…';
+  });
 }
 
 document.getElementById('upd-go').addEventListener('click', function() {

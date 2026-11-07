@@ -45,6 +45,7 @@
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="control">Control</button>
     <button class="tab-btn" data-tab="console">Console</button>
+    <button class="tab-btn" data-tab="update">Update</button>
   </nav>
   <div class="hdr-actions">
     <span class="driver-chip" id="driver-chip" data-state="free">Control free</span>
@@ -325,14 +326,6 @@
         <div class="collapsible-body open" id="servo-body">
           <div id="servo-controls">
             <div class="servo-grid" id="servo-grid"></div>
-            <div class="servo-home-row">
-              <button class="btn-sm btn-secondary" id="servo-home">Home All</button>
-            </div>
-            <div class="servo-limits-note" id="servo-limits-note">
-              Лимиты серво заданы в config.py (SERVO_LIMITS) и заблокированы:
-              Steering 30–150, Cam Pan 0–180, Cam Tilt 80–170,
-              Crane Grip 100–180, Crane Arm 100–180.
-            </div>
           </div>
         </div>
       </div>
@@ -384,21 +377,21 @@
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main">Headlight</button>
             </div>
-            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600;text-align:center">Side Lights</div>
-            <div class="headlight-row" style="margin-bottom:10px">
-              <button class="headlight-btn off" id="hl-left" data-port="1">Left</button>
-              <button class="headlight-btn off" id="hl-both" data-port="both">Both</button>
-              <button class="headlight-btn off" id="hl-right" data-port="2">Right</button>
-            </div>
-            <div style="margin-bottom:6px;font-size:.75rem;color:#5f6368;font-weight:600;text-align:center">Turn Signals (toggle)</div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">
-              <button class="headlight-btn off" id="hl-left-signal" style="font-size:.75rem">&#9664; Left</button>
-              <button class="headlight-btn off" id="hl-right-signal" style="font-size:.75rem">Right &#9654;</button>
-            </div>
-            <div style="margin-top:6px;font-size:.75rem;color:#5f6368;text-align:center">
-              <div style="display:flex;gap:12px;justify-content:center">
-                <span>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
-                <span>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
+            <div class="signal-section">
+              <div class="signal-section-title">Turn Signals <span class="signal-toggle-hint">(toggle)</span></div>
+              <div class="signal-row">
+                <button class="signal-btn off" id="hl-left-signal" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                  <span>Left</span>
+                </button>
+                <button class="signal-btn off" id="hl-right-signal" type="button">
+                  <span>Right</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </button>
+              </div>
+              <div class="signal-status">
+                <span class="signal-status-item"><i class="signal-dot" id="blinker-left-dot"></i>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
+                <span class="signal-status-item"><i class="signal-dot" id="blinker-right-dot"></i>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
               </div>
             </div>
           </div>
@@ -444,40 +437,48 @@
 
       <div class="card" id="card-missions">
         <div class="card-title collapsible-header open" data-target="missions-body">
-          <div style="display:flex;align-items:center;gap:8px">Missions</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M12 19h4.5a3.5 3.5 0 000-7h-9a3.5 3.5 0 010-7H12"/></svg>
+            Missions
+          </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="missions-body">
-          <div class="mission-row">
-            <select id="mission-select" aria-label="Mission"></select>
-            <button class="gbtn" id="mission-start" type="button">Start</button>
-            <button class="gbtn" id="mission-stop" type="button" style="background:#ea4335;color:#fff">Stop</button>
+          <div class="ms-body">
+            <div class="ms-picker">
+              <span class="ms-picker-label">Mission</span>
+              <div class="ms-select-wrap">
+                <select id="mission-select" aria-label="Mission"></select>
+                <svg class="ms-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </div>
+            <div class="ms-actions">
+              <button class="ms-btn ms-btn-start" id="mission-start" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+                <span>Start</span>
+              </button>
+              <button class="ms-btn ms-btn-stop" id="mission-stop" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                <span>Stop</span>
+              </button>
+            </div>
+            <div class="ms-tools">
+              <button class="ms-chip ms-chip-rec" id="mission-rec" type="button">Record path</button>
+              <button class="ms-chip" id="mission-home" type="button" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+                <span>Return home</span>
+              </button>
+              <button class="ms-chip ms-chip-danger" id="mission-del" type="button" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                <span>Delete</span>
+              </button>
+            </div>
+            <div class="mission-status" id="mission-status" data-state="idle">Idle</div>
+            <div class="ms-hint">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>Return home retraces the recorded path by dead reckoning (approximate; no odometry).</span>
+            </div>
           </div>
-          <div class="mission-row">
-            <button class="gbtn" id="mission-rec" type="button">Record path</button>
-            <button class="gbtn" id="mission-home" type="button" disabled>Return home</button>
-            <button class="gbtn" id="mission-del" type="button" style="display:none">Delete</button>
-          </div>
-          <div class="mission-status" id="mission-status">Idle</div>
-          <div class="mission-hint">Return home retraces the recorded path by dead reckoning (approximate; no odometry).</div>
-        </div>
-      </div>
-
-      <div class="card" id="card-update">
-        <div class="card-title collapsible-header open" data-target="update-body">
-          <div style="display:flex;align-items:center;gap:8px">System update <span class="sb-value" id="upd-version">--</span></div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="update-body">
-          <div class="mission-row">
-            <input type="file" id="upd-file" accept=".gz,.tgz,.tar.gz,.zip" aria-label="Update archive">
-            <button class="gbtn" id="upd-go" type="button">Upload &amp; install</button>
-          </div>
-          <div class="mission-row">
-            <select id="upd-backups" aria-label="Backups"></select>
-            <button class="gbtn" id="upd-rollback" type="button">Roll back</button>
-          </div>
-          <div class="mission-status" id="upd-status">Upload a project archive (.tar.gz / .zip). The previous version is backed up automatically.</div>
         </div>
       </div>
 
@@ -500,6 +501,60 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<div class="tab-content" id="content-update">
+  <div class="upd-wrap">
+    <div class="card upd-card" id="card-update">
+      <div class="upd-header">
+        <div class="upd-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          <span>System update</span>
+          <span class="upd-version-chip" id="upd-version">--</span>
+        </div>
+      </div>
+      <div class="upd-body" id="update-body">
+        <div class="upd-step">
+          <div class="upd-step-head">
+            <span class="upd-step-num">1</span>
+            <span class="upd-step-title">Install archive</span>
+          </div>
+          <div class="upd-file-row">
+            <label class="upd-file-label" for="upd-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span id="upd-file-name">Choose .tar.gz / .zip…</span>
+            </label>
+            <input type="file" id="upd-file" accept=".gz,.tgz,.tar.gz,.zip" aria-label="Update archive">
+            <button class="ms-btn ms-btn-start upd-install-btn" id="upd-go" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>Upload &amp; install</span>
+            </button>
+          </div>
+        </div>
+        <div class="upd-step">
+          <div class="upd-step-head">
+            <span class="upd-step-num">2</span>
+            <span class="upd-step-title">Roll back if needed</span>
+          </div>
+          <div class="upd-file-row">
+            <div class="ms-select-wrap upd-backup-wrap">
+              <select id="upd-backups" aria-label="Backups"></select>
+              <svg class="ms-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <button class="ms-chip" id="upd-rollback" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+              <span>Roll back</span>
+            </button>
+          </div>
+        </div>
+        <div class="mission-status upd-status" id="upd-status">Upload a project archive (.tar.gz / .zip). The previous version is backed up automatically.</div>
+        <div class="ms-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span>The robot stops and restarts during install. Last 3 versions are kept as backups; <code>missions/</code> and <code>config_local.py</code> are preserved.</span>
+        </div>
+      </div>
     </div>
   </div>
 </div>
