@@ -84,23 +84,24 @@ class TestButtons:
         ds4.start(motors=hw.motors, servos=hw.servos, leds=hw.leds,
                   buzzer=hw.buzzer, switches=hw.switches, shared_state=hw)
         ds4._connected = True  # без «подключения» поток сглаживания не активен
+        from config import SERVO_CRANE_ARM, CRANE_ARM_CLOSED, CRANE_ARM_OPEN
         ds4._btn_press(FakeEcodes.BTN_SOUTH)
         assert ds4._crane_arm_closed is True
         # плавный ход асинхронный — ждём достижения цели
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            if hw.servos.get_angle(6) == 150:  # CRANE_ARM_CLOSED
+            if hw.servos.get_angle(SERVO_CRANE_ARM) == CRANE_ARM_CLOSED:
                 break
             time.sleep(0.02)
-        assert hw.servos.get_angle(6) == 150
+        assert hw.servos.get_angle(SERVO_CRANE_ARM) == CRANE_ARM_CLOSED
         ds4._btn_press(FakeEcodes.BTN_SOUTH)
         assert ds4._crane_arm_closed is False
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            if hw.servos.get_angle(6) == 100:  # CRANE_ARM_OPEN (v1.3.0)
+            if hw.servos.get_angle(SERVO_CRANE_ARM) == CRANE_ARM_OPEN:
                 break
             time.sleep(0.02)
-        assert hw.servos.get_angle(6) == 100
+        assert hw.servos.get_angle(SERVO_CRANE_ARM) == CRANE_ARM_OPEN
         ds4._connected = False
 
     def test_crane_grip_cycle(self, ds4, hw):

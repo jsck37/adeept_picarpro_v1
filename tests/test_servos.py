@@ -68,9 +68,10 @@ class TestInit:
         assert all(s is not None for s in servos._servos)
 
     def test_init_angles_applied(self, servos):
-        # каналы 5/6 -> CRANE_GRIP_HIGH=180 / CRANE_ARM_OPEN=100 (v1.3.0)
-        assert servos.get_angle(5) == 180
-        assert servos.get_angle(6) == 100
+        # v1.6.0: каналы клешни 4/5 (плечо=наклон, захват)
+        from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
+        assert servos.get_angle(SERVO_CRANE_GRIP) == 180  # CRANE_GRIP_HIGH
+        assert servos.get_angle(SERVO_CRANE_ARM) == 100   # CRANE_ARM_OPEN
         assert servos.get_angle(0) == 90
 
     def test_init_without_device_not_fatal(self):
@@ -158,24 +159,26 @@ class TestLimits:
         from config import SERVO_LIMITS
         assert servos.get_limits() == {
             int(k): dict(v) for k, v in SERVO_LIMITS.items()}
+        from config import SERVO_CRANE_GRIP
         assert servos.get_limits(2) == {'min': 80, 'max': 170}
-        assert servos.get_limits(5) == {'min': 100, 'max': 180}
-        assert servos.get_limits(6) == {'min': 100, 'max': 180}
+        assert servos.get_limits(SERVO_CRANE_GRIP) == {'min': 100, 'max': 180}
+        assert servos.get_limits(6) == {'min': 0, 'max': 180}   # резерв v1.6.0
 
     def test_no_runtime_editing(self, servos):
         """Редактирование лимитов из кода удалено."""
         assert not hasattr(servos, 'set_limits')
 
     def test_clamped_to_config_limits(self, servos):
-        # tilt: 80..170, grip: 100..180, arm: 100..180
+        # tilt камеры: 80..170, клешня (наклон/захват): 100..180 (v1.6.0)
+        from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
         assert servos.set_angle(2, 10) is True
         assert servos.get_angle(2) == 80
         assert servos.set_angle(2, 200) is True
         assert servos.get_angle(2) == 170
-        assert servos.set_angle(5, 10) is True
-        assert servos.get_angle(5) == 100
-        assert servos.set_angle(6, 200) is True
-        assert servos.get_angle(6) == 180
+        assert servos.set_angle(SERVO_CRANE_GRIP, 10) is True
+        assert servos.get_angle(SERVO_CRANE_GRIP) == 100
+        assert servos.set_angle(SERVO_CRANE_ARM, 200) is True
+        assert servos.get_angle(SERVO_CRANE_ARM) == 180
 
     def test_same_angle_not_rewritten(self, servos):
         """Анти-джиттер: повторная команда того же угла не пишет PWM."""

@@ -23,13 +23,22 @@ test('reconnectDelay: растёт и ограничена 10 с (с дрожь�
 test('vectorToDir: 8 направлений и мёртвая зона', () => {
   assert.strictEqual(C.vectorToDir(0, -50), 'forward');
   assert.strictEqual(C.vectorToDir(0, 50), 'backward');
-  assert.strictEqual(C.vectorToDir(-50, 0), 'left');
-  assert.strictEqual(C.vectorToDir(50, 0), 'right');
+  // v1.6.0: крайние лево/право — руль без движения
+  assert.strictEqual(C.vectorToDir(-50, 0), 'steer_left');
+  assert.strictEqual(C.vectorToDir(50, 0), 'steer_right');
   assert.strictEqual(C.vectorToDir(40, -40), 'forward_right');
   assert.strictEqual(C.vectorToDir(-40, -40), 'forward_left');
   assert.strictEqual(C.vectorToDir(-40, 40), 'backward_left');
   assert.strictEqual(C.vectorToDir(40, 40), 'backward_right');
   assert.strictEqual(C.vectorToDir(3, 3), 'stop');
+});
+
+test('combineKeys: A/D без W/S — руль без движения (v1.6.0)', () => {
+  assert.strictEqual(C.combineKeys({left: true}), 'steer_left');
+  assert.strictEqual(C.combineKeys({right: true}), 'steer_right');
+  // с W/S — обычные диагонали
+  assert.strictEqual(C.combineKeys({up: true, left: true}), 'forward_left');
+  assert.strictEqual(C.combineKeys({down: true, right: true}), 'backward_right');
 });
 
 test('combineKeys: диагонали, отмена, отпускание одной из двух', () => {
@@ -49,11 +58,16 @@ test('combineKeys: диагонали, отмена, отпускание одн
   assert.strictEqual(C.combineKeys({up: true, spin_left: true}), 'forward');
 });
 
-test('keyAction: регистр и стрелки', () => {
+test('keyAction: регистр; стрелки отданы камере (v1.6.0)', () => {
   assert.strictEqual(C.keyAction('W'), 'up');
-  assert.strictEqual(C.keyAction('ArrowLeft'), 'left');
+  assert.strictEqual(C.keyAction('a'), 'left');
   assert.strictEqual(C.keyAction('Q'), 'spin_left');
   assert.strictEqual(C.keyAction('x'), null);
+  // стрелки больше НЕ колёса — ими управляет камера (app.js camKeys)
+  assert.strictEqual(C.keyAction('ArrowLeft'), null);
+  assert.strictEqual(C.keyAction('ArrowUp'), null);
+  assert.strictEqual(C.keyAction('ArrowDown'), null);
+  assert.strictEqual(C.keyAction('ArrowRight'), null);
 });
 
 test('driverState', () => {

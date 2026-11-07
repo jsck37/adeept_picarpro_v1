@@ -28,9 +28,9 @@ var servoDefs = [
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 80, max: 170, init: 90 },
   { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
-  { id: 4, name: 'Servo 4',  min: 0,  max: 180, init: 90 },
-  { id: 5, name: 'Crane Grip', min: 100, max: 180, init: 180 },
-  { id: 6, name: 'Crane Arm',  min: 100, max: 180, init: 100 },
+  { id: 4, name: 'Crane Tilt', min: 100, max: 180, init: 180 },
+  { id: 5, name: 'Crane Grip', min: 100, max: 180, init: 100 },
+  { id: 6, name: 'Reserve',  min: 0,  max: 180, init: 90 },
 ];
 // Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
 
@@ -750,9 +750,10 @@ var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
 
 var dirLabels = {
-  forward: 'Forward', backward: 'Backward', left: 'Left', right: 'Right',
+  forward: 'Forward', backward: 'Backward',
   forward_left: 'Fwd-Left', forward_right: 'Fwd-Right',
   backward_left: 'Back-Left', backward_right: 'Back-Right', stop: 'Stopped',
+  steer_left: 'Steer left', steer_right: 'Steer right',
   spin_left: 'Spin left', spin_right: 'Spin right'
 };
 
@@ -819,7 +820,7 @@ var wheelsStick = makeStick(joystickContainer, joystickKnob, 24, function(dx, dy
   if (joystickLabel) joystickLabel.textContent = dirLabels[dir] || dir;
   sendMoveDir(dir, true);          // тот же темп повторов, что и раньше (150 мс)
 }, function() {
-  if (joystickLabel) joystickLabel.textContent = 'Wheels \u2014 WASD / arrows';
+  if (joystickLabel) joystickLabel.textContent = 'Wheels \u2014 WASD / joystick';
   sendMoveDir('stop', false);
 });
 
@@ -858,14 +859,15 @@ var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, function(dx,
   setCamera(newPan, newTilt);
   if (camJoystickLabel) {
     camJoystickLabel.textContent = (Math.abs(dx) < 5 && Math.abs(dy) < 5)
-      ? 'Camera \u2014 drag' : 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
+      ? 'Camera \u2014 drag / arrows' : 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
   }
 }, function() {
-  if (camJoystickLabel) camJoystickLabel.textContent = 'Camera \u2014 drag';
+  if (camJoystickLabel) camJoystickLabel.textContent = 'Camera \u2014 drag / arrows';
 });
 
-// ---- клавиатура: W/A/S/D и стрелки (диагонали), Q/E — разворот на месте,
-// Пробел — стоп, Esc — аварийный стоп, I/J/K/L — камера ----
+// ---- клавиатура: W/A/S/D — колёса (A/D сами по себе только руль),
+// Q/E — разворот на месте, Пробел — стоп, Esc — аварийный стоп,
+// стрелки и I/J/K/L — камера (v1.6.0: стрелки отданы камере) ----
 var heldKeys = {};
 function typingTarget(e) {
   var t = e.target && e.target.tagName;
@@ -874,11 +876,17 @@ function typingTarget(e) {
 function applyKeyDir() {
   var dir = PanelCore.combineKeys(heldKeys);
   if (joystickLabel && !(wheelsStick && wheelsStick.active())) {
-    joystickLabel.textContent = dir === 'stop' ? 'Wheels \u2014 WASD / arrows' : (dirLabels[dir] || dir);
+    joystickLabel.textContent = dir === 'stop' ? 'Wheels \u2014 WASD / joystick' : (dirLabels[dir] || dir);
   }
   sendMoveDir(dir, false);
 }
-var camKeys = { 'i': [0, -5], 'k': [0, 5], 'j': [-5, 0], 'l': [5, 0] };
+// Камера: стрелки и I/J/K/L, шаг 5° за нажатие
+// (v1.6.0: стрелки → камера, раньше они вели колёса вместе с WASD)
+var camKeys = {
+  'i': [0, -5], 'k': [0, 5], 'j': [-5, 0], 'l': [5, 0],
+  'ArrowUp': [0, -5], 'ArrowDown': [0, 5],
+  'ArrowLeft': [-5, 0], 'ArrowRight': [5, 0]
+};
 document.addEventListener('keydown', function(e) {
   if (typingTarget(e) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === 'Escape') { emergencyStop(); e.preventDefault(); return; }

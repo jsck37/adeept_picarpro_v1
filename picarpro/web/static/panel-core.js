@@ -19,24 +19,27 @@
   }
 
   // Направление по вектору смещения джойстика (dx,dy — пиксели, y вниз).
+  // Крайние лево/право — тоже steer_* (руль без движения), как A/D.
   function vectorToDir(dx, dy, deadzone) {
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < (deadzone === undefined ? 10 : deadzone)) return 'stop';
     var a = Math.atan2(-dy, dx) * 180 / Math.PI;
-    if (a > -22.5 && a <= 22.5) return 'right';
+    if (a > -22.5 && a <= 22.5) return 'steer_right';
     if (a > 22.5 && a <= 67.5) return 'forward_right';
     if (a > 67.5 && a <= 112.5) return 'forward';
     if (a > 112.5 && a <= 157.5) return 'forward_left';
-    if (a > 157.5 || a <= -157.5) return 'left';
+    if (a > 157.5 || a <= -157.5) return 'steer_left';
     if (a > -157.5 && a <= -112.5) return 'backward_left';
     if (a > -112.5 && a <= -67.5) return 'backward';
     return 'backward_right';
   }
 
-  // Клавиши -> логические кнопки движения.
+  // Клавиши -> логические кнопки движения (v1.6.0).
+  // WASD — колёса (модель «как у автомобиля»: A/D сами по себе только
+  // поворачивают руль, машина едет только от W/S). Стрелки отданы камере
+  // (см. app.js camKeys) — раньше и WASD, и стрелки вели колёса.
   var KEY_ACTIONS = {
-    'w': 'up', 'ArrowUp': 'up', 's': 'down', 'ArrowDown': 'down',
-    'a': 'left', 'ArrowLeft': 'left', 'd': 'right', 'ArrowRight': 'right',
+    'w': 'up', 's': 'down', 'a': 'left', 'd': 'right',
     'q': 'spin_left', 'e': 'spin_right'
   };
 
@@ -48,6 +51,8 @@
   // Набор зажатых логических кнопок -> команда движения.
   // Раньше отпускание ЛЮБОЙ клавиши посылало stop, даже если другая ещё
   // зажата, а W+D не давало диагональ.
+  // v1.6.0: A/D без W/S -> steer_left/steer_right (руль без движения),
+  // а не дуга вперёд.
   function combineKeys(held) {
     var up = !!held.up, down = !!held.down;
     if (up && down) { up = false; down = false; }
@@ -59,8 +64,8 @@
       if (right) return v + '_right';
       return v;
     }
-    if (left) return 'left';
-    if (right) return 'right';
+    if (left) return 'steer_left';
+    if (right) return 'steer_right';
     if (held.spin_left && !held.spin_right) return 'spin_left';
     if (held.spin_right && !held.spin_left) return 'spin_right';
     return 'stop';

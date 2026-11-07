@@ -199,7 +199,7 @@ class TestHotspotScript:
         (tmp_path / 'sys' / 'wlan0').mkdir(parents=True, exist_ok=True)
         body = body.replace('/sys/class/net/$DEV', str(tmp_path / 'sys') + '/$DEV')
         conf = tmp_path / 'hotspot.conf'
-        conf.write_text('HOTSPOT_SSID="Bot"\nHOTSPOT_PASS="12345678"\nHOTSPOT_CHANNEL="auto"\n'
+        conf.write_text('HOTSPOT_SSID="Bot"\nHOTSPOT_PASS="0123456789"\nHOTSPOT_CHANNEL="auto"\n'
                         'HOTSPOT_IP="10.42.0.1"\nHOTSPOT_BAND="a"\n')
         run_dir = tmp_path / 'run'
         run_dir.mkdir()

@@ -462,7 +462,7 @@ def stage_6_wifi_hotspot(debian_ver):
         run_cmd("apt-get install -y --no-install-recommends network-manager", critical=False)
 
     # --- настройки: config.py -> существующий conf -> запрос -------------
-    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "12345678", "auto", "10.42.0.1"
+    def_ssid, def_pass, def_ch, def_ip = "Adeept_Robot", "0123456789", "auto", "10.42.0.1"
     def_band = "g"
     try:
         sys.path.insert(0, thisPath)

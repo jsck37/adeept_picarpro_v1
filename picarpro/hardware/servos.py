@@ -4,6 +4,7 @@ from config import (
     I2C_BUS, PCA9685_SERVO_ADDR, PCA9685_SERVO_FREQ,
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
     SERVO_INIT_ANGLES, SERVO_LIMITS, SERVO_MOVE_ON_BOOT,
+    SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
 )
 
@@ -182,8 +183,13 @@ class ServoController:
                         actuation_range=actuation_range)
                     init_angle = SERVO_INIT_ANGLES.get(i)
                     if init_angle is None:
-                        init_angle = CRANE_ARM_OPEN if i == 6 else (
-                            CRANE_GRIP_HIGH if i == 5 else SERVO_INIT_ANGLE)
+                        # каналы клешни — из config (v1.6.0: захват на 5,
+                        # наклон на 4); раньше каналы были захардкожены
+                        init_angle = (CRANE_ARM_OPEN
+                                      if i == SERVO_CRANE_ARM else
+                                      (CRANE_GRIP_HIGH
+                                       if i == SERVO_CRANE_GRIP else
+                                       SERVO_INIT_ANGLE))
                     init_angle = self._clamp(i, init_angle)
                     self._init_angles[i] = init_angle
                     if SERVO_MOVE_ON_BOOT:

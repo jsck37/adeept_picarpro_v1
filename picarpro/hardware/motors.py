@@ -6,6 +6,7 @@ from config import (
     MOTOR_PWM_FREQ, DEFAULT_SPEED,
     TURN_RADIUS_MIN, TURN_RADIUS_MAX,
     MOTOR_MAX_SPEED_DEFAULT, MOTOR_PWM_BACKEND,
+    MOTOR_INVERT_RIGHT, MOTOR_INVERT_LEFT,
 )
 from picarpro.hardware.pwm import make_pwm
 
@@ -18,7 +19,8 @@ except ImportError:
 
 
 class MotorController:
-    """Два борта L298N: A = правый, B = левый.
+    """Два борта L298N: A = правый, B = левый (семантика оригинальной
+    прошивки Adeept: motor_right = Motor A, motor_left = Motor B).
 
     Все режимы движения (move / move_differential / spin) сходятся в одну
     точку ``_apply`` — раньше логика выставления пинов и скважности была
@@ -57,9 +59,13 @@ class MotorController:
 
     # ---- низкий уровень ------------------------------------------------
     @staticmethod
-    def _set_side(in1, in2, pwm, power):
-        """power: знаковая доля мощности -1..1 (знак = направление)."""
-        forward = power >= 0
+    def _set_side(in1, in2, pwm, power, invert=False):
+        """power: знаковая доля мощности -1..1 (знак = направление).
+
+        IN1 = прямой ход, IN2 = назад (пины сверены с оригиналом Adeept,
+        v1.6.0). invert — для сборок с перепутанными проводами мотора.
+        """
+        forward = (power >= 0) != bool(invert)
         GPIO.output(in1, GPIO.HIGH if forward else GPIO.LOW)
         GPIO.output(in2, GPIO.LOW if forward else GPIO.HIGH)
         pwm.ChangeDutyCycle(max(0.0, min(100.0, abs(power) * 100.0)))
@@ -67,8 +73,10 @@ class MotorController:
     def _apply(self, right, left):
         """Единая точка записи в железо. right/left — знаковые доли -1..1."""
         with self._lock:
-            self._set_side(MOTOR_A_IN1, MOTOR_A_IN2, self._pwm_a, right)
-            self._set_side(MOTOR_B_IN1, MOTOR_B_IN2, self._pwm_b, left)
+            self._set_side(MOTOR_A_IN1, MOTOR_A_IN2, self._pwm_a, right,
+                           MOTOR_INVERT_RIGHT)
+            self._set_side(MOTOR_B_IN1, MOTOR_B_IN2, self._pwm_b, left,
+                           MOTOR_INVERT_LEFT)
             self._moving = bool(right or left)
 
     def _clamp_speed(self, speed):

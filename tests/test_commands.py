@@ -122,18 +122,20 @@ class TestCrane:
 
     def test_grip_positions(self, state):
         # v1.3.0: grip 100..180 (углы в механический стоп больше не проходят)
+        from config import SERVO_CRANE_GRIP
         for act, angle in (('grip_low', 100), ('grip_mid', 135),
                            ('grip_high', 180)):
             r = call(state, 'crane', {'action': act})
             assert r['ok'] is True
-            assert state.servos.get_angle(5) == angle
+            assert state.servos.get_angle(SERVO_CRANE_GRIP) == angle
         assert state.crane_grip_position == 'high'
 
     def test_grip_custom_angle(self, state):
+        from config import SERVO_CRANE_GRIP
         r = call(state, 'crane', {'action': 'grip_angle', 'angle': 60})
         assert r['ok'] is True
-        # 60 ниже лимита серво 5 (min 100) — зажимается в 100
-        assert state.servos.get_angle(5) == 100
+        # 60 ниже лимита канала клешни (min 100) — зажимается в 100
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 100
 
 
 class TestSwitchesHeadlightBlinker:

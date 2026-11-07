@@ -16,6 +16,7 @@ from picarpro.logger import logger
 from config import (
     ADS7830_ADDR, ADS7830_CHANNEL, BATTERY_VREF, BATTERY_MIN_V,
     BATTERY_MEDIAN_WINDOW, I2C_BUS,
+    BATTERY_ALARM_PERSIST_S, BATTERY_LOW_CLEAR_V,
 )
 
 # ADS7830 команды: MUX-канал + single-ended режим (SD | C[2:0])
@@ -132,6 +133,16 @@ class VoltageMonitor:
             }
 
     def _loop(self):
+        # v1.6.0: тревога только при УСТОЙЧИВО низком напряжении.
+        # Раньше биппер срабатывал на переход в «низкое» состояние: при езде
+        # батарея проседает от пускового тока моторов, медиана на несколько
+        # выборок падала ниже порога — биппер пищал в начале каждой поездки,
+        # хотя батарея в порядке. Теперь: 1) условие должно непрерывно
+        # держаться BATTERY_ALARM_PERSIST_S; 2) гистерезис — «низкое»
+        # снимается только выше BATTERY_LOW_CLEAR_V (иначе хлопки вокруг
+        # порога дают повторные тревоги). Медиана сглаживает короткие
+        # провалы, гистерезис + персистентность — поездки на севшей батарее.
+        low_since = None
         while self._running:
             v = self._reader.read_voltage()
             alarm = False
@@ -146,17 +157,25 @@ class VoltageMonitor:
                                  (median_v - BATTERY_MIN_V)
                                  / max(0.1, BATTERY_VREF - BATTERY_MIN_V) * 100.0))
                     self._battery_percent = round(percent)
-                    low = median_v < BATTERY_MIN_V
-                    alarm = low and not self._low_battery
-                    if not alarm:
-                        self._low_battery = low
+                    if self._low_battery:
+                        # гистерезис: снимаем только выше порога восстановления
+                        if median_v >= BATTERY_LOW_CLEAR_V:
+                            self._low_battery = False
+                            low_since = None
+                    elif median_v < BATTERY_MIN_V:
+                        now = time.monotonic()
+                        low_since = low_since or now
+                        if now - low_since >= BATTERY_ALARM_PERSIST_S:
+                            alarm = True
+                    else:
+                        low_since = None
                 if alarm:
-                    # колбэк (зуммер/LED) — вне блокировки: get_status()
-                    # из телеметрии не должен ждать его завершения; флаг low
-                    # выставляем уже после тревоги (low => тревога была подана)
+                    # колбэк (зуммер/LED) — вне блокировки; флаг low
+                    # выставляем уже после тревоги (low => тревога была)
                     self._trigger_alarm()
                     with self._lock:
                         self._low_battery = True
+                    low_since = None
             time.sleep(1.0)
 
     def _trigger_alarm(self):

@@ -60,12 +60,13 @@ class TestServoLimitsViaCommands:
         assert state.servos.get_angle(2) == 80
         call(state, 'servo', {'id': 2, 'angle': 200})
         assert state.servos.get_angle(2) == 170
+        from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
         call(state, 'crane', {'action': 'grip_high'})
-        assert state.servos.get_angle(5) == 180
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 180
         call(state, 'crane', {'action': 'grip_low'})
-        assert state.servos.get_angle(5) == 100
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 100
         call(state, 'crane', {'action': 'arm_open'})
-        assert state.servos.get_angle(6) == 100
+        assert state.servos.get_angle(SERVO_CRANE_ARM) == 100
 
 
 class TestNavTcpProtocol:

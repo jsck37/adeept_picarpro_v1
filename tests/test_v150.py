@@ -89,6 +89,37 @@ class TestDrive:
         call(clean_state, 'move', {'dir': 'stop'})
         assert not clean_state.motors.is_moving
 
+    def test_steer_only_does_not_move(self, clean_state):
+        """v1.6.0: A/D (steer_left/steer_right) — только рулевое серво,
+        моторы стоят (раньше 'left' включал дугу вперёд)."""
+        from config import SERVO_STEERING, STEER_MAP
+        r = call(clean_state, 'move', {'dir': 'steer_left'})
+        assert r['ok'] is True
+        assert not clean_state.motors.is_moving
+        assert clean_state.servos.get_angle(SERVO_STEERING) == STEER_MAP['left']
+        r = call(clean_state, 'move', {'dir': 'steer_right'})
+        assert r['ok'] is True
+        assert not clean_state.motors.is_moving
+        assert clean_state.servos.get_angle(SERVO_STEERING) == STEER_MAP['right']
+
+    def test_steer_stops_running_motors(self, clean_state):
+        """Едем вперёд -> пришли steer_left: моторы остановлены, руль свёрнут."""
+        from config import SERVO_STEERING, STEER_MAP
+        call(clean_state, 'move', {'dir': 'forward'})
+        assert clean_state.motors.is_moving
+        call(clean_state, 'move', {'dir': 'steer_left'})
+        assert not clean_state.motors.is_moving
+        assert clean_state.servos.get_angle(SERVO_STEERING) == STEER_MAP['left']
+
+    def test_arc_turns_still_move(self, clean_state):
+        """Дуги для автономных/TCP не тронуты: left/right = движение+руль."""
+        call(clean_state, 'move', {'dir': 'left'})
+        assert clean_state.motors.is_moving
+        call(clean_state, 'move', {'dir': 'stop'})
+        call(clean_state, 'move', {'dir': 'forward_left'})
+        assert clean_state.motors.is_moving
+        call(clean_state, 'move', {'dir': 'stop'})
+
 
 # ---------------------------------------------------------------------------
 # web_active: захват руля истекает
