@@ -132,11 +132,17 @@
           <div id="auto-controls">
             <div class="btn-group" id="auto-group">
               <button class="gbtn" data-auto="radarScan">Radar</button>
-              <button class="gbtn" data-auto="automatic">Drive</button>
               <button class="gbtn" data-auto="trackLine">IR Line</button>
-              <button class="gbtn" data-auto="keepDistance">Distance</button>
               <button class="gbtn" data-auto="watchDog">Watchdog</button>
               <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
+            </div>
+            <div id="radar-box" style="display:none;margin-top:8px">
+              <canvas id="radar-canvas" width="280" height="190"
+                      style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
+              <div style="margin-top:4px;font-size:.7rem;color:#80868b;line-height:1.45">
+                Radar: сканирует сервоприводом ULTRASONIC_SCAN_SERVO (по умолчанию рулевое;
+                если датчик стоит на панораме камеры — укажите SERVO_CAM_PAN в config.py).
+              </div>
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
               <button class="gbtn" id="steady-toggle">Steady Cam</button>
@@ -294,7 +300,7 @@
                 <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
                 <button class="gbtn crane-grip-btn active" id="crane-grip-high" data-action="grip_high">High</button>
               </div>
-              <div style="margin-top:8px;font-size:.7rem;color:#80868b;line-height:1.45">Каналы клешни этой сборки: канал 4 — наклон (SERVO_CRANE_GRIP, ползунок «Crane Tilt»), канал 6 — захват (SERVO_CRANE_ARM, ползунок «Crane Grab»); канал 5 (кисть) не подключён. Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
+              <div style="margin-top:8px;font-size:.7rem;color:#80868b;line-height:1.45">Каналы клешни этой сборки (v1.6.2, подтверждено с железа): канал 5 — наклон (SERVO_CRANE_GRIP, ползунок «Crane Tilt»), канал 6 — захват (SERVO_CRANE_ARM, ползунок «Crane Grab»); канал 4 (локоть) — резерв, не подключён. Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
             </div>
           </div>
 

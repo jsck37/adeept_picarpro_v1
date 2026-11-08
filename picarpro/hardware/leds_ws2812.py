@@ -1,6 +1,33 @@
 import os, threading, time
 from picarpro.logger import logger
-from config import LED_COUNT, LED_BRIGHTNESS, LED_ANIM_FPS
+from config import (LED_COUNT, LED_BRIGHTNESS, LED_ANIM_FPS,
+                    LED_BACKEND, LED_PWM_PIN, LED_PWM_DMA)
+
+# v1.6.2 — НАЙДЕН КОРЕНЬ «неработающей ленты». Лента подключена к GPIO12
+# (PWM0, физ. пин 32) — так в оригинальной прошивке Adeept
+# (Server/RobotLight.py: LED_PIN=12, LED_DMA=10, LED_CHANNEL=0 через
+# rpi_ws281x) и в docs/components/ws2812.json. Все версии мода
+# v1.0..v1.6.1 выводили сигнал в SPI MOSI (GPIO10, пин 19), куда лента НЕ
+# подключена, поэтому она не зажигалась ни разу при любых таймингах
+# SPI-кодирования.
+#
+# Основной бэкенд теперь rpi_ws281x (PWM/DMA на GPIO12, тайминги выдаёт
+# сам драйвер — ровно по спецификации WS2812). SPI-бэкенд оставлен как
+# фолбэк для сборок с DIN на пине 19 (LED_BACKEND='spi'), его тайминги
+# тоже исправлены: классическая схема «3 SPI-бита на бит WS2812» при
+# ЗАПРОСЕ 2.4 МГц. bcm2835 округляет делитель до степени двойки, факт.
+# частота получается 1.95–3.9 МГц — в обоих случаях тайминги в окне
+# декодирования: T1H = 512–1024 нс, T0H = 256–512 нс, период бита
+# 768–1536 нс (спека: T1H 800±150, T0H 400±150, период 1250±600 нс).
+# Раньше (v1.6.1) запрашивали 8 МГц => факт. 7.8125 МГц, T1H = 256 нс —
+# чип декодировал ВСЕ биты как «0», лента оставалась чёрной.
+try:
+    from rpi_ws281x import PixelStrip as _PixelStrip, Color as _WSColor
+    _HAS_WS281X = True
+except ImportError:
+    _PixelStrip = None
+    _WSColor = None
+    _HAS_WS281X = False
 
 try:
     import spidev
@@ -9,29 +36,14 @@ except ImportError:
     _HAS_SPI = False
     spidev = None
 
-# v1.6.1 — ПОЧИНЕНО кодирование: классическая схема «3 SPI-бита на бит
-# WS2812» при запросе 8 МГц. На bcm2835 запрошенная частота делится на
-# степень двойки С ОКРУГЛЕНИЕМ ВНИЗ: 250 МГц / 32 = ровно 7.8125 МГц.
-# Тайминги получившегося сигнала (SPI-бит = 128 нс):
-#   '1' = 0b110  -> T1H = 256 нс, '0' = 0b100 -> T0H = 128 нс,
-#   период бита 384 нс — стандартная проверенная сообществом схема для
-#   WS2812 на Pi (та же, что в rpi_ws281x SPI-fallback и множестве
-#   гайдов).
-# Раньше (v1.0..v1.6.0) было 4 бита на бит при запросе 6.4 МГц: делитель
-# округлялся вниз до 32 => фактические 7.8125 МГц, и T0H становился
-# 256 нс — чип WS2812 декодировал «ноль» как «единицу» (порог ~150-250 нс),
-# лента показывала белый мусор вместо цветов. Старая прошивка jsck37
-# использовала 3 бита при запросе 4 МГц (факт. те же 7.8125 МГц) —
-# T1H = 256 нс, T0H = 128 нс, но кодировка гоняла по 8 SPI-бит на бит
-# (0x06/0x04), т.е. период бита был 1024 нс.
-_BIT0 = 0b100   # высокий 1 SPI-бит (128 нс) + два низких
-_BIT1 = 0b110   # два высоких (256 нс) + один низкий
-_LATCH_BYTES = 90   # 720 SPI-бит x 128 нс = 92 мкс тишины (>= 50 мкс latch)
+_BIT0 = 0b100   # высокий 1 SPI-бит + два низких
+_BIT1 = 0b110   # два высоких + один низкий
+_LATCH_BYTES = 90   # 720 SPI-бит x ~128-512 нс — тишина >= 50 мкс latch
 
-# Троттлинг диагностического лога при недоступном SPI (v1.4.0): ретраи
-# идут каждые HW_RETRY_INTERVAL_S, подсказка — раз в LED_DIAG_INTERVAL_S.
+# Троттлинг диагностического лога при недоступном выводе (v1.4.0)
 LED_DIAG_INTERVAL_S = 300.0
 _SPI_DEV = '/dev/spidev0.0'
+_WS2812_FREQ_HZ = 800_000   # как в RobotLight.py (LED_FREQ_HZ)
 
 
 def _byte_to_spi(byte):
@@ -54,31 +66,43 @@ class LEDController:
 
     def __init__(self):
         self._spi = None
+        self._strip = None      # rpi_ws281x PixelStrip (бэкенд pwm)
+        self._backend = None    # 'pwm' | 'spi'
         self._mode = 'off'
         self._color = (255, 0, 0)
         self._flag = threading.Event()
         self._wake = threading.Event()      # прерывает паузы анимации
-        self._show_lock = threading.Lock()  # SPI не терпит параллельных записей
+        self._show_lock = threading.Lock()  # вывод не терпит параллельных записей
         self._gen = 0                       # поколение анимации (смена режима)
         self._power_scale = 1.0             # режим экономии: множитель яркости
         self._running = True
         self._thread = None
         self._pixels = [(0, 0, 0)] * LED_COUNT
         self._initialized = False
-        if not _HAS_SPI:
-            if not LEDController._throttle():
-                logger.warning('[LEDs] spidev not available')
+        mode = LED_BACKEND if LED_BACKEND in ('pwm', 'spi') else 'auto'
+        if mode in ('pwm', 'auto'):
+            if _HAS_WS281X:
+                try:
+                    self._open_pwm()
+                    self._backend = 'pwm'
+                except Exception as e:
+                    self._log_diag(e, backend='pwm')
+            else:
+                self._log_diag(None, backend='pwm')   # пакет не установлен
+        if self._backend is None and mode in ('spi', 'auto'):
+            try:
+                if self._open_spi():
+                    self._backend = 'spi'
+            except Exception as e:
+                self._log_diag(e, backend='spi')
+        if self._backend is None:
             return
-        try:
-            if not self._open_spi():
-                self._log_diag()
-                return
-            self._initialized = True
-            self._thread = threading.Thread(target=self._run, daemon=True)
-            self._thread.start()
-            logger.info(f'[LEDs] OK — {LED_COUNT} WS2812 via SPI0')
-        except Exception as e:
-            self._log_diag(e)
+        self._initialized = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info(f'[LEDs] OK — {LED_COUNT} WS2812 via {self._backend}'
+                    + (' (GPIO12, как в оригинале Adeept)'
+                       if self._backend == 'pwm' else ' (GPIO10/MOSI)'))
 
     @classmethod
     def _throttle(cls):
@@ -90,29 +114,53 @@ class LEDController:
         return False
 
     @classmethod
-    def _log_diag(cls, err=None):
+    def _log_diag(cls, err=None, backend='spi'):
         """Диагностика неработающей WS2812-ленты — не чаще
-        LED_DIAG_INTERVAL_S (v1.4.0). Лента сидит на SPI0 (GPIO10/MOSI,
-        физ. пин 19); без dtparam=spi=on устройства /dev/spidev0.0 нет."""
+        LED_DIAG_INTERVAL_S (v1.4.0)."""
         if cls._throttle():
             return
         if err is not None:
-            logger.error(f'[LEDs] init failed: {err}')
+            logger.error(f'[LEDs] init failed ({backend}): {err}')
         else:
-            logger.error('[LEDs] SPI0 open failed')
+            logger.error(f'[LEDs] {backend} backend unavailable')
+        if backend == 'pwm':
+            if not _HAS_WS281X:
+                logger.error(
+                    '[LEDs] подсказки: пакет rpi_ws281x не установлен — '
+                    'лейта сидит на GPIO12 (физ. пин 32), как в оригинале '
+                    'Adeept. Установите: sudo pip3 install rpi-ws281x '
+                    '(или запустите setup.py заново) и перезапустите '
+                    'сервис; модуль подхватится автоматически '
+                    '(авто-ретраи v1.4.0).')
+            else:
+                logger.error(
+                    '[LEDs] подсказки: rpi_ws281x требует root (DMA/PWM0 '
+                    'GPIO12) и свободного PWM-канала — не запускайте '
+                    'аналоговый звук (3.5 мм) одновременно с лентой.')
+            return
         if not os.path.exists(_SPI_DEV):
             logger.error(
                 '[LEDs] подсказки: /dev/spidev0.0 отсутствует — включите SPI '
                 '(raspi-config Interface Options -> SPI, или строка '
                 'dtparam=spi=on в /boot/firmware/config.txt) и перезагрузите; '
-                'установщик v1.4.0 делает это сам. DIN ленты — GPIO10 (пин 19). '
+                'установщик v1.4.0 делает это сам. Фолбэк-проводка ленты — '
+                'GPIO10/MOSI (пин 19); штатная проводка этой сборки — '
+                'GPIO12 (пин 32) через rpi_ws281x (LED_BACKEND="pwm"). '
                 'Модуль подхватится автоматически (авто-ретраи v1.4.0) после '
                 'появления SPI.')
         else:
             logger.error(
                 '[LEDs] подсказки: /dev/spidev0.0 есть — проверьте провод DIN '
-                '(GPIO10/MOSI, физ. пин 19) и питание 5V ленты; при просадке '
-                'питания лента гаснет (см. комментарий LED_COUNT в config.py).')
+                '(GPIO10/MOSI, физ. пин 19; штатная проводка — GPIO12/пин 32) '
+                'и питание 5V ленты; при просадке питания лента гаснет '
+                '(см. комментарий LED_COUNT в config.py).')
+
+    def _open_pwm(self):
+        """Открыть ленту через rpi_ws281x (PWM0/DMA, GPIO12) — как в
+        оригинальной прошивке Adeept RobotLight.py."""
+        self._strip = _PixelStrip(LED_COUNT, LED_PWM_PIN, _WS2812_FREQ_HZ,
+                                  LED_PWM_DMA, False, 255, 0)
+        self._strip.begin()
 
     def _open_spi(self):
         """Открыть SPI (с закрытием предыдущего дескриптора при retry)."""
@@ -124,9 +172,10 @@ class LEDController:
                     pass
             self._spi = spidev.SpiDev()
             self._spi.open(0, 0)
-            # 8 МГц -> на bcm2835 делитель 32 => ровно 7.8125 МГц:
-            # см. расчёт таймингов WS2812 в шапке файла (v1.6.1).
-            self._spi.max_speed_hz = 8_000_000
+            # 2.4 МГц запрос => факт. 1.95-3.9 МГц (округление делителя
+            # bcm2835): тайминги WS2812 в окне декодирования при любом
+            # варианте округления — см. расчёт в шапке файла (v1.6.2).
+            self._spi.max_speed_hz = 2_400_000
             self._spi.mode = 0b00
             return True
         except Exception:
@@ -143,6 +192,27 @@ class LEDController:
             if gen is not None and gen != self._gen:
                 return
             b = LED_BRIGHTNESS / 255.0 * self._power_scale
+            if self._backend == 'pwm':
+                # rpi_ws281x: Color(Red, Green, Blue) — порядок GRB на ленте
+                # драйвер учитывает сам; ретрай с переоткрытием при сбое
+                try:
+                    for i, (r, g, bl) in enumerate(self._pixels):
+                        self._strip.setPixelColor(
+                            i, _WSColor(int(r * b) & 255, int(g * b) & 255,
+                                        int(bl * b) & 255))
+                    self._strip.show()
+                except Exception:
+                    try:
+                        self._open_pwm()
+                        for i, (r, g, bl) in enumerate(self._pixels):
+                            self._strip.setPixelColor(
+                                i, _WSColor(int(r * b) & 255,
+                                            int(g * b) & 255,
+                                            int(bl * b) & 255))
+                        self._strip.show()
+                    except Exception:
+                        pass
+                return
             parts = []
             for r, g, bl in self._pixels:
                 parts.append(_SPI_TABLE[int(g * b) & 255])
@@ -293,6 +363,11 @@ class LEDController:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self.clear()
+        if self._strip:
+            try:
+                self._strip = None      # rpi_ws281x не требует закрытия
+            except Exception:
+                pass
         if self._spi:
             try:
                 self._spi.close()

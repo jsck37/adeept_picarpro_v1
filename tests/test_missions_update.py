@@ -121,8 +121,8 @@ class TestMissionRun:
         assert wait_for(lambda: mr.get_status()['state'] == 'done', 3)
 
     def test_turn_timed_without_gyro(self, mr, clean_state, monkeypatch):
-        import picarpro.functions.missions as mm
-        monkeypatch.setattr(mm, 'AUTO_SPIN_RATE_DPS', 10000.0)
+        # v1.6.2: разворот — дуга (drive.arc_turn), скорость — AUTO_ARC_RATE_DPS
+        monkeypatch.setattr('picarpro.drive.AUTO_ARC_RATE_DPS', 10000.0)
         clean_state.mpu6050 = None
         mr.start(steps=[{'op': 'turn', 'deg': 90}])
         assert wait_for(lambda: mr.get_status()['state'] == 'done', 3)

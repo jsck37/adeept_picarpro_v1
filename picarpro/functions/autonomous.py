@@ -4,9 +4,10 @@ import time
 from picarpro.logger import logger
 from picarpro.utils.filters import KalmanFilter1D, PID
 from picarpro.utils.heading import HeadingTracker
+from picarpro.drive import arc_turn
 from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
-    LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN,
+    LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN, LINE_ACTIVE_LOW,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION, ARUCO_CAM_FOV_DEG,
     FINDCOLOR_TOLERANCE, FINDCOLOR_SPEED, FINDCOLOR_STEER_RANGE,
@@ -14,7 +15,7 @@ from config import (
     AUTO_MIN_SPEED, AUTO_SPEED_SLEW_PER_S, AUTO_CRUISE_SPEED, AUTO_SLOW_SPEED,
     AUTO_OBSTACLE_STOP_CM, AUTO_OBSTACLE_SLOW_CM, AUTO_EVADE_BACKUP_S,
     AUTO_EVADE_SPIN_SPEED, AUTO_EVADE_SCAN_DEG, AUTO_EVADE_TURN_DEG,
-    AUTO_SPIN_RATE_DPS, AUTO_SPIN_TIMEOUT_S, AUTO_SEARCH_TIMEOUT_S,
+    AUTO_SEARCH_TIMEOUT_S,
     KEEP_DISTANCE_TARGET_CM, KEEP_DISTANCE_TOLERANCE_CM,
     KEEP_DISTANCE_MAX_SPEED, KEEP_DISTANCE_KP,
 )
@@ -90,6 +91,7 @@ class AutonomousController:
         self._ctx = None
         self._current_mode = 'none'
         self._radar_data = []
+        self._radar_points = {}
         self._speed_now = 0.0
         self._speed_ts = time.monotonic()
         self._ir_left_pin = LINE_LEFT_PIN
@@ -243,25 +245,40 @@ class AutonomousController:
         logger.info('[Auto] shutdown')
 
     # ---- датчики ----------------------------------------------------------------
+    def _ir_line(self, pin):
+        """Семантика «линия обнаружена» для одного датчика (v1.6.2).
+
+        Раньше get_ir_values отдавал СЫРОЙ GPIO (1 над белым полом), а UI
+        трактовал 1 как LINE — виджет «IR Line Sensors» показывал LINE на
+        голом полу («инвертированы»). Теперь оба читателя (_read_ir и
+        get_ir_values) возвращают одинаковую семантику: True = линия.
+        Полярность модуля — LINE_ACTIVE_LOW в config.py.
+        """
+        if not self._ir_available:
+            return False
+        try:
+            raw = GPIO.input(pin)
+        except Exception:
+            return False
+        return (raw == 0) if LINE_ACTIVE_LOW else (raw == 1)
+
     def _read_ir(self):
         if not self._ir_available:
             return False, False, False
-        try:
-            return (GPIO.input(self._ir_left_pin) == 0,
-                    GPIO.input(self._ir_mid_pin) == 0,
-                    GPIO.input(self._ir_right_pin) == 0)
-        except Exception:
-            return False, False, False
+        return (self._ir_line(self._ir_left_pin),
+                self._ir_line(self._ir_mid_pin),
+                self._ir_line(self._ir_right_pin))
 
     def get_ir_values(self):
+        """(left, middle, right) — True = датчик НАД ЛИНИЕЙ (v1.6.2).
+
+        Раньше возвращал сырые уровни GPIO, из-за чего UI и логика
+        следования трактовали датчики в противоположных конвенциях.
+        None* — модуль недоступен.
+        """
         if not self._ir_available:
             return None, None, None
-        try:
-            return (GPIO.input(self._ir_left_pin),
-                    GPIO.input(self._ir_mid_pin),
-                    GPIO.input(self._ir_right_pin))
-        except Exception:
-            return None, None, None
+        return self._read_ir()
 
     def _safe_distance(self):
         """Дистанция для принятия решений, см, или None (нет данных).
@@ -326,49 +343,61 @@ class AutonomousController:
 
     # ---- разворот на угол -----------------------------------------------------------
     def _turn(self, ctx, degrees, use_gyro):
-        """Развернуться на месте на degrees (>0 вправо, <0 влево)."""
+        """Развернуться на degrees (>0 вправо, <0 влево) — ДУГОЙ (v1.6.2).
+
+        Раньше — spin бортами в противоположные стороны: на Аккерман-
+        шасси машина не вращалась (передние колёса скребут), и объезд
+        препятствий/миссии «не могли повернуться». Теперь общий с
+        миссиями дуговый разворот (drive.arc_turn): руль до упора +
+        ход вперёд, угол закрывается по гироскопу или по времени."""
         need = abs(degrees)
         if need < 3 or not ctx.alive:
             return
-        side = 'right' if degrees > 0 else 'left'
         self._halt(ctx)
-        self._spin(ctx, AUTO_EVADE_SPIN_SPEED, side)
-        if use_gyro:
-            self._heading.reset_angle()
-            lead = AUTO_SPIN_RATE_DPS * 0.08    # упреждение на инерцию/задержку
-            t0 = time.monotonic()
-            while ctx.alive:
-                if self._heading.update() >= need - lead:
-                    break
-                if time.monotonic() - t0 > AUTO_SPIN_TIMEOUT_S:
-                    logger.warning('[Auto] gyro turn timeout')
-                    break
-                ctx.wait(0.01)
-        else:
-            ctx.wait(need / AUTO_SPIN_RATE_DPS)
-        self._halt(ctx)
-        ctx.wait(0.12)                          # дать машине успокоиться
+        heading = self._heading if use_gyro else None
+        arc_turn(self.motors, self.servos, degrees,
+                 alive=ctx.alive, wait=ctx.wait, heading=heading)
 
     def _look(self):
         d = self.ultrasonic.measure_now()
         return _MAX_RANGE_CM if d is None else d
 
     # ---- радар ------------------------------------------------------------------------
+    # v1.6.2: скан НЕ останавливается после одного прохода — качает датчик
+    # туда-сюда, пока режим не остановят, и обновляет точки по углам.
+    # Точки живут в _radar_points (угол -> дистанция), в статус уходит
+    # отсортированный список — веб-канва рисует живой радар с точками.
+    RADAR_STEP_DEG = 5
+    RADAR_PAUSE_S = 0.12
+    RADAR_SWEEP_PAUSE_S = 0.3
+
     def _radar_scan(self, ctx):
         if not self._ultra_ok():
             return
-        self._radar_data = []
-        for angle_off in range(-60, 61, 5):
-            if not ctx.alive:
-                break
-            self.servos.move_angle(ULTRASONIC_SCAN_SERVO, angle_off)
-            if ctx.wait(0.12):                  # серво доехало, эхо успокоилось
-                break
-            d = self.ultrasonic.measure_now()
-            if d is None:
-                d = self.ultrasonic.get_last_distance()
-            self._radar_data.append({'angle': angle_off, 'distance': d})
-        self.servos.move_angle(ULTRASONIC_SCAN_SERVO, 0)
+        self._radar_points = {}
+        up = True
+        try:
+            while ctx.alive:
+                rng = range(-60, 61, self.RADAR_STEP_DEG) if up \
+                    else range(60, -61, -self.RADAR_STEP_DEG)
+                up = not up
+                for angle_off in rng:
+                    if not ctx.alive:
+                        break
+                    self.servos.move_angle(ULTRASONIC_SCAN_SERVO, angle_off)
+                    if ctx.wait(self.RADAR_PAUSE_S):   # серво доехало, эхо успокоилось
+                        break
+                    d = self.ultrasonic.measure_now()
+                    if d is None:
+                        d = self.ultrasonic.get_last_distance()
+                    self._radar_points[angle_off] = d
+                    self._radar_data = [
+                        {'angle': a, 'distance': self._radar_points[a]}
+                        for a in sorted(self._radar_points)]
+                if ctx.alive:
+                    ctx.wait(self.RADAR_SWEEP_PAUSE_S)
+        finally:
+            self.servos.move_angle(ULTRASONIC_SCAN_SERVO, 0)
 
     # ---- автоматический объезд препятствий ----------------------------------------------
     def _automatic(self, ctx):

@@ -267,17 +267,34 @@ class TestAutonomousV150:
         assert ctrl._spd(0) == 0
 
     def test_evade_turns_to_freer_side(self, monkeypatch):
+        """v1.6.2: развороты объезда — ДУГИ (Аккерман). Направление «осмотра»
+        видно по вывороту руля: осмотр вправо (30°), осмотр влево (150°),
+        довод до свободной стороны (влево — 150)."""
+        import picarpro.drive as dr
         import picarpro.functions.autonomous as au
         monkeypatch.setattr(au, 'AUTO_EVADE_BACKUP_S', 0.0)
-        monkeypatch.setattr(au, 'AUTO_SPIN_RATE_DPS', 100000.0)  # развороты мгновенны
+        monkeypatch.setattr(dr, 'AUTO_ARC_RATE_DPS', 100000.0)  # дуги мгновенны
+
+        class _RecServos:
+            def __init__(self):
+                self.calls = []
+
+            def set_angle(self, sid, angle):
+                self.calls.append((sid, angle))
+                return True
+
         rec = _RecMotors()
+        rec_servo = _RecServos()
         # справа 30 см, слева 150 см -> уходим влево
-        ctrl = au.AutonomousController(rec, None, _StubUltra([30.0, 150.0]))
+        ctrl = au.AutonomousController(rec, rec_servo, _StubUltra([30.0, 150.0]))
         ctx = au._RunCtx('automatic')
         ctrl._evade(ctx, use_gyro=False)
-        spins = [c[2] for c in rec.calls if c[0] == 'spin']
-        assert spins[0] == 'right' and spins[1] == 'left'
-        assert spins.count('left') >= 2          # осмотр + довод до цели
+        steer = [a for sid, a in rec_servo.calls if sid == 0 and a != 90]
+        assert steer[0] == 30 and steer[1] == 150      # осмотр: вправо, влево
+        assert steer.count(150) >= 2                   # довод в свободную (лево)
+        # дуги — это движение вперёд, а не spin
+        assert any(c[0] == 'move' and c[2] == 'forward' for c in rec.calls)
+        assert not any(c[0] == 'spin' for c in rec.calls)
         ctrl.shutdown()
 
     def test_track_hand_shake_finishes_mode(self, clean_state):

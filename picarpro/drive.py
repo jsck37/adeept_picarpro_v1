@@ -6,7 +6,10 @@ functions/aruco_nav.py, причём с мелкими расхождениям�
 не везде, неизвестные направления в commands.py тихо превращались в поворот
 вправо). Теперь — здесь.
 """
-from config import SERVO_STEERING, STEER_MAP
+import time
+
+from config import (SERVO_STEERING, STEER_MAP, AUTO_TURN_ARC_SPEED,
+                    AUTO_ARC_RATE_DPS, AUTO_SPIN_TIMEOUT_S)
 
 TURN_SHARP = 0.3     # радиус дуги при движении с поворотом
 TURN_NONE = 0.5
@@ -68,3 +71,54 @@ def drive(state, d, speed=None):
         else:
             state.servos.set_angle(SERVO_STEERING, STEER_MAP.get(d, 90))
     return True
+
+
+def arc_turn(motors, servos, deg, alive, wait, heading=None, speed=None):
+    """Разворот на угол deg дугой — руль до упора + ход вперёд (v1.6.2).
+
+    Шасси PiCarPro — Аккерман (рулевое серво, передние управляемые
+    колёса): «танковый» разворот на месте (spin) физически не вращает
+    машину — передние колёса скребут пол, и робот «при разворотах не
+    мог повернуться» (миссии, объезд препятствий). Поэтому разворот
+    делаем как на настоящей машине: выворачиваем руль до упора и едем
+    вперёд, пока не наберём угол.
+
+    deg: >0 — вправо, <0 — влево (величина |deg| — на сколько градусов).
+    alive(): False — внешняя остановка (миссия/режим остановлены).
+    wait(sec): прерываемая пауза (True = прервано).
+    heading: HeadingTracker с уже проведённой калибровкой нуля или None —
+        тогда разворот по времени (AUTO_ARC_RATE_DPS). Для каждого вызова
+        аккумулятор угла обнуляется (heading.begin()).
+    speed: скорость дуги, по умолчанию AUTO_TURN_ARC_SPEED.
+    """
+    need = abs(deg)
+    if need < 3:
+        return
+    side = 'right' if deg > 0 else 'left'
+    speed = int(max(10, min(100, AUTO_TURN_ARC_SPEED if speed is None
+                            else speed)))
+    try:
+        if servos:
+            # руль до упора (STEER_MAP['left']=150 / ['right']=30 —
+            # крайние значения внутри SERVO_LIMITS[0])
+            servos.set_angle(SERVO_STEERING, STEER_MAP[side])
+        if motors:
+            motors.move(speed, 'forward', 'no', TURN_NONE)
+        if heading is not None and heading.available:
+            heading.begin()          # обнулить аккумулятор угла
+            lead = AUTO_ARC_RATE_DPS * 0.2    # упреждение на инерцию
+            t0 = time.monotonic()
+            while alive():
+                if heading.update() >= need - lead:
+                    break
+                if time.monotonic() - t0 > AUTO_SPIN_TIMEOUT_S:
+                    break            # предохранитель: не крутимся вечно
+                wait(0.01)
+        else:
+            wait(need / AUTO_ARC_RATE_DPS)
+    finally:
+        if motors:
+            motors.stop()
+        if servos:
+            servos.set_angle(SERVO_STEERING, 90)   # руль прямо
+    wait(0.12)                     # дать машине успокоиться

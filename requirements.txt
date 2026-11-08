@@ -18,7 +18,10 @@ RPi.GPIO
 # OLED Display (SSD1306)
 luma.oled
 
-# WS2812 LED Strip (SPI)
+# WS2812 LED Strip
+# v1.6.2: основной бэкенд ленты — rpi_ws281x (PWM0/DMA, GPIO12 — проводка
+# оригинала Adeept); spidev остаётся SPI-фолбэком для проводки на GPIO10
+rpi-ws281x
 spidev
 
 # Vision / Video

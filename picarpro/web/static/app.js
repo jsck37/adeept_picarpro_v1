@@ -28,10 +28,10 @@ var servoDefs = [
   { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
   { id: 2, name: 'Cam Tilt', min: 80, max: 170, init: 90 },
   { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
-  // v1.6.1: наклон клешни — канал 4 (полный диапазон 0..180, как в
-  // v1.5.x), захват — канал 6, канал 5 (кисть) на этой сборке пуст.
-  { id: 4, name: 'Crane Tilt', min: 0,   max: 180, init: 180 },
-  { id: 5, name: 'Servo 5',    min: 0,   max: 180, init: 90 },
+  // v1.6.2 (подтверждено с железа): наклон клешни — канал 5, захват —
+  // канал 6, канал 4 (локоть) — резерв, не подключён.
+  { id: 4, name: 'Servo 4',    min: 0,   max: 180, init: 90 },
+  { id: 5, name: 'Crane Tilt', min: 0,   max: 180, init: 180 },
   { id: 6, name: 'Crane Grab', min: 100, max: 180, init: 100 },
 ];
 // Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
@@ -402,6 +402,53 @@ function fetchConsoleHistory() {
 }
 
 var firstStatus = true;
+// v1.6.2: радар как в оригинальном приложении Adeept — сектор скана с
+// точками препятствий; точки приходят в статусе (radar_data)
+var RADAR_MAX_CM = 200;   // ULTRASONIC_MAX_DISTANCE (м) * 100
+var RADAR_SECTOR_DEG = 60;   // сектор скана: ±60° (см. _radar_scan)
+var currentAutoMode = 'none';
+function drawRadar(points) {
+  var cv = document.getElementById('radar-canvas');
+  if (!cv || !cv.getContext) return;
+  var ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  var cx = W / 2, cy = H - 20, R = H - 40;
+  var sector = RADAR_SECTOR_DEG * Math.PI / 180;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1a10';
+  ctx.fillRect(0, 0, W, H);
+  // дистанционные дуги 50/100/150/200 см
+  ctx.strokeStyle = 'rgba(80,200,120,0.35)';
+  ctx.lineWidth = 1;
+  [50, 100, 150, 200].forEach(function(cm) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * cm / RADAR_MAX_CM, -Math.PI / 2 - sector, -Math.PI / 2 + sector);
+    ctx.stroke();
+  });
+  // границы сектора и центральный луч
+  [-1, 0, 1].forEach(function(k) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(k * sector) * R, cy - Math.cos(k * sector) * R);
+    ctx.strokeStyle = k === 0 ? 'rgba(80,200,120,0.5)' : 'rgba(80,200,120,0.35)';
+    ctx.stroke();
+  });
+  // точки, увиденные ультразвуком
+  ctx.fillStyle = '#ff5252';
+  (points || []).forEach(function(p) {
+    if (p.distance === null || p.distance === undefined || p.distance <= 0) return;
+    var d = Math.min(p.distance, RADAR_MAX_CM);
+    var a = (p.angle || 0) * Math.PI / 180;
+    var x = cx + Math.sin(a) * R * d / RADAR_MAX_CM;
+    var y = cy - Math.cos(a) * R * d / RADAR_MAX_CM;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  // корпус робота
+  ctx.fillStyle = '#4caf50';
+  ctx.fillRect(cx - 5, cy - 3, 10, 6);
+}
 function updateStatus(d) {
   if (!d) return;
   if ('driver' in d) setDriver(d.driver);
@@ -425,6 +472,10 @@ function updateStatus(d) {
     'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
     'keepDistance': 'Distance', 'findColor': 'Color Track', 'watchDog': 'Watchdog'
   };
+  if (d.auto_mode !== undefined) currentAutoMode = d.auto_mode;
+  var radarBox = document.getElementById('radar-box');
+  if (radarBox) radarBox.style.display = currentAutoMode === 'radarScan' ? 'block' : 'none';
+  if (d.radar_data) drawRadar(d.radar_data);
   var sbModule = document.getElementById('sb-module');
   if (sbModule) sbModule.textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {

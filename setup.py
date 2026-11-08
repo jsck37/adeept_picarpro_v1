@@ -438,8 +438,8 @@ def stage_5_hardware_config():
     append_to_config("i2c_arm=on", "dtparam=i2c_arm=on", config_path)
     append_to_config("i2c_arm_baudrate", "dtparam=i2c_arm_baudrate=400000", config_path)
     append_to_config("gpu_mem=", "gpu_mem=128", config_path)
-    # v1.4.0: SPI обязателен для WS2812-ленты (spidev0.0); на ОС без
-    # raspi-config (чистый Debian) do_spi выше не сработал бы
+    # v1.4.0: SPI для WS2812-фолбэка (spidev0.0); v1.6.2: лента по умолчанию
+    # на GPIO12 через rpi_ws281x — SPI остаётся как резерв (LED_BACKEND='spi')
     append_to_config("spi=on", "dtparam=spi=on", config_path)
     # v1.4.0: CSI-камера на Bookworm/Trixie включается авто-детектом
     # (без этого libcamera не видит сенсор: «No camera number 0 found»)

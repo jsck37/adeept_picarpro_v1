@@ -16,17 +16,23 @@ import threading
 import time
 
 from picarpro.logger import logger
-from picarpro.drive import drive, parse_direction
+from picarpro.drive import drive, parse_direction, arc_turn
 from picarpro.utils.heading import HeadingTracker
 from config import (
     MISSIONS_DIR, MISSION_MAX_STEP_S, MISSION_MAX_TOTAL_S, MISSION_MAX_STEPS,
     MISSION_ABORT_ON_OBSTACLE, MISSION_RECORD_MIN_SEGMENT_S,
-    AUTO_OBSTACLE_STOP_CM, AUTO_SPIN_RATE_DPS, AUTO_SPIN_TIMEOUT_S,
-    AUTO_EVADE_SPIN_SPEED, SERVO_COUNT,
+    AUTO_OBSTACLE_STOP_CM, AUTO_ARC_RATE_DPS,
+    SERVO_COUNT,
 )
 
 NAME_RE = re.compile(r'^[A-Za-z0-9_-]{1,32}$')
 SPIN_DIRS = ('spin_left', 'spin_right', 'stop')
+# v1.6.2: A/D-руление без движения — записанный маршрут, в котором водитель
+# крутил руль (steer_left/steer_right), раньше ОТКЛОНЯЛСЯ валидатором
+# («bad dir: steer_left») и НЕ СОХРАНЯЛСЯ. Теперь такие шаги легальны
+# (drive() умеет их исполнять — руль без хода), а из «вернуться домой»
+# они выкидываются: руление на месте не смещает робота.
+STEER_DIRS = ('steer_left', 'steer_right')
 LED_MODES = ('off', 'solid', 'breath', 'flow', 'rainbow', 'police', 'colorWipe')
 MAX_DEPTH = 3
 
@@ -43,11 +49,13 @@ BUILTIN = {
             {'op': 'drive', 'dir': 'forward_right', 'speed': 40, 'sec': 1.2},
         ]},
     ],
-    'spin_show': [
+    # v1.6.2: бывший spin_show. Аккерман-шасси не умеет крутиться на
+    # месте — показ заменили на двойной разворот дугой.
+    'turn_show': [
         {'op': 'led', 'mode': 'rainbow'},
-        {'op': 'drive', 'dir': 'spin_left', 'speed': 50, 'sec': 2},
+        {'op': 'turn', 'deg': 180},
         {'op': 'beep', 'sec': 0.3},
-        {'op': 'drive', 'dir': 'spin_right', 'speed': 50, 'sec': 2},
+        {'op': 'turn', 'deg': -180},
         {'op': 'led', 'mode': 'off'},
     ],
     'guard_1min': [
@@ -93,7 +101,7 @@ def validate_steps(steps, depth=0):
         op = st.get('op')
         if op == 'drive':
             d = str(st.get('dir', ''))
-            if not (parse_direction(d) or d in SPIN_DIRS):
+            if not (parse_direction(d) or d in SPIN_DIRS or d in STEER_DIRS):
                 raise MissionError(f'bad dir: {d[:20]}')
             out.append({'op': 'drive', 'dir': d,
                         'speed': int(_num(st.get('speed'), 10, 100, 40, 'speed')),
@@ -144,7 +152,7 @@ def estimate_seconds(steps):
         if st['op'] == 'repeat':
             t += st['times'] * estimate_seconds(st['steps'])
         elif st['op'] == 'turn':
-            t += abs(st['deg']) / AUTO_SPIN_RATE_DPS + 0.3
+            t += abs(st['deg']) / AUTO_ARC_RATE_DPS + 0.3
         else:
             t += st.get('sec', 0.0)
     return t
@@ -165,6 +173,10 @@ def reverse_dir(d):
         return 'spin_right'
     if d == 'spin_right':
         return 'spin_left'
+    if d in STEER_DIRS:
+        # руление на месте робота не смещает; для «домой» такие шаги
+        # отфильтровываются в return_home_steps, тут — формально
+        return d
     parsed = parse_direction(d)
     if not parsed:
         return 'stop'
@@ -287,8 +299,11 @@ class MissionRunner:
     def return_home_steps(self):
         if not self._last_path:
             raise MissionError('no recorded path (use Record first)')
+        # v1.6.2: steer_* шаги (руление на месте) не смещают робота —
+        # для обратного пути они бесполезны, выбрасываем
         return [{'op': 'drive', 'dir': reverse_dir(s['dir']), 'speed': s['speed'],
-                 'sec': s['sec']} for s in reversed(self._last_path)]
+                 'sec': s['sec']} for s in reversed(self._last_path)
+                if s['dir'] not in STEER_DIRS]
 
     # ---- выполнение ---------------------------------------------------------------
     def is_active(self):
@@ -449,35 +464,20 @@ class MissionRunner:
             a.stop()
 
     def _turn(self, deg, stop):
-        """Разворот на месте на deg (>0 вправо): по гироскопу, иначе по времени."""
-        need = abs(deg)
-        if need < 3:
-            return
-        s, side = self.state, ('spin_right' if deg > 0 else 'spin_left')
+        """Разворот на deg (>0 вправо): дугой (Аккерман), по гироскопу,
+        иначе по времени. Раньше был spin на месте — на этом шасси машина
+        не вращалась (v1.6.2)."""
+        s = self.state
         hd = self._heading
-        use_gyro = False
+        heading = None
         if hd is not None and hd.available:
             if not self._gyro_ready:
                 self._gyro_ready = hd.calibrate(stop.wait)
-            use_gyro = self._gyro_ready
-        try:
-            if use_gyro:
-                hd.begin()
-            drive(s, side, AUTO_EVADE_SPIN_SPEED)
-            if use_gyro:
-                lead = AUTO_SPIN_RATE_DPS * 0.08
-                t0 = time.monotonic()
-                while not stop.is_set():
-                    if hd.update() >= need - lead:
-                        break
-                    if time.monotonic() - t0 > AUTO_SPIN_TIMEOUT_S:
-                        break
-                    stop.wait(0.01)
-            else:
-                stop.wait(need / AUTO_SPIN_RATE_DPS)
-        finally:
-            drive(s, 'stop')
-        stop.wait(0.12)
+            if self._gyro_ready:
+                heading = hd
+        arc_turn(s.motors, s.servos, deg,
+                 alive=lambda: not stop.is_set(), wait=stop.wait,
+                 heading=heading)
 
     # ---- единая точка для команды `mission` -----------------------------------------
     def handle(self, action, p):

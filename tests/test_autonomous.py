@@ -36,6 +36,8 @@ class TestGuards:
 
 class TestRadar:
     def test_radar_scan_produces_data(self, clean_state):
+        """v1.6.2: скан непрерывный (крутится, пока режим не остановят),
+        точки обновляются по углам, после остановки датчик в центре."""
         state = clean_state
         state.init_camera()  # камера не обязательна для радара
         ctrl = state.autonomous
@@ -44,11 +46,19 @@ class TestRadar:
         assert ok is True
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
-            if not ctrl.is_active() and ctrl.get_radar_data():
+            if len(ctrl.get_radar_data()) >= 25:      # шаг 5° от -60 до 60
                 break
             time.sleep(0.1)
+        ctrl.stop()
+        # поток скана доходит до finally (серво в центр) до RADAR_PAUSE_S:
+        # is_active сбрасывается stop() сразу, поэтому ждём и угол тоже
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and (
+                ctrl.is_active() or state.servos.get_angle(0) != 90):
+            time.sleep(0.05)
+        assert not ctrl.is_active()
         data = ctrl.get_radar_data()
-        assert len(data) >= 20      # шаг 5° от -60 до 60
+        assert len(data) >= 25
         assert data[0]['angle'] == -60
         assert data[-1]['angle'] == 60
         # руль вернулся в центр
@@ -98,12 +108,14 @@ class TestTrackLineIR:
         ctrl.stop()
 
     def test_ir_values_api(self, clean_state, fake_gpio):
+        """v1.6.2: get_ir_values возвращает семантику «над линией»
+        (раньше отдавал сырой GPIO и UI показывал LINE на голом полу)."""
         state = clean_state
-        fake_gpio.set_input(19, 0)
-        fake_gpio.set_input(16, 1)
+        fake_gpio.set_input(19, 0)   # над тёмной линией (active LOW)
+        fake_gpio.set_input(16, 1)   # белый пол
         fake_gpio.set_input(20, 1)
         l, m, r = state.autonomous.get_ir_values()
-        assert (l, m, r) == (0, 1, 1)
+        assert (l, m, r) == (True, False, False)
 
 
 class TestKeepDistance:
