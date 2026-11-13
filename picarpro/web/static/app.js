@@ -404,11 +404,14 @@ function fetchConsoleHistory() {
 
 var firstStatus = true;
 // v1.6.2: радар как в оригинальном приложении Adeept — сектор скана с
-// точками препятствий; точки приходят в статусе (radar_data)
+// точками препятствий; точки приходят в статусе (radar_data).
+// v1.6.5: «нет эха» сервер шлёт как RADAR_MAX_CM (свободно) — рисуем такие
+// точки тускло-зелёными, препятствия — красными; при недоступном HC-SR04
+// выводим сообщение вместо пустого экрана.
 var RADAR_MAX_CM = 200;   // ULTRASONIC_MAX_DISTANCE (м) * 100
 var RADAR_SECTOR_DEG = 60;   // сектор скана: ±60° (см. _radar_scan)
 var currentAutoMode = 'none';
-function drawRadar(points) {
+function drawRadar(points, offline) {
   var cv = document.getElementById('radar-canvas');
   if (!cv || !cv.getContext) return;
   var ctx = cv.getContext('2d');
@@ -434,21 +437,29 @@ function drawRadar(points) {
     ctx.strokeStyle = k === 0 ? 'rgba(80,200,120,0.5)' : 'rgba(80,200,120,0.35)';
     ctx.stroke();
   });
-  // точки, увиденные ультразвуком
-  ctx.fillStyle = '#ff5252';
+  // точки, увиденные ультразвуком: препятствия — красные, «свободно» —
+  // тускло-зелёные у внешней дуги
   (points || []).forEach(function(p) {
     if (p.distance === null || p.distance === undefined || p.distance <= 0) return;
     var d = Math.min(p.distance, RADAR_MAX_CM);
     var a = (p.angle || 0) * Math.PI / 180;
     var x = cx + Math.sin(a) * R * d / RADAR_MAX_CM;
     var y = cy - Math.cos(a) * R * d / RADAR_MAX_CM;
+    var free = p.distance >= RADAR_MAX_CM - 2;
+    ctx.fillStyle = free ? 'rgba(80,200,120,0.45)' : '#ff5252';
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.arc(x, y, free ? 2 : 3.5, 0, Math.PI * 2);
     ctx.fill();
   });
   // корпус робота
   ctx.fillStyle = '#4caf50';
   ctx.fillRect(cx - 5, cy - 3, 10, 6);
+  if (offline) {
+    ctx.fillStyle = '#ffb74d';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('HC-SR04 offline', cx, 16);
+  }
 }
 function updateStatus(d) {
   if (!d) return;
@@ -467,7 +478,20 @@ function updateStatus(d) {
     document.getElementById('sb-ram').textContent = ramText;
   }
   if (d.distance !== undefined) document.getElementById('sb-distance').textContent = d.distance + 'cm';
-  if (d.speed !== undefined) document.getElementById('sb-speed').textContent = d.speed + '%';
+  // v1.6.5: скорость в панели — фактическая: удержание L2/R2 (турбо) = 100 %,
+  // геймпад без турбо = его текущая скорость хода, иначе ползунок веб-панели
+  var spdEl = document.getElementById('sb-speed');
+  var pad = d.ds4;
+  if (pad && pad.connected && pad.turbo) {
+    spdEl.textContent = '100%';
+    spdEl.classList.add('turbo');
+  } else if (pad && pad.connected && pad.drive_speed > 0) {
+    spdEl.textContent = pad.drive_speed + '%';
+    spdEl.classList.remove('turbo');
+  } else if (d.speed !== undefined) {
+    spdEl.textContent = d.speed + '%';
+    spdEl.classList.remove('turbo');
+  }
   var autoModeLabels = {
     'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
     'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
@@ -476,7 +500,8 @@ function updateStatus(d) {
   if (d.auto_mode !== undefined) currentAutoMode = d.auto_mode;
   var radarBox = document.getElementById('radar-box');
   if (radarBox) radarBox.style.display = currentAutoMode === 'radarScan' ? 'block' : 'none';
-  if (d.radar_data) drawRadar(d.radar_data);
+  if (d.radar_data) drawRadar(d.radar_data, d.ultra_ok === false);
+  else if (currentAutoMode === 'radarScan') drawRadar([], d.ultra_ok === false);
   var sbModule = document.getElementById('sb-module');
   if (sbModule) sbModule.textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {

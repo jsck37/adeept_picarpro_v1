@@ -76,6 +76,7 @@ class DS4Controller:
         self._right_blinking = False
         self._auto_mode_active = False
         self._turbo_active = False
+        self._drive_speed = 0     # фактическая скорость хода (0-100), для UI
         self._rainbow_on = False
         self._rescan_flag = threading.Event()
         self._dpad_left_pressed = False
@@ -120,6 +121,7 @@ class DS4Controller:
             'rx': round(self._rx, 2), 'ry': round(self._ry, 2),
             'connect_count': self._connect_count,
             'turbo': self._turbo_active,
+            'drive_speed': self._drive_speed,
             'rainbow': self._rainbow_on,
             'crane_arm_closed': self._crane_arm_closed,
             'crane_grip': grip,
@@ -204,6 +206,7 @@ class DS4Controller:
         self._l2 = self._r2 = 0.0
         self._hat_x = self._hat_y = 0
         self._turbo_active = False
+        self._drive_speed = 0
         self._left_blinking = False
         self._right_blinking = False
         if was:
@@ -438,6 +441,7 @@ class DS4Controller:
             return
         lx, ly = self._lx, self._ly
         if math.hypot(lx, ly) < 0.05:
+            self._drive_speed = 0
             self._motors.stop()
             self._servos.set_angle(SERVO_STEERING, 90)
             return
@@ -456,6 +460,7 @@ class DS4Controller:
             s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) \
                 if abs_ly > 0.1 else 0
             s = min(100, s)
+        self._drive_speed = s          # v1.6.5: фактическая скорость для UI
         if s > 0:
             if turn == 'no':
                 left = right = 1.0

@@ -1,6 +1,8 @@
 """Миссии: JSON-сценарии движения, запись пути и «вернуться домой».
 
-Шаги (op): drive, turn, wait, servo, beep, led, auto, repeat — см. BUILTIN.
+Шаги (op): drive, turn, wait, servo, auto, repeat — см. BUILTIN.
+v1.6.5: подсветка и буззер убраны из миссий — шаги led/beep из старых
+сохранённых сценариев валидатор молча пропускает, исполнитель их не знает.
 Все значения проходят whitelist-валидацию и ограничиваются (время шага,
 число шагов, общая длительность), сценарий из веба не может ни зациклить
 робота навсегда, ни вызвать произвольный код.
@@ -33,7 +35,6 @@ SPIN_DIRS = ('spin_left', 'spin_right', 'stop')
 # (drive() умеет их исполнять — руль без хода), а из «вернуться домой»
 # они выкидываются: руление на месте не смещает робота.
 STEER_DIRS = ('steer_left', 'steer_right')
-LED_MODES = ('off', 'solid', 'breath', 'flow', 'rainbow', 'police', 'colorWipe')
 MAX_DEPTH = 3
 
 BUILTIN = {
@@ -51,12 +52,11 @@ BUILTIN = {
     ],
     # v1.6.2: бывший spin_show. Аккерман-шасси не умеет крутиться на
     # месте — показ заменили на двойной разворот дугой.
+    # v1.6.5: без подсветки и буззера — миссия только двигает шасси.
     'turn_show': [
-        {'op': 'led', 'mode': 'rainbow'},
         {'op': 'turn', 'deg': 180},
-        {'op': 'beep', 'sec': 0.3},
+        {'op': 'wait', 'sec': 0.3},
         {'op': 'turn', 'deg': -180},
-        {'op': 'led', 'mode': 'off'},
     ],
     'guard_1min': [
         {'op': 'auto', 'mode': 'watchDog', 'sec': 60},
@@ -114,14 +114,10 @@ def validate_steps(steps, depth=0):
             sid = int(_num(st.get('id'), 0, SERVO_COUNT - 1, None, 'id'))
             out.append({'op': 'servo', 'id': sid,
                         'angle': int(_num(st.get('angle'), 0, 180, None, 'angle'))})
-        elif op == 'beep':
-            out.append({'op': 'beep', 'sec': _num(st.get('sec'), 0.0, 5.0, 0.2, 'sec')})
-        elif op == 'led':
-            mode = str(st.get('mode', ''))
-            if mode not in LED_MODES:
-                raise MissionError(f'bad led mode: {mode[:20]}')
-            out.append({'op': 'led', 'mode': mode,
-                        'sec': _num(st.get('sec'), 0.0, MISSION_MAX_STEP_S, 0.0, 'sec')})
+        elif op in ('beep', 'led'):
+            # v1.6.5: подсветка и буззер убраны из миссий. Шаги из старых
+            # сохранённых сценариев пропускаются без ошибки валидации.
+            continue
         elif op == 'auto':
             from picarpro.functions.autonomous import ALL_MODES
             mode = str(st.get('mode', ''))
@@ -438,16 +434,6 @@ class MissionRunner:
         elif op == 'servo':
             if s.servos:
                 s.servos.set_angle(st['id'], st['angle'])
-        elif op == 'beep':
-            if s.buzzer:
-                s.buzzer.beep()
-            stop.wait(st['sec'])
-        elif op == 'led':
-            if s.leds:
-                s.leds.set_mode(st['mode'])
-                if st['sec'] > 0:
-                    stop.wait(st['sec'])
-                    s.leds.set_mode('off')
         elif op == 'auto':
             a = s.autonomous
             if a is None:

@@ -633,9 +633,9 @@ def stage_8_yolo_model():
         print(f"  {GRN}[+]{RST} YOLO ready: {YOLO_MODEL_PATH}")
         return
     print(f"  {YLW}[!]{RST} YOLO model not found: {YOLO_MODEL_PATH}")
-    print("      Официального готового .onnx не существует — модель экспортируют из .pt.")
+    print("      Не удалось скачать YOLO_MODEL_URL (нет интернета / обрыв связи).")
     print("      На ПК:  pip install ultralytics && python3 tools/fetch_yolo.py --scp <user>@<ip робота>")
-    print("      или задайте YOLO_MODEL_URL в config.py и перезапустите setup.py.")
+    print("      или положите .onnx + classes.txt в /home/pi/models и перезапустите setup.py.")
 
 
 def main():

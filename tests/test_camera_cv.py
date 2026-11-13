@@ -89,15 +89,16 @@ class TestHandDetection:
         cv_thread._process(frame)
         assert cv_thread.hand_detected is False
 
-    def test_shake_detection_returns_true(self, cv_thread):
-        """Частые смены знака x -> колбэк возвращает True (жест «встряхнуть»)."""
-        cv_thread._hand_smooth_x = 0.0
-        cv_thread._hand_history = []
-        now = time.time()
-        result = None
-        # имитируем серию колбэков с меняющимся знаком через on_hand-механику
-        # (без автономного контроллера — проверяем только счётчик реверсов)
-        assert cv_thread.on_hand_found is None
+    def test_hand_callback_false_keeps_detection(self, cv_thread):
+        """v1.6.5: колбэк слежения, вернувший False, не сбрасывает
+        hand_detected (отключение по «встряске» убрано)."""
+        cv_thread.on_hand_found = lambda pos, area: False
+        frame = np.full((64, 64, 3), 120, dtype=np.uint8)
+        frame[16:48, 16:48] = (180, 150, 120)  # RGB телесный
+        cv_thread.set_hand_color(0, 30, 50, 25, 255, 255)
+        cv_thread.cv_mode = 'trackHand'
+        cv_thread._process(frame)
+        assert cv_thread.hand_detected is True
 
 
 class TestFindColor:

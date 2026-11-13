@@ -73,6 +73,28 @@ class TestTurbo:
         ds4._apply_move()
         assert hw.motors._speed == 100
 
+    def test_drive_speed_visible_in_status(self, ds4, hw):
+        """v1.6.5: фактическая скорость хода в статусе (для веб-панели):
+        турбо с отклонённым стиком — 100 %, нейтраль — 0."""
+        ds4.start(motors=hw.motors, servos=hw.servos, leds=hw.leds,
+                  buzzer=hw.buzzer, switches=hw.switches, shared_state=hw)
+        ds4._l2 = 1.0
+        ds4._ly = 0.3
+        ds4._apply_turbo()
+        ds4._apply_move()
+        st = ds4.get_status()
+        assert st['turbo'] is True and st['drive_speed'] == 100
+        ds4._lx = ds4._ly = 0.0
+        ds4._apply_move()
+        assert ds4.get_status()['drive_speed'] == 0
+        # без турбо стик на четверть — фактическая скорость < 100
+        ds4._l2 = 0.0
+        ds4._ly = 0.25
+        ds4._apply_turbo()
+        ds4._apply_move()
+        st = ds4.get_status()
+        assert st['turbo'] is False and 0 < st['drive_speed'] < 100
+
     def test_turbo_without_stick_does_not_move(self, ds4, hw, fake_gpio):
         """Раньше L2/R2 сами запускали движение вперёд — теперь нет: стик в
         нейтрали -> робот стоит (без движения вперёд)."""

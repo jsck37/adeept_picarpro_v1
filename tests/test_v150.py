@@ -297,7 +297,9 @@ class TestAutonomousV150:
         assert not any(c[0] == 'spin' for c in rec.calls)
         ctrl.shutdown()
 
-    def test_track_hand_shake_finishes_mode(self, clean_state):
+    def test_track_hand_shake_keeps_tracking(self, clean_state):
+        """v1.6.5: «встряхивание» руки больше не выключает режим — слежение
+        продолжается, наклон камеры реагирует на руку вверх/вниз."""
         from tests.test_autonomous import _FakeCam
         ctrl = clean_state.autonomous
         fc = _FakeCam()
@@ -305,16 +307,20 @@ class TestAutonomousV150:
         assert ctrl.start('trackHand')[0]
         assert wait_for(lambda: fc.cv_thread.on_hand_found is not None, 2.0)
         cb = fc.cv_thread.on_hand_found
-        ended = False
         for i in range(12):                        # рука «мотается» влево-вправо
             x = 80 if i % 2 else 560
-            if cb([x, 240], 5000):
-                ended = True
-                break
+            assert cb([x, 240], 5000) is False     # колбэк никогда не просит стоп
             time.sleep(0.02)
-        assert ended
-        # раньше режим тут же перезапускался и «висел» вечно
-        assert wait_for(lambda: not ctrl.is_active(), 2.0)
+        assert ctrl.is_active()                    # режим НЕ выключился
+        # рука в верхней части кадра -> наклон уходит вниз от 90
+        for _ in range(12):
+            cb([320, 60], 5000)
+        tilt = clean_state.servos.get_angle(2)
+        assert tilt < 90
+        # рука в нижней части кадра -> наклон уходит вверх
+        for _ in range(12):
+            cb([320, 420], 5000)
+        assert clean_state.servos.get_angle(2) > tilt
 
     def test_rebind_keeps_single_thread(self, clean_state):
         ctrl = clean_state.autonomous

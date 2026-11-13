@@ -35,8 +35,7 @@ class TestMissionValidation:
 
     @pytest.mark.parametrize('bad', [
         [], 'x', [1], [{'op': 'rm -rf'}], [{'op': 'drive', 'dir': 'sideways'}],
-        [{'op': 'turn'}], [{'op': 'servo', 'id': 1}],
-        [{'op': 'led', 'mode': 'nope'}], [{'op': 'auto', 'mode': 'x'}],
+        [{'op': 'turn'}], [{'op': 'servo', 'id': 1}], [{'op': 'auto', 'mode': 'x'}],
         [{'op': 'drive', 'dir': 'forward', 'sec': 'abc'}],
         [{'op': 'repeat', 'times': 2, 'steps': []}],
     ])
@@ -144,7 +143,11 @@ class TestMissionRun:
         clean_state.emergency_stop()
         assert wait_for(lambda: not mr.is_active(), 2)
 
-    def test_servo_and_led_steps(self, mr, clean_state):
+    def test_led_beep_steps_are_skipped(self, mr, clean_state):
+        """v1.6.5: подсветка/буззер убраны из миссий — шаги пропускаются."""
+        from picarpro.functions.missions import validate_steps
+        assert validate_steps([{'op': 'led', 'mode': 'solid'},
+                               {'op': 'beep', 'sec': 0}]) == []
         mr.start(steps=[{'op': 'servo', 'id': 1, 'angle': 40},
                         {'op': 'led', 'mode': 'solid'}, {'op': 'beep', 'sec': 0}])
         assert wait_for(lambda: mr.get_status()['state'] == 'done', 3)

@@ -10,6 +10,7 @@ from config import (
     LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN, LINE_ACTIVE_LOW,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION, ARUCO_CAM_FOV_DEG,
+    CAM_PAN_TRACK_DIR, CAM_TILT_TRACK_DIR,
     FINDCOLOR_TOLERANCE, FINDCOLOR_SPEED, FINDCOLOR_STEER_RANGE,
     ULTRASONIC_SCAN_SERVO, ULTRASONIC_MAX_DISTANCE,
     AUTO_MIN_SPEED, AUTO_SPEED_SLEW_PER_S, AUTO_CRUISE_SPEED, AUTO_SLOW_SPEED,
@@ -373,6 +374,7 @@ class AutonomousController:
 
     def _radar_scan(self, ctx):
         if not self._ultra_ok():
+            logger.warning('[Radar] HC-SR04 не инициализирован — скан невозможен')
             return
         self._radar_points = {}
         up = True
@@ -390,6 +392,13 @@ class AutonomousController:
                     d = self.ultrasonic.measure_now()
                     if d is None:
                         d = self.ultrasonic.get_last_distance()
+                    if not d or d <= 0:
+                        # v1.6.5: «нет эха / нет данных» = свободно до 2 м.
+                        # Раньше в точку уходил None/0 и веб-канва её
+                        # пропускала — радар выглядел пустым («объектов нет»),
+                        # хотя скан шёл. Теперь каждый угол даёт точку:
+                        # препятствие — реальная дистанция, свободно — 200 см.
+                        d = _MAX_RANGE_CM
                     self._radar_points[angle_off] = d
                     self._radar_data = [
                         {'angle': a, 'distance': self._radar_points[a]}
@@ -596,35 +605,40 @@ class AutonomousController:
             return
         cam = self._camera
         cam.set_cv_mode(CV_HAND)
-        s = {'pan': 90, 'tilt': 90, 'sx': 0.0, 'sy': 0.0, 'hist': []}
+        # v1.6.5: ax/ay — аккумуляторы дробных шагов. Раньше int() на шаге
+        # съедал малые отклонения (при |sy| < ~0.29 кадра шаг был 0) и наклон
+        # камеры ВВЕРХ/ВНИЗ почти не двигался — выглядело как «следит только
+        # вправо/влево». Отключение по «встряске» убрано: режим идёт, пока
+        # владелец не остановит его сам.
+        s = {'pan': 90, 'tilt': 90, 'sx': 0.0, 'sy': 0.0, 'ax': 0.0, 'ay': 0.0}
         self.servos.set_angle(SERVO_CAM_PAN, 90)
         self.servos.set_angle(SERVO_CAM_TILT, 90)
         self._halt(ctx)
         PAN_STEP, TILT_STEP, DEADZONE, A = 4, 3, 0.06, 0.5
-        SHAKE_WIN, SHAKE_TH = 1.5, 5
+        PAN_DIR, TILT_DIR = CAM_PAN_TRACK_DIR, CAM_TILT_TRACK_DIR
         cx = CAMERA_RESOLUTION[0] / 2.0
         cy = CAMERA_RESOLUTION[1] / 2.0     # раньше брали ширину*0.75 — случайно верно для 4:3
 
         def on_hand(pos, area):
             if area == 0 or not ctx.alive:
                 return False
-            now = time.monotonic()
             s['sx'] = A * ((pos[0] - cx) / cx) + (1 - A) * s['sx']
             s['sy'] = A * ((pos[1] - cy) / cy) + (1 - A) * s['sy']
-            s['hist'] = [(t, v) for t, v in s['hist'] + [(now, s['sx'])]
-                         if now - t < SHAKE_WIN]
-            signs = [1 if v > 0 else -1 for _, v in s['hist']]
-            reversals = sum(1 for a, b in zip(signs, signs[1:]) if a != b)
-            if len(s['hist']) > 2 and reversals >= SHAKE_TH:
-                logger.info('[Auto] trackHand: shake detected — finishing')
-                ctx.stop.set()               # встряхнули руку = «хватит»
-                return True
             if abs(s['sx']) > DEADZONE:
-                s['pan'] = max(0, min(180, s['pan'] - int(
-                    s['sx'] * PAN_STEP * (1 + abs(s['sx'])))))
+                # минус — направление панорамы как в v1.6.4 (рука правее
+                # центра => pan уменьшается); DIR-флаг меняет при зеркальном
+                # креплении серво
+                s['ax'] += -s['sx'] * PAN_STEP * (1 + abs(s['sx'])) * PAN_DIR
+                step = int(s['ax'])
+                if step:
+                    s['ax'] -= step
+                    s['pan'] = max(0, min(180, s['pan'] + step))
             if abs(s['sy']) > DEADZONE:
-                s['tilt'] = max(0, min(180, s['tilt'] + int(
-                    s['sy'] * TILT_STEP * (1 + abs(s['sy'])))))
+                s['ay'] += s['sy'] * TILT_STEP * (1 + abs(s['sy'])) * TILT_DIR
+                step = int(s['ay'])
+                if step:
+                    s['ay'] -= step
+                    s['tilt'] = max(0, min(180, s['tilt'] + step))
             self.servos.set_angle(SERVO_CAM_PAN, s['pan'])
             self.servos.set_angle(SERVO_CAM_TILT, s['tilt'])
             return False

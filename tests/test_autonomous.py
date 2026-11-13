@@ -61,6 +61,9 @@ class TestRadar:
         assert len(data) >= 25
         assert data[0]['angle'] == -60
         assert data[-1]['angle'] == 60
+        # v1.6.5: «нет эха» = 200 см (свободно) — точек без дистанции нет,
+        # иначе канва пропускала их и радар выглядел пустым
+        assert all(p['distance'] and p['distance'] > 0 for p in data)
         # руль вернулся в центр
         assert state.servos.get_angle(0) == 90
 

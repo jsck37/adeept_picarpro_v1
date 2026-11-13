@@ -206,6 +206,12 @@ CAMERA_RESOLUTION = (640, 480)
 CAMERA_FPS = 15
 CAMERA_JPEG_QUALITY = 60
 CAMERA_IDLE_INTERVAL_S = 0.5    # период захвата без потребителей
+# v1.6.5: направление слежения камеры в trackHand. +1 — прежнее поведение
+# (pan: рука правее => камера влево; tilt: рука ниже центра => наклон растёт);
+# -1 — если на конкретной сборке серво стоят зеркально, флаг меняет
+# направление без правки кода.
+CAM_PAN_TRACK_DIR = 1
+CAM_TILT_TRACK_DIR = 1
 # v1.6.4: адаптивное энергосбережение. Загрузка системы (max из CPU и RAM)
 # выше CAMERA_IDLE_BACKOFF_CPU_PCT — фоновый захват реже (интервал плавно
 # растёт до CAMERA_IDLE_BACKOFF_MAX × base): ядра отдаются активным задачам
@@ -360,15 +366,21 @@ TURN_RADIUS_MAX = 1.0
 
 # ---------------------------------------------------------------------------
 # YOLO — детектирование объектов на OpenCV DNN (ONNX), без PyTorch.
-#   Подходит для RPi 3B+ с 1 ГБ ОЗУ ТОЛЬКО вместе с расширенным swap
-#   (tools/setup_swap.sh) и моделью nano при входе 320x320.
-#   Модель экспортируется на ПК: tools/export_yolo_onnx.py (см. docs/YOLO_GUIDE.md)
+#   v1.6.5: setup.py САМ скачивает готовый ONNX с официального релиза
+#   ultralytics/yolov5 v7.0 (yolov5n, вход 640x640, 3.8 МБ — проверено через
+#   cv2.dnn: чтение+инференс ~150 МБ пик RSS, выход (1,25200,85) парсится
+#   детектором). Укладывается в 500 МБ свободной ОЗУ вместе с MJPEG-стримом.
+#   На RPi 3B+ инференс при входе 640 ~1.5-3 с/кадр — скорость потока не
+#   страдает (инференс в CVThread), но детект обновляется реже; при желании
+#   экспортируйте 320-вход на ПК (tools/fetch_yolo.py, docs/YOLO_GUIDE.md).
 # ---------------------------------------------------------------------------
-YOLO_MODEL_PATH = '/home/pi/models/yolov8n.onnx'   # путь к ONNX-модели на Pi
+YOLO_MODEL_PATH = '/home/pi/models/yolov5n.onnx'   # путь к ONNX-модели на Pi
 YOLO_CLASSES_FILE = '/home/pi/models/classes.txt'  # имена классов по строкам
-YOLO_MODEL_URL = ''            # прямая ссылка на .onnx для автозагрузки в setup.py (пусто — пропуск)
-YOLO_MODEL_SHA256 = ''         # необязательная контрольная сумма для YOLO_MODEL_URL
-YOLO_INPUT_SIZE = 320          # вход сети (320 — оптимально для 3B+; 640 слишком медленно)
+YOLO_MODEL_URL = ('https://github.com/ultralytics/yolov5/releases/'
+                  'download/v7.0/yolov5n.onnx')   # пусто — пропуск автозагрузки
+YOLO_MODEL_SHA256 = (
+    '04f0e55c26f58d17145b36045780fe1250d5bd2187543e11568e5141d05b3262')
+YOLO_INPUT_SIZE = 640          # вход сети: 640 у официального v7.0 ONNX (320 — свой экспорт)
 YOLO_CONFIDENCE = 0.45         # порог уверенности
 YOLO_NMS_THRESHOLD = 0.45      # порог NMS
 YOLO_FRAME_SKIP = 3            # инференс каждый N-й кадр (разгрузка CPU)
