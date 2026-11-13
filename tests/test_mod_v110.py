@@ -1,9 +1,6 @@
-"""Тесты мод-дополнений v1.1.0: NavTCP-протокол, портированные команды
-(hugo-Peltier), yolo_status, лимиты серво через команды."""
-import json
-import threading
-import time
-
+"""Тесты мод-дополнений v1.1.0: команды статусов (yolo_status, push),
+лимиты серво через команды. NavTCP/ArUco/ColorScan удалены в v1.6.7
+(требовали вторую камеру / хост-компоненты)."""
 import pytest
 
 
@@ -17,21 +14,19 @@ def call(state, cmd, params=None):
     return process(state, {'cmd': cmd, 'params': params or {}})
 
 
-class TestPortedCommands:
-    def test_aruco_nav_status_idle(self, state):
-        r = call(state, 'aruco_nav', {'action': 'status'})
-        assert r['ok'] is True
-        assert r['active'] is False
-
+class TestStatusCommands:
     def test_push_status_idle(self, state):
         r = call(state, 'push', {'action': 'status'})
         assert r['ok'] is True
         assert r['pushes_done'] == 0
 
-    def test_color_scan_status_idle(self, state):
+    def test_aruco_nav_command_removed(self, state):
+        r = call(state, 'aruco_nav', {'action': 'status'})
+        assert r['ok'] is False            # команда удалена в v1.6.7
+
+    def test_color_scan_command_removed(self, state):
         r = call(state, 'color_scan', {'action': 'status'})
-        assert r['ok'] is True
-        assert r['active'] is False
+        assert r['ok'] is False            # команда удалена в v1.6.7
 
     def test_yolo_status(self, state):
         r = call(state, 'yolo_status')
@@ -40,8 +35,9 @@ class TestPortedCommands:
 
     def test_status_broadcast_contains_new_fields(self, state):
         d = state.get_status()
-        assert 'yolo' in d and 'nav_tcp' in d
-        assert 'aruco_nav' in d and 'push' in d and 'color_scan' in d
+        assert 'yolo' in d and 'push' in d
+        assert 'nav_tcp' not in d and 'aruco_nav' not in d \
+            and 'color_scan' not in d
 
 
 class TestServoLimitsViaCommands:
@@ -68,88 +64,6 @@ class TestServoLimitsViaCommands:
         assert state.servos.get_angle(SERVO_CRANE_GRIP) == 100
         call(state, 'crane', {'action': 'arm_open'})
         assert state.servos.get_angle(SERVO_CRANE_ARM) == 100
-
-
-class TestNavTcpProtocol:
-    """NavTCP: построчный протокол команд хоста (порт hugo-Peltier)."""
-
-    @pytest.fixture
-    def server(self, state, unused_tcp_port_factory):
-        from picarpro.routes.nav_server import NavTcpServer
-        srv = NavTcpServer(state, port=unused_tcp_port_factory())
-        srv.start()
-        time.sleep(0.15)
-        yield srv
-        srv.shutdown()
-
-    def _talk(self, port, messages):
-        import socket
-        results = []
-        with socket.create_connection(('127.0.0.1', port), timeout=3) as s:
-            f = s.makefile('rwb')
-            for msg in messages:
-                f.write((msg + '\n').encode('utf-8'))
-                f.flush()
-                if msg == 'STATUS':
-                    results.append(json.loads(f.readline().decode()))
-                elif msg == 'QUIT':
-                    results.append(f.readline().decode().strip())
-                else:
-                    results.append(f.readline().decode().strip())
-        return results
-
-    def test_move_commands(self, server, state):
-        port = server.port
-        resp = self._talk(port, ['FORWARD', 'LEFT', 'STOP', 'QUIT'])
-        assert resp[0] == 'OK FORWARD'
-        assert resp[1] == 'OK LEFT'
-        assert resp[2] == 'OK STOP'
-        assert resp[3] == 'BYE'
-        assert state.nav_last_cmd == 'QUIT'
-
-    def test_speed_command(self, server, state):
-        resp = self._talk(server.port, ['SPEED 42', 'QUIT'])
-        assert resp[0] == 'OK SPEED 42'
-        assert state.speed == 42
-
-    def test_speed_garbage(self, server):
-        resp = self._talk(server.port, ['SPEED abc', 'QUIT'])
-        assert resp[0].startswith('ERR')
-
-    def test_unknown_command(self, server):
-        resp = self._talk(server.port, ['FLYWHEEL', 'QUIT'])
-        assert resp[0].startswith('ERR unknown')
-
-    def test_status_json(self, server):
-        resp = self._talk(server.port, ['STATUS', 'QUIT'])
-        st = resp[0]
-        assert st['ok'] is True
-        assert 'speed' in st and 'last_cmd' in st
-
-    def test_pick_blue_and_drop(self, server, state):
-        resp = self._talk(server.port, ['PICK_BLUE', 'DROP', 'QUIT'])
-        assert resp[0] == 'OK PICK_BLUE'
-        assert resp[1] == 'OK DROP'
-        assert state.crane_arm_closed is False
-
-
-class TestImuStream:
-    def test_start_stop(self, state):
-        from picarpro.functions.imu_stream import ImuUdpStreamer
-        s = ImuUdpStreamer(state)
-        s.start()
-        time.sleep(0.1)
-        s.stop()
-
-    def test_no_subscriber_no_crash(self, state):
-        """Без подключённого хоста стример молчит и не падает."""
-        from picarpro.functions.imu_stream import ImuUdpStreamer
-        s = ImuUdpStreamer(state)
-        s.start()
-        time.sleep(0.2)
-        assert s._running
-        s.stop()
-        assert not s._running
 
 
 class TestObstaclePusher:

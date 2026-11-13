@@ -80,6 +80,7 @@ class YoloDetector:
         self._out_names = []       # >1 выход => seg-модель
         self._seg = False
         self.task = 'detect'
+        self._semantics = {}       # {класс: % кадра} — для yoloSemantic
 
     @property
     def loaded(self):
@@ -262,6 +263,15 @@ class YoloDetector:
                         n_masks += 1
                 objs.append(obj)
         objs.sort(key=lambda o: -o['area'])
+        if seg and frame_area:
+            # суммарная доля кадра по классам — для UI семантики (yoloSemantic)
+            sem = {}
+            for o in objs:
+                if 'mask_area' in o:
+                    sem[o['label']] = round(
+                        sem.get(o['label'], 0.0)
+                        + 100.0 * o['mask_area'] / frame_area, 1)
+            self._semantics = sem
         return objs
 
     @staticmethod
@@ -304,19 +314,24 @@ class YoloDetector:
         mask[oy:oy1, ox:ox1] = big[:oy1 - oy, :ox1 - ox]
         return mask
 
-    def draw(self, disp_bgr, objs, color=(0, 255, 255)):
-        """Нарисовать маски (полупрозрачно), рамки и подписи на кадре (BGR)."""
+    def _class_color(self, label):
+        """BGR-цвет класса для оверлея (палитра по id класса)."""
+        cid = self._classes.index(label) if label in self._classes else 0
+        return _MASK_PALETTE[cid % len(_MASK_PALETTE)]
+
+    def draw(self, disp_bgr, objs, color=(0, 255, 255), masks=True):
+        """Рамки и подписи; masks=True — ещё и полупрозрачные маски
+        (режим yoloSeg). yoloDetect рисует только рамки."""
         if not _HAS_CV2:
             return disp_bgr
-        for o in objs:
-            m = o.get('mask')
-            if m is not None and m.any():
-                cid = self._classes.index(o['label']) \
-                    if o['label'] in self._classes else 0
-                col = _MASK_PALETTE[cid % len(_MASK_PALETTE)]
-                disp_bgr[m] = (disp_bgr[m] * 0.5
-                               + np.array(col, dtype=np.float32) * 0.5
-                               ).astype(disp_bgr.dtype)
+        if masks:
+            for o in objs:
+                m = o.get('mask')
+                if m is not None and m.any():
+                    col = self._class_color(o['label'])
+                    disp_bgr[m] = (disp_bgr[m] * 0.5
+                                   + np.array(col, dtype=np.float32) * 0.5
+                                   ).astype(disp_bgr.dtype)
         for o in objs:
             x, y, bw, bh = o['box']
             cv2.rectangle(disp_bgr, (x, y), (x + bw, y + bh), color, 2)
@@ -324,6 +339,37 @@ class YoloDetector:
             ty = max(y - 6, 14)
             cv2.putText(disp_bgr, text, (x, ty),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        return disp_bgr
+
+    def draw_semantic(self, disp_bgr, objs):
+        """СЕМАНТИЧЕСКАЯ карта (режим yoloSemantic): сцена заливается цветом
+        класса (плотнее, чем в yoloSeg), снизу — легенда «класс: % кадра»
+        по суммарной площади масок. Кадр остаётся читаемым (~65 % цвета)."""
+        if not _HAS_CV2:
+            return disp_bgr
+        areas = {}
+        for o in objs:
+            m = o.get('mask')
+            if m is None or not m.any():
+                continue
+            label = o['label']
+            col = self._class_color(label)
+            disp_bgr[m] = (disp_bgr[m] * 0.35
+                           + np.array(col, dtype=np.float32) * 0.65
+                           ).astype(disp_bgr.dtype)
+            a = areas.setdefault(label, [0, col])
+            a[0] += int(o.get('mask_area', 0))
+        frame_area = float(disp_bgr.shape[0] * disp_bgr.shape[1])
+        line = 1
+        for label, (px, col) in sorted(areas.items(),
+                                       key=lambda kv: -kv[1][0]):
+            pct = 100.0 * px / frame_area if frame_area else 0.0
+            ty = disp_bgr.shape[0] - 10 - 18 * line
+            cv2.putText(disp_bgr, f'{label}: {pct:.1f}%', (10, ty),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2)
+            line += 1
+            if line > 6:
+                break
         return disp_bgr
 
     def get_status(self):
@@ -337,7 +383,7 @@ class YoloDetector:
             if 'mask_area' in o:
                 d['mask_area'] = o['mask_area']
                 d['mask_pct'] = o.get('mask_pct')
-        return {
+        st = {
             'loaded': self.loaded,
             'task': self.task,
             'objects': out,
@@ -345,6 +391,9 @@ class YoloDetector:
             'age_s': round(time.time() - self._last_infer_ts, 1)
             if self._last_infer_ts else None,
         }
+        if self.task == 'seg' and self._semantics:
+            st['semantics'] = dict(self._semantics)
+        return st
 
 
 class _NullCtx:

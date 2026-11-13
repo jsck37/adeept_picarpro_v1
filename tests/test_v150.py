@@ -444,26 +444,6 @@ class TestVoiceParsing:
 
 
 # ---------------------------------------------------------------------------
-# NavTCP: QUIT закрывает соединение
-# ---------------------------------------------------------------------------
-class TestNavQuit:
-    def test_quit_closes(self, clean_state):
-        from picarpro.routes.nav_server import NavTcpServer
-        srv = NavTcpServer(clean_state, port=0)
-        srv.start()
-        port = srv._httpd.server_address[1]
-        try:
-            s = socket.create_connection(('127.0.0.1', port), timeout=3)
-            s.sendall(b'QUIT\n')
-            assert s.recv(16).strip() == b'BYE'
-            s.settimeout(2)
-            assert s.recv(16) == b''          # сервер закрыл соединение
-            s.close()
-        finally:
-            srv.shutdown()
-
-
-# ---------------------------------------------------------------------------
 # Камера: новые кадры, сон, переворот
 # ---------------------------------------------------------------------------
 class TestCameraV150:

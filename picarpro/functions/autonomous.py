@@ -9,7 +9,7 @@ from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN, LINE_ACTIVE_LOW,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
-    CAMERA_RESOLUTION, ARUCO_CAM_FOV_DEG,
+    CAMERA_RESOLUTION, CAM_FOV_DEG,
     CAM_PAN_TRACK_DIR, CAM_TILT_TRACK_DIR,
     FINDCOLOR_TOLERANCE, FINDCOLOR_SPEED, FINDCOLOR_STEER_RANGE,
     ULTRASONIC_SCAN_SERVO, ULTRASONIC_MAX_DISTANCE,
@@ -19,6 +19,14 @@ from config import (
     AUTO_SEARCH_TIMEOUT_S,
     KEEP_DISTANCE_TARGET_CM, KEEP_DISTANCE_TOLERANCE_CM,
     KEEP_DISTANCE_MAX_SPEED, KEEP_DISTANCE_KP,
+    OBSTACLE_GRAB_STOP_CM, OBSTACLE_GRAB_SPEED, OBSTACLE_GRAB_STEER_TOL,
+    OBSTACLE_GRAB_SEARCH_TIMEOUT_S, OBSTACLE_GRAB_RELOCATE_TURN_DEG,
+    OBSTACLE_GRAB_RELOCATE_DRIVE_S, OBSTACLE_GRAB_RETURN_TURN_DEG,
+    OBSTACLE_GRAB_RETURN_DRIVE_S, OBSTACLE_GRAB_CLASSES,
+    MAZE_WALL_STOP_CM, MAZE_SPEED, MAZE_TURN_DIR, MAZE_TURNS,
+    MAZE_BACKUP_S, MAZE_EXIT_FREE_CM, MAZE_EXIT_FREE_S, MAZE_TIMEOUT_S,
+    CRANE_ARM_OPEN, CRANE_ARM_CLOSED, CRANE_GRIP_LOW, CRANE_GRIP_MID,
+    SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
 )
 
 try:
@@ -28,7 +36,8 @@ except ImportError:
     _HAS_GPIO = False
     GPIO = None
 
-MODES_WITH_ULTRA = ('radarScan', 'automatic', 'keepDistance')
+MODES_WITH_ULTRA = ('radarScan', 'automatic', 'keepDistance',
+                    'obstacleGrab', 'mazeU')
 MODES_WITH_CAMERA = ('trackLineCV', 'trackHand', 'findColor', 'watchDog')
 ALL_MODES = MODES_WITH_ULTRA + ('trackLine',) + MODES_WITH_CAMERA
 
@@ -151,6 +160,8 @@ class AutonomousController:
             'trackHand': self._track_hand,
             'findColor': self._find_color,
             'watchDog': self._watch_dog,
+            'obstacleGrab': self._obstacle_grab,
+            'mazeU': self._maze_u,
         }
         while self._running:
             self._flag.wait()
@@ -665,7 +676,7 @@ class AutonomousController:
         from picarpro.camera.camera_opencv import CV_FINDCOLOR
         cam = self._camera
         cam.set_cv_mode(CV_FINDCOLOR)
-        half_fov = ARUCO_CAM_FOV_DEG / 2.0
+        half_fov = CAM_FOV_DEG / 2.0
         cx_frame = CAMERA_RESOLUTION[0] / 2.0
         tol = FINDCOLOR_TOLERANCE / 100.0
         st = {'pos': [0, 0], 'found': False}
@@ -751,3 +762,203 @@ class AutonomousController:
         finally:
             cam.cv_thread.on_motion = None
             cam.set_cv_mode('none')
+
+    # ---- захват и перенос препятствия (v1.6.7) --------------------------------
+    def _yolo_objects(self):
+        """Объекты YOLO-детектора камеры (уже отсортированы по площади),
+        отфильтрованные по OBSTACLE_GRAB_CLASSES. Пусто, если камера/YOLO
+        недоступны или ничего не найдено."""
+        cam = self._camera
+        if not cam:
+            return []
+        y = getattr(cam.cv_thread, 'yolo', None)
+        if not (y and y.loaded):
+            return []
+        if y._objects_lock is not None:
+            with y._objects_lock:
+                objs = list(y.objects)
+        else:
+            objs = list(y.objects)
+        if OBSTACLE_GRAB_CLASSES:
+            objs = [o for o in objs if o['label'] in OBSTACLE_GRAB_CLASSES]
+        return objs
+
+    def _crane_sequence(self, ctx, steps):
+        """Последовательность движений клешни: [(servo, angle, steps, delay)].
+        Любое исключение серво не роняет режим."""
+        try:
+            for sid, angle, n, delay in steps:
+                self.servos.smooth_move(sid, angle, steps=n, delay=delay)
+                if ctx.wait(0.1):
+                    return False
+        except Exception as e:
+            logger.warning(f'[Grab] crane error: {e}')
+            return False
+        return True
+
+    def _obstacle_grab(self, ctx):
+        """«Препятствие» (v1.6.7): подъезд к препятствию, захват клешнёй,
+        перенос в сторону и возврат. Цель — крупнейший YOLO-объект в кадре
+        (доворот по центру объекта); если камера/YOLO не дают объектов —
+        подъезд по ультразвуку «вслепую». Режим одноразовый: после переноса
+        завершается."""
+        if not (self._ultra_ok() and self.servos):
+            logger.warning('[Grab] нужны ультразвук и серво')
+            return
+        from picarpro.camera.camera_opencv import CV_YOLO
+        cam = self._camera
+        if cam:
+            cam.set_cv_mode(CV_YOLO)     # на видео видно, за чем едет робот
+        self._distance_filter.reset()
+        cx_frame = CAMERA_RESOLUTION[0] / 2.0
+        st = 'search'
+        try:
+            while ctx.alive:
+                if st == 'search':
+                    objs = self._yolo_objects()
+                    d = self._safe_distance()
+                    if objs and cam:
+                        err = (objs[0]['cx'] - cx_frame) / cx_frame
+                        if abs(err) > OBSTACLE_GRAB_STEER_TOL:
+                            self._set_steer(ctx, max(30, min(150,
+                                            90 - int(err * 60))))
+                            self._arc(ctx, OBSTACLE_GRAB_SPEED,
+                                      'left' if err < 0 else 'right',
+                                      min(1.0, abs(err)))
+                        else:
+                            self._set_steer(ctx, 90)
+                            self._forward(ctx, OBSTACLE_GRAB_SPEED)
+                    elif d is not None:
+                        # цели нет в кадре — едем вперёд, ультразвук подстрахует
+                        self._set_steer(ctx, 90)
+                        self._forward(ctx, OBSTACLE_GRAB_SPEED)
+                    else:
+                        self._halt(ctx)
+                    if d is not None and d <= OBSTACLE_GRAB_STOP_CM:
+                        self._halt(ctx)
+                        logger.info(f'[Grab] target at {d:.0f} см — захват')
+                        st = 'grab'
+                    if ctx.wait(0.12):
+                        break
+                elif st == 'grab':
+                    self._crane_sequence(ctx, [
+                        (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, 8, 0.03),
+                        (SERVO_CRANE_ARM, CRANE_ARM_CLOSED, 14, 0.05),
+                        (SERVO_CRANE_GRIP, CRANE_GRIP_MID, 8, 0.03),
+                    ])
+                    st = 'relocate'
+                elif st == 'relocate':
+                    logger.info('[Grab] relocating obstacle')
+                    self._turn(ctx, OBSTACLE_GRAB_RELOCATE_TURN_DEG,
+                               self._heading.available)
+                    for _ in range(int(OBSTACLE_GRAB_RELOCATE_DRIVE_S / 0.1)):
+                        if not self._forward(ctx, OBSTACLE_GRAB_SPEED) \
+                                or ctx.wait(0.1):
+                            break
+                    self._halt(ctx)
+                    self._crane_sequence(ctx, [
+                        (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, 8, 0.03),
+                        (SERVO_CRANE_ARM, CRANE_ARM_OPEN, 14, 0.05),
+                        (SERVO_CRANE_GRIP, CRANE_GRIP_MID, 8, 0.03),
+                    ])
+                    st = 'return'
+                elif st == 'return':
+                    logger.info('[Grab] returning')
+                    self._turn(ctx, OBSTACLE_GRAB_RETURN_TURN_DEG,
+                               self._heading.available)
+                    for _ in range(int(OBSTACLE_GRAB_RETURN_DRIVE_S / 0.1)):
+                        if not self._forward(ctx, OBSTACLE_GRAB_SPEED) \
+                                or ctx.wait(0.1):
+                            break
+                    self._halt(ctx)
+                    logger.info('[Grab] done — obstacle relocated')
+                    break
+        finally:
+            if cam:
+                try:
+                    cam.set_cv_mode('none')
+                except Exception:
+                    pass
+            self._halt(ctx)
+            if self.servos:
+                try:
+                    self.servos.set_angle(SERVO_CRANE_GRIP, CRANE_GRIP_MID)
+                    self.servos.set_angle(SERVO_CRANE_ARM, CRANE_ARM_OPEN)
+                except Exception:
+                    pass
+
+    # ---- U-образный лабиринт (v1.6.7) -----------------------------------------
+    def _maze_u(self, ctx):
+        """Проход лёгкого U-образного лабиринта по ультразвуку: коридор до
+        стены -> поворот на 90° -> второй коридор -> поворот на 90° ->
+        выходной коридор (суммарный разворот 180°). Направление поворотов —
+        MAZE_TURN_DIR, число поворотов — MAZE_TURNS. Камера (если есть)
+        включается только для наблюдения, на управление не влияет.
+        Выход: после всех поворотов впереди свободно MAZE_EXIT_FREE_S секунд
+        (или сработал предохранитель MAZE_TIMEOUT_S)."""
+        if not self._ultra_ok():
+            logger.warning('[Maze] HC-SR04 не инициализирован')
+            return
+        cam = self._camera
+        if cam:
+            try:
+                cam.set_cv_mode('none')
+            except Exception:
+                pass
+        self._distance_filter.reset()
+        use_gyro = False
+        if self._heading.available:
+            self._heading.begin()
+            use_gyro = self._heading.calibrate(ctx.wait)
+        turn_deg = 90.0 if MAZE_TURN_DIR == 'right' else -90.0
+        try:
+            turns_done = 0
+            free_since = None
+            deadline = time.monotonic() + MAZE_TIMEOUT_S
+            while ctx.alive and time.monotonic() < deadline:
+                d = self._safe_distance()
+                if d is None:                # нет данных — стоим (безопасность)
+                    self._halt(ctx)
+                    ctx.wait(0.2)
+                    continue
+                wall = d <= MAZE_WALL_STOP_CM
+                if turns_done < MAZE_TURNS and wall:
+                    self._halt(ctx)
+                    self._send(ctx, self.motors.move,
+                               self._spd(AUTO_SLOW_SPEED),
+                               'backward', 'no', 0.5)
+                    ctx.wait(MAZE_BACKUP_S)
+                    self._halt(ctx)
+                    self._turn(ctx, turn_deg, use_gyro)
+                    turns_done += 1
+                    self._distance_filter.reset()
+                    free_since = None
+                    logger.info(f'[Maze] turn {turns_done}/{MAZE_TURNS} '
+                                f'({MAZE_TURN_DIR})')
+                elif turns_done >= MAZE_TURNS:
+                    if wall:
+                        # стен больше, чем ожидалось — поворачиваем дальше
+                        # (страховка на случай «не-U» конфигурации)
+                        self._turn(ctx, turn_deg, use_gyro)
+                        turns_done += 1
+                        self._distance_filter.reset()
+                        free_since = None
+                        continue
+                    if d >= MAZE_EXIT_FREE_CM:
+                        free_since = free_since or time.monotonic()
+                        if time.monotonic() - free_since >= MAZE_EXIT_FREE_S:
+                            logger.info('[Maze] exit reached')
+                            break
+                    else:
+                        free_since = None
+                    self._forward(ctx, MAZE_SPEED)
+                else:
+                    self._forward(ctx, MAZE_SPEED)
+                ctx.wait(0.1)
+            if ctx.alive and time.monotonic() >= deadline:
+                logger.warning('[Maze] timeout — stopping')
+        finally:
+            if self._heading.available:
+                self._heading.end()
+            self._halt(ctx)
+            self._set_steer(ctx, 90)

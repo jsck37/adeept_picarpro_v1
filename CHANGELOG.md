@@ -1,5 +1,50 @@
 # CHANGELOG — PiCar-Pro Merged Edition v1.0.0
 
+## MOD v1.6.7 — Obstacle Grab и Maze U, три YOLO-режима в UI, pigpio убран, одна камера
+
+Правка по списку задач владельца (после проверки v1.6.6 на железе).
+
+* **УДАЛЕНЫ режимы, требовавшие вторую (надземную) камеру** — бортовая
+  ArUco-навигация, Color Scan, NavTCP-сервер (порт 5001), UDP-стриминг
+  IMU (порт 5005) и хост-скрипт: файлы `picarpro/functions/aruco_nav.py`,
+  `color_scan.py`, `imu_stream.py`, `picarpro/routes/nav_server.py`,
+  `tools/aruco_nav_host.py`, `docs/ARUCO_NAV.md` и все упоминания в коде,
+  UI, config и документации. У робота одна камера на клешне — все режимы
+  теперь работают с ней. Команды `aruco_nav`/`color_scan` отвечают
+  `{ok: False}` (из тестов видно, что удалены).
+* **Новый автономный режим «Obstacle Grab»** (`obstacleGrab`): подъезд к
+  препятствию, захват клешнёй, перенос в сторону (разворот ~150°, отвоз,
+  отпускание) и возврат. Цель — крупнейший YOLO-объект в кадре: робот
+  доворачивает по центру объекта; если YOLO не дал объектов — подъезд
+  «вслепую» по HC-SR04 до OBSTACLE_GRAB_STOP_CM. Параметры — блок
+  OBSTACLE_GRAB_* в config.py. Идея расталкивания клешнёй (Push Mode)
+  сохранена как фоновый режим без камеры.
+* **Новый автономный режим «Maze U»** (`mazeU`): проход лёгкого
+  U-образного лабиринта по ультразвуку — коридор до стены -> поворот 90°
+  -> второй коридор -> поворот 90° -> выход (переднее «свободно» дольше
+  MAZE_EXIT_FREE_S). Направление и число поворотов — MAZE_TURN_DIR /
+  MAZE_TURNS; камера включается только для наблюдения. Предохранитель —
+  MAZE_TIMEOUT_S.
+* **Три YOLO-режима в UI** (Computer Vision): «YOLO» — рамки (yoloDetect),
+  «YOLO Mask» — маски объектов (yoloSeg), «YOLO Sem» — семантическая
+  карта классов с легендой доли кадра по классам (yoloSemantic). Один
+  seg-инференс, три представления; в статусе (`yolo_status`/d.yolo)
+  появилось `semantics` — {класс: % кадра}. Рамки в yoloDetect не рисуют
+  маски даже на seg-модели (легче оверлей).
+* **Кнопка каждого режима в панели Autonomous**: Radar, Auto Drive,
+  IR Line, CV Line, Keep Dist, Hand, Color, Watchdog, Obstacle Grab,
+  Maze U + Stop (раньше в панели были только три). Push Mode остался
+  отдельной кнопкой рядом со Steady Cam.
+* **pigpio ПОЛНОСТЬЮ убран** — setup.py больше не ставит пакет pigpio/
+  pigpiod-демон, ШИМ моторов всегда RPi.GPIO (`picarpro/hardware/pwm.py`
+  упрощён, MOTOR_PWM_BACKEND из config удалён). Причина: отдельный демон
+  и зависимость себя не окупили, RPi.GPIO проще и работает на Pi 5.
+* **Тесты**: +18 (реестр режимов, mazeU — два поворота и выход,
+  obstacleGrab — слепой захват/перенос/возврат и доворот по YOLO-цели,
+  три CV-режима, семантика в статусе, отсутствие pigpio); переработаны
+  test_mod_v110 (без NavTCP/IMU/ArUco) и test_v153_hw (RPi.GPIO PWM).
+  Полный набор: **531 passed, 0 skipped** (один давний тайминг-тест больше не скипается).
+
 ## MOD v1.6.6 — сегментация YOLO (маски объектов) + модели в архиве прошивки
 
 Ответ на вопрос владельца «возможно ли интегрировать сегментацию» —
@@ -1045,7 +1090,7 @@ apt upgrade, python3-opencv из apt) встроены в тихий устан�
 * установщик в финальной подсказке напоминает про `tools/setup_swap.sh`
   (обязательно для YOLO на 1 ГБ ОЗУ) и `tools/selftest.py`.
 
-## MOD v1.1.0 — YOLO на 1 ГБ ОЗУ + порт hugo-Peltier + MPU6050 fix + servo UX
+## MOD v1.1.0 — YOLO на 1 ГБ ОЗУ + сторонние режимы навигации + MPU6050 fix + servo UX
 
 ### YOLO/OpenCV на RPi 3B+ (1 ГБ ОЗУ)
 * `picarpro/camera/yolo_detector.py` — инференс YOLO через `cv2.dnn` (ONNX),
@@ -1058,7 +1103,11 @@ apt upgrade, python3-opencv из apt) встроены в тихий устан�
 * `tools/export_yolo_onnx.py` — экспорт .pt → .onnx + classes.txt (на ПК);
   `docs/YOLO_GUIDE.md`.
 
-### Порт hugo-Peltier/Adeept-picarPro
+### Сторонние режимы навигации и работы с препятствиями
+
+(компоненты этого раздела удалены в v1.6.7 — требовали вторую
+(надземную) камеру и хост-компоненты; вместо них — автономные режимы
+obstacleGrab и mazeU, работающие с одной бортовой камерой)
 * `picarpro/routes/nav_server.py` — NavTCP на порту **5001** (в оригинале
   5000 конфликтовал с Flask): FORWARD/LEFT/RIGHT/BACKWARD/STOP/SPEED/
   PICK_BLUE/DROP/STATUS/QUIT + watchdog STOP при потере хоста;

@@ -10,7 +10,7 @@
 from picarpro.drive import drive
 from picarpro.control import READ_ONLY_CMDS
 from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
-                                           CV_YOLO)
+                                           CV_YOLO, CV_YOLO_SEG, CV_YOLO_SEM)
 from config import (
     SERVO_COUNT, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
@@ -238,7 +238,8 @@ def process(state, data, client=None):
 
     elif cmd == 'cv_mode':
         mode_map = {'none': CV_NONE, 'findlineCV': CV_LINE,
-                    'trackHand': CV_HAND, 'yoloDetect': CV_YOLO}
+                    'trackHand': CV_HAND, 'yoloDetect': CV_YOLO,
+                    'yoloSeg': CV_YOLO_SEG, 'yoloSemantic': CV_YOLO_SEM}
         m = mode_map.get(str(p.get('mode', 'none')))
         if m is not None:
             state.init_camera()
@@ -253,46 +254,13 @@ def process(state, data, client=None):
         else:
             r.update({'loaded': False, 'objects': []})
 
-    # ------------------------------------------------------------------
-    # Портированные режимы из hugo-Peltier/Adeept-picarPro
-    # ------------------------------------------------------------------
-    elif cmd == 'aruco_nav':
-        # бортовая ArUco-навигация (порт Demo.py, камера Pi)
-        action = str(p.get('action', 'status'))
-        if action == 'status' and not state.aruco_nav:
-            r = {'ok': True, 'active': False, 'finished': False}
-        else:
-            state.init_camera()
-            if not state.aruco_nav and state.camera:
-                from picarpro.functions.aruco_nav import ArucoNavigator
-                state.aruco_nav = ArucoNavigator(state, state.camera)
-            if not state.aruco_nav:
-                r = {'ok': False, 'error': 'Камера недоступна'}
-            else:
-                r = _service_cmd(state.aruco_nav, action)
-
     elif cmd == 'push':
-        # расталкивание препятствий клешней (порт Phase 2)
+        # расталкивание препятствий клешней (по HC-SR04, без камеры)
         action = str(p.get('action', 'status'))
         if not state.pusher:
             from picarpro.functions.arm_push import ObstaclePusher
             state.pusher = ObstaclePusher(state)
         r = _service_cmd(state.pusher, action)
-
-    elif cmd == 'color_scan':
-        # сканирование рукой + цветовой захват (порт colortracking.py)
-        action = str(p.get('action', 'status'))
-        if action == 'status' and not state.color_scan:
-            r = {'ok': True, 'active': False, 'mode': 'IDLE'}
-        else:
-            state.init_camera()
-            if not state.color_scan and state.camera:
-                from picarpro.functions.color_scan import ColorArmScanner
-                state.color_scan = ColorArmScanner(state, state.camera)
-            if not state.color_scan:
-                r = {'ok': False, 'error': 'Камера недоступна'}
-            else:
-                r = _service_cmd(state.color_scan, action)
 
     elif cmd == 'hand_color':
         state.init_camera()

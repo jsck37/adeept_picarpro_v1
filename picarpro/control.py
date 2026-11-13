@@ -32,9 +32,7 @@ ALWAYS_ALLOWED = READ_ONLY_CMDS | {'estop'}
 # команды, у которых часть действий — только чтение
 READ_ACTIONS = {
     'mission': frozenset(('list', 'status')),
-    'aruco_nav': frozenset(('status',)),
     'push': frozenset(('status',)),
-    'color_scan': frozenset(('status',)),
 }
 
 

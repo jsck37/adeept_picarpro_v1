@@ -5,7 +5,7 @@ from config import (
     MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2,
     MOTOR_PWM_FREQ, DEFAULT_SPEED,
     TURN_RADIUS_MIN, TURN_RADIUS_MAX,
-    MOTOR_MAX_SPEED_DEFAULT, MOTOR_PWM_BACKEND,
+    MOTOR_MAX_SPEED_DEFAULT,
     MOTOR_INVERT_RIGHT, MOTOR_INVERT_LEFT,
 )
 from picarpro.hardware.pwm import make_pwm
@@ -45,10 +45,8 @@ class MotorController:
             for pin in (MOTOR_A_EN, MOTOR_A_IN1, MOTOR_A_IN2,
                         MOTOR_B_EN, MOTOR_B_IN1, MOTOR_B_IN2):
                 GPIO.setup(pin, GPIO.OUT)
-            self._pwm_a, backend = make_pwm(GPIO, MOTOR_A_EN, MOTOR_PWM_FREQ,
-                                            MOTOR_PWM_BACKEND)
-            self._pwm_b, _ = make_pwm(GPIO, MOTOR_B_EN, MOTOR_PWM_FREQ,
-                                      MOTOR_PWM_BACKEND)
+            self._pwm_a, backend = make_pwm(GPIO, MOTOR_A_EN, MOTOR_PWM_FREQ)
+            self._pwm_b, _ = make_pwm(GPIO, MOTOR_B_EN, MOTOR_PWM_FREQ)
             self._pwm_a.start(0)
             self._pwm_b.start(0)
             self.pwm_backend = backend

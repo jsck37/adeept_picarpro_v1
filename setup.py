@@ -352,31 +352,6 @@ def stage_4_pip_packages(debian_ver):
         run_cmd(cmd, critical=False)
 
 
-def stage_4b_pigpio():
-    """Демон pigpiod для стабильного ШИМ моторов (DMA). Не критично: без него
-    моторы работают на RPi.GPIO. Pi 5 (RP1) pigpio не поддерживает."""
-    print(f"  {DIM}[*]{RST} pigpio (hardware-timed motor PWM)...")
-    try:
-        with open('/proc/device-tree/model') as f:
-            model = f.read()
-    except Exception:
-        model = ''
-    if 'Raspberry Pi 5' in model:
-        print(f"  {YLW}[!]{RST} Pi 5: pigpio не поддерживается — остаётся RPi.GPIO PWM")
-        return
-    run_cmd("apt-get install -y --no-install-recommends pigpio python3-pigpio", critical=False)
-    dropin = "/etc/systemd/system/pigpiod.service.d"
-    try:
-        os.makedirs(dropin, exist_ok=True)
-        with open(os.path.join(dropin, "picarpro.conf"), "w") as f:
-            # -l: только localhost; -s 10: выборка 10 мкс (вдвое меньше нагрузки на CPU)
-            f.write("[Service]\nExecStart=\nExecStart=/usr/bin/pigpiod -l -s 10\n")
-    except Exception as e:
-        print(f"  {YLW}[!]{RST} pigpiod drop-in: {e}")
-    run_cmd("systemctl daemon-reload", critical=False)
-    run_cmd("systemctl enable --now pigpiod", critical=False)
-
-
 def stage_5_hardware_config():
     print(f"\n  {BLU}[5/8]{RST} Configuring hardware...")
 
@@ -651,7 +626,6 @@ def main():
     stage_2_swap()
     stage_3_apt_packages(debian_ver, codename)
     stage_4_pip_packages(debian_ver)
-    stage_4b_pigpio()
     stage_5_hardware_config()
     hotspot_cfg = stage_6_wifi_hotspot(debian_ver) or {
         'ssid': 'Adeept_Robot'}

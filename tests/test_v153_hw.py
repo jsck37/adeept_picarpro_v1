@@ -1,7 +1,6 @@
-"""v1.5.3: pigpio-ШИМ моторов, аппаратный MJPEG, кап FPS стрима."""
-import sys
+"""v1.5.3: ШИМ моторов (с v1.6.7 — только RPi.GPIO), аппаратный MJPEG,
+кап FPS стрима."""
 import time
-import types
 
 import pytest
 
@@ -16,73 +15,22 @@ def wait_for(cond, timeout=3.0, step=0.02):
 
 
 # ---------------------------------------------------------------------------
-class _FakePi:
-    connected = True
+class TestRpigpioPwm:
+    """v1.6.7: pigpio убран — ШИМ всегда через RPi.GPIO."""
 
-    def __init__(self):
-        self.calls = []
-
-    def set_PWM_range(self, pin, r): self.calls.append(('range', pin, r))
-    def set_PWM_frequency(self, pin, f): self.calls.append(('freq', pin, f))
-    def set_PWM_dutycycle(self, pin, d): self.calls.append(('duty', pin, d))
-
-
-@pytest.fixture
-def fake_pigpio(monkeypatch):
-    from picarpro.hardware import pwm
-    mod = types.ModuleType('pigpio')
-    pi = _FakePi()
-    mod.pi = lambda: pi
-    monkeypatch.setitem(sys.modules, 'pigpio', mod)
-    pwm.reset_for_tests()
-    yield pi
-    pwm.reset_for_tests()
-
-
-class TestPigpioPwm:
-    def test_motors_use_pigpio_when_daemon_available(self, fake_pigpio, fake_gpio):
-        from config import MOTOR_A_EN
+    def test_backend_is_rpigpio(self, fake_gpio):
         from picarpro.hardware.motors import MotorController
         m = MotorController()
-        assert m.pwm_backend == 'pigpio'
-        m.move(50, 'forward', 'no')
-        duties = [c for c in fake_pigpio.calls if c[0] == 'duty' and c[1] == MOTOR_A_EN]
-        assert duties[-1][2] == 500           # 50 % при разрешении 1000
-        m.stop()
-        assert [c for c in fake_pigpio.calls if c[0] == 'duty' and c[1] == MOTOR_A_EN][-1][2] == 0
-        assert ('range', MOTOR_A_EN, 1000) in fake_pigpio.calls
+        assert m.pwm_backend == 'rpigpio'
 
-    def test_fallback_when_daemon_down(self, monkeypatch, fake_gpio):
-        from picarpro.hardware import pwm
-        from picarpro.hardware.motors import MotorController
-        mod = types.ModuleType('pigpio')
-        down = _FakePi()
-        down.connected = False
-        mod.pi = lambda: down
-        monkeypatch.setitem(sys.modules, 'pigpio', mod)
-        pwm.reset_for_tests()
-        assert MotorController().pwm_backend == 'rpigpio'
-        pwm.reset_for_tests()
-
-    def test_fallback_without_module(self, monkeypatch, fake_gpio):
-        from picarpro.hardware import pwm
-        from picarpro.hardware.motors import MotorController
-        monkeypatch.setitem(sys.modules, 'pigpio', None)     # import -> ImportError
-        pwm.reset_for_tests()
-        assert MotorController().pwm_backend == 'rpigpio'
-        pwm.reset_for_tests()
-
-    def test_forced_rpigpio(self, fake_pigpio, fake_gpio, monkeypatch):
-        import picarpro.hardware.motors as mm
-        monkeypatch.setattr(mm, 'MOTOR_PWM_BACKEND', 'rpigpio')
-        assert mm.MotorController().pwm_backend == 'rpigpio'
-
-    def test_duty_clamped(self, fake_pigpio):
-        from picarpro.hardware.pwm import PigpioPWM
-        p = PigpioPWM(fake_pigpio, 4, 1000)
-        p.ChangeDutyCycle(150)
-        p.ChangeDutyCycle(-5)
-        assert [c[2] for c in fake_pigpio.calls if c[0] == 'duty'] == [1000, 0]
+    def test_make_pwm_uses_gpio_pwm(self, fake_gpio):
+        import RPi.GPIO as GPIO_F  # фейковый модуль из тестовой среды
+        from picarpro.hardware.pwm import make_pwm
+        pwm, backend = make_pwm(GPIO_F, 12, 100)
+        assert backend == 'rpigpio'
+        pwm.start(50)
+        pwm.ChangeDutyCycle(75)
+        pwm.stop()
 
 
 # ---------------------------------------------------------------------------

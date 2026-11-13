@@ -123,8 +123,7 @@ function sendCommand(cmd, params) {
       'i2c_scan': '/cmd/i2c_scan',
       'web_active': '/cmd/web_active', 'clear_log': '/cmd/clear_log',
       'steady': '/cmd/steady', 'battery': '/cmd/battery',
-      'aruco_nav': '/cmd/aruco_nav', 'push': '/cmd/push',
-      'color_scan': '/cmd/color_scan', 'yolo_status': '/cmd/yolo_status',
+      'push': '/cmd/push', 'yolo_status': '/cmd/yolo_status',
       'mission': '/cmd/mission', 'estop': '/cmd/estop', 'take_control': '/cmd/take_control',
       'release_control': '/cmd/release_control',
     };
@@ -495,7 +494,8 @@ function updateStatus(d) {
   var autoModeLabels = {
     'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
     'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
-    'keepDistance': 'Distance', 'findColor': 'Color Track', 'watchDog': 'Watchdog'
+    'keepDistance': 'Distance', 'findColor': 'Color Track', 'watchDog': 'Watchdog',
+    'obstacleGrab': 'Obstacle Grab', 'mazeU': 'Maze U'
   };
   if (d.auto_mode !== undefined) currentAutoMode = d.auto_mode;
   var radarBox = document.getElementById('radar-box');
@@ -526,15 +526,9 @@ function updateStatus(d) {
       }
     });
   }
-  // статусы портированных режимов
-  if (d.aruco_nav && d.aruco_nav.active !== undefined) {
-    setPortedMode('aruco', d.aruco_nav.active);
-  }
+  // статус Push Mode (толчок препятствий клешнёй по HC-SR04)
   if (d.push && d.push.active !== undefined) {
     setPortedMode('push', d.push.active);
-  }
-  if (d.color_scan && d.color_scan.active !== undefined) {
-    setPortedMode('colorscan', d.color_scan.active);
   }
   var mpu = d.mpu6050;
   if (!('mpu6050' in d)) {
@@ -1237,14 +1231,10 @@ if (steadyToggle) {
   });
 }
 
-// --- портированные режимы (hugo-Peltier): ArUco nav / Push / Color Scan -----
+// --- Push Mode: расталкивание препятствий клешнёй по HC-SR04 ----------------
 var portedModes = {
-  aruco: { btn: 'aruco-toggle', cmd: 'aruco_nav', active: false,
-           labelOn: 'Stop Nav', labelOff: 'ArUco Nav' },
   push:  { btn: 'push-toggle', cmd: 'push', active: false,
            labelOn: 'Stop Push', labelOff: 'Push Mode' },
-  colorscan: { btn: 'colorscan-toggle', cmd: 'color_scan', active: false,
-               labelOn: 'Stop Scan', labelOff: 'Color Scan' },
 };
 
 Object.keys(portedModes).forEach(function(key) {

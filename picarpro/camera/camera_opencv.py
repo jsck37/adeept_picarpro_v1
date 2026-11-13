@@ -50,7 +50,9 @@ CV_LINE = 'findlineCV'
 CV_HAND = 'trackHand'
 CV_FINDCOLOR = 'findColor'
 CV_WATCHDOG = 'watchDog'
-CV_YOLO = 'yoloDetect'      # нейросетевое детектирование объектов (ONNX, cv2.dnn)
+CV_YOLO = 'yoloDetect'        # YOLO: рамки объектов (ONNX, cv2.dnn)
+CV_YOLO_SEG = 'yoloSeg'       # YOLO-СЕГМЕНТАЦИЯ: маски найденных объектов
+CV_YOLO_SEM = 'yoloSemantic'  # YOLO-СЕМАНТИКА: карта классов + площади в кадре
 
 HAND_AREA_MIN = 800          # px² на полном кадре
 LINE_BAND_PAD = 6            # запас строк вокруг опорных линий CV_LINE_POS_*
@@ -191,6 +193,8 @@ class CVThread(threading.Thread):
             CV_FINDCOLOR: self._find_color,
             CV_WATCHDOG: self._watch_dog,
             CV_YOLO: self._yolo_detect,
+            CV_YOLO_SEG: self._yolo_detect,
+            CV_YOLO_SEM: self._yolo_detect,
         }.get(self.cv_mode)
         if handler:
             handler(frame)
@@ -389,7 +393,15 @@ class CVThread(threading.Thread):
             objs = self.yolo.infer(frame)
         if self.overlay_wanted:
             bgr = self._to_bgr(frame)
-            self.yolo.draw(bgr, objs)
+            # один и тот же seg-инференс, три представления (v1.6.7):
+            # yoloDetect — только рамки; yoloSeg — маски объектов;
+            # yoloSemantic — карта классов (заливка + легенда площадей)
+            if self.cv_mode == CV_YOLO_SEM:
+                self.yolo.draw_semantic(bgr, objs)
+            elif self.cv_mode == CV_YOLO_SEG:
+                self.yolo.draw(bgr, objs, masks=True)
+            else:
+                self.yolo.draw(bgr, objs, masks=False)
             cv2.putText(bgr, f'YOLO-{self.yolo.task} {len(objs)} obj '
                              f'({self.yolo.last_infer_ms:.0f} ms)',
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -431,7 +443,7 @@ class Camera:
         self._frame = None
         self._frame_id = 0
         self._frame_cond = threading.Condition()
-        # сырой RGB-кадр (ArUco, color_scan) — по тому же принципу
+        # сырой RGB-кадр для внешних потребителей — по тому же принципу
         self._last_raw = None
         self._raw_id = 0
         self._raw_cond = threading.Condition()
@@ -696,7 +708,7 @@ class Camera:
         self._demand_changed()
 
     def raw_demand_open(self):
-        """Регистрация потребителя сырых кадров (aruco_nav, color_scan)."""
+        """Регистрация потребителя сырых кадров."""
         with self._demand_lock:
             self._raw_demand += 1
         self._demand_changed()
@@ -866,7 +878,7 @@ class Camera:
                 if captured is not None and _HAS_CV2 and len(captured.shape) == 3:
                     # Нормализация к настоящему RGB: и Picamera2 "RGB888"
                     # (байты BGR), и OpenCV VideoCapture отдают BGR, а все
-                    # потребители (CV, ArUco, color_scan, YOLO) ждут RGB.
+                    # потребители (CV, YOLO) ждут RGB.
                     captured = cv2.cvtColor(captured, cv2.COLOR_BGR2RGB)
                 raw = captured
                 if raw is None or len(raw.shape) != 3:
@@ -933,9 +945,8 @@ class Camera:
     def wait_raw_frame(self, last_id=0, timeout=1.0):
         """Дождаться СВЕЖЕГО сырого кадра: (id, кадр) или (last_id, None).
 
-        Кадр отдаётся без копии (только для чтения): потребителям ArUco и
-        color_scan раньше приходилось по 0.9 МБ копировать и обрабатывать
-        один и тот же кадр по несколько раз за период камеры.
+        Кадр отдаётся без копии (только для чтения): 0.9 МБ на кадр не
+        приходится копировать каждому потребителю отдельно.
         """
         self._ensure_started()
         with self._raw_cond:
@@ -970,7 +981,7 @@ class Camera:
             self.stream_close()
 
     def set_cv_mode(self, mode):
-        if mode == CV_YOLO:
+        if mode in (CV_YOLO, CV_YOLO_SEG, CV_YOLO_SEM):
             self.cv_thread.yolo.load()   # ленивая загрузка ONNX при включении
         self.cv_thread.cv_mode = mode
         if mode == CV_NONE:
