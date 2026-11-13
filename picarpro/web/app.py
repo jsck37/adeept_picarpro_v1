@@ -28,7 +28,8 @@ from picarpro.web.auth import (SECURITY_HEADERS, request_authorized,
 from picarpro.routes.bluetooth import (
     scan_devices, pair_and_connect, disconnect_device,
     load_config as bt_load_config, save_config as bt_save_config,
-    _load_hid_sony, validate_mac,
+    _load_hid_sony, validate_mac, BluetoothBusy,
+    diagnose as bt_diagnose,
 )
 from config import (FLASK_PORT, BASE_DIR, CORS_ORIGINS,
                     TELEMETRY_INTERVAL_S, MAX_CONTENT_LENGTH, UPDATE_MAX_BYTES)
@@ -296,35 +297,30 @@ def create_app(state):
         return jsonify(r)
 
     # ---- bluetooth --------------------------------------------------------
-    def _is_gamepad(name):
-        n = (name or '').lower()
-        return any(k in n for k in (
-            'wireless controller', 'dualshock', 'ds4', 'ds5', 'dualsense',
-            'xbox', 'gamepad', '8bitdo', 'pro controller', 'joy-con',
-            'sony interactive', 'playstation', 'nintendo',
-        ))
-
     @app.route('/api/bt/scan')
     def bt_scan():
         try:
-            devices = scan_devices(scan_time=6)
-            for d in devices:
-                d['is_gamepad'] = _is_gamepad(d['name'])
-            devices.sort(key=lambda d: (0 if d['is_gamepad'] else 1, d['name']))
-            return jsonify({'ok': True, 'devices': devices})
+            return jsonify({'ok': True, 'devices': scan_devices(scan_time=6)})
+        except BluetoothBusy as e:
+            return jsonify({'ok': False, 'busy': True, 'error': str(e), 'devices': []})
         except Exception as e:
             logger.error(f'[BT] scan error: {e}')
-            return jsonify({'ok': False, 'error': str(e), 'devices': []})
+            return jsonify({'ok': False, 'error': str(e)[:200], 'devices': [],
+                            'diagnose': bt_diagnose()})
 
-    def _bt_connect(mac, on_success=None):
-        """Сопряжение в фоновом потоке с таймаутом ожидания 45 с (общий код
-        /api/bt/connect и /api/bt/auto_connect, раньше — копия в каждом)."""
+    @app.route('/api/bt/diagnose')
+    def bt_diag():
+        return jsonify({'ok': True, **bt_diagnose()})
+
+    def _bt_connect(mac, on_success=None, allow_pairing=True):
+        """Подключение в фоновом потоке с ожиданием до 60 с (общий код
+        /api/bt/connect и /api/bt/auto_connect)."""
         result = {'ok': False, 'message': ''}
         done = threading.Event()
 
         def _do():
             try:
-                ok, msg = pair_and_connect(mac, state.ds4)
+                ok, msg = pair_and_connect(mac, state.ds4, allow_pairing=allow_pairing)
                 result['ok'] = ok
                 result['message'] = msg
                 if ok and on_success:
@@ -335,7 +331,8 @@ def create_app(state):
                 done.set()
 
         threading.Thread(target=_do, daemon=True).start()
-        done.wait(timeout=45)
+        if not done.wait(timeout=60):
+            result['message'] = 'Timed out — check the controller and retry'
         return result
 
     @app.route('/api/bt/connect', methods=['POST'])
@@ -382,7 +379,8 @@ def create_app(state):
         mac = cfg.get('last_gamepad_mac')
         if not mac:
             return jsonify({'ok': False, 'error': 'No saved gamepad MAC'})
-        return jsonify(_bt_connect(mac))
+        # автоподключение: только connect уже сопряжённого — без remove/pair
+        return jsonify(_bt_connect(mac, allow_pairing=False))
 
     @app.route('/api/bt/load_hid_sony', methods=['POST'])
     def bt_load_hid():

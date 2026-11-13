@@ -14,7 +14,7 @@ class TestInit:
         s = clean_state
         assert s.speed == 50
         assert s.running is True
-        assert s.crane_grip_position == 'high'
+        assert s.crane_grip_position == 'mid'   # v1.6.4: high убран
         assert s.crane_arm_closed is False
 
 
@@ -37,7 +37,7 @@ class TestStatus:
         assert st['ds4']['connected'] is False
         # серво-статус
         assert len(st['servo_angles']) == 7
-        assert st['crane_grip_position'] == 'high'
+        assert st['crane_grip_position'] == 'mid'
 
     def test_hw_flags(self, clean_state):
         hw = clean_state.get_status()['hw']

@@ -106,7 +106,8 @@ class TestLedBuzzer:
         assert r['ok'] is False
 
     def test_buzzer_melodies(self, state):
-        for melody in ('beep', 'birthday', 'alarm'):
+        # v1.6.4: birthday заменён на tetris (Korobeiniki, ~10 с)
+        for melody in ('beep', 'tetris', 'alarm'):
             r = call(state, 'buzzer', {'melody': melody})
             assert r['ok'] is True
         r = call(state, 'buzzer_stop')
@@ -121,14 +122,16 @@ class TestCrane:
         assert r['closed'] is False
 
     def test_grip_positions(self, state):
-        # v1.3.0: grip 100..180 (углы в механический стоп больше не проходят)
+        # v1.6.4: grip_high (180°) удалён — остались low/mid
         from config import SERVO_CRANE_GRIP
-        for act, angle in (('grip_low', 100), ('grip_mid', 135),
-                           ('grip_high', 180)):
+        for act, angle in (('grip_low', 100), ('grip_mid', 135)):
             r = call(state, 'crane', {'action': act})
             assert r['ok'] is True
             assert state.servos.get_angle(SERVO_CRANE_GRIP) == angle
-        assert state.crane_grip_position == 'high'
+        # grip_high больше не существует — команда отклоняется как unknown
+        r = call(state, 'crane', {'action': 'grip_high'})
+        assert r['ok'] is False
+        assert state.crane_grip_position == 'mid'
 
     def test_grip_custom_angle(self, state):
         from config import SERVO_CRANE_GRIP

@@ -5,7 +5,7 @@ from config import (
     SERVO_COUNT, SERVO_MIN_PULSE, SERVO_MAX_PULSE, SERVO_INIT_ANGLE,
     SERVO_INIT_ANGLES, SERVO_LIMITS, SERVO_MOVE_ON_BOOT,
     SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
-    CRANE_ARM_OPEN, CRANE_GRIP_HIGH,
+    CRANE_ARM_OPEN, CRANE_GRIP_MID,
 )
 
 try:
@@ -187,7 +187,7 @@ class ServoController:
                         # наклон на 4); раньше каналы были захардкожены
                         init_angle = (CRANE_ARM_OPEN
                                       if i == SERVO_CRANE_ARM else
-                                      (CRANE_GRIP_HIGH
+                                      (CRANE_GRIP_MID
                                        if i == SERVO_CRANE_GRIP else
                                        SERVO_INIT_ANGLE))
                     init_angle = self._clamp(i, init_angle)

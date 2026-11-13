@@ -140,8 +140,8 @@
               <canvas id="radar-canvas" width="280" height="190"
                       style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
               <div style="margin-top:4px;font-size:.7rem;color:#80868b;line-height:1.45">
-                Radar: сканирует сервоприводом ULTRASONIC_SCAN_SERVO (по умолчанию рулевое;
-                если датчик стоит на панораме камеры — укажите SERVO_CAM_PAN в config.py).
+                Radar: сканирует панорамой камеры (SERVO_CAM_PAN, v1.6.4) — колёса
+                стоят на месте. Серво настраивается в config.py (ULTRASONIC_SCAN_SERVO).
               </div>
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
@@ -197,14 +197,11 @@
               </div>
               <div class="ds4-col">
                 <div style="font-size:.68rem;color:#5f6368;line-height:1.6">
-                  <div><b>L-stick</b> Drive &nbsp; <b>R-stick</b> Camera</div>
-                  <div><b>L2/R2</b> Turbo &nbsp; <b>L1</b> Side lights</div>
+                  <div><b>L-stick</b> Drive &nbsp; <b>R-stick</b> Camera (5&deg;/шаг)</div>
+                  <div><b>L2/R2</b> Speed 100% (без авто-вперёд) &nbsp; <b>L1</b> Side lights</div>
                   <div><b>R1</b> Beep &nbsp; <b>Dpad&#9650;</b> Headlight</div>
                   <div><b>Dpad&#9660;</b> Rainbow &nbsp; <b>Dpad&#9664;/&#9654;</b> Blinkers</div>
-                  <div><b>&#215;</b> Arm toggle &nbsp; <b>&#9675;</b> Grip tilt</div>
-                  <div><b>&#9651;</b> CV line &nbsp; <b>&#9633;</b> Hand track</div>
-                  <div><b>Options</b> Police+turbo &nbsp; <b>Share</b> Police</div>
-                  <div><b>PS</b> Home all servos</div>
+                  <div><b>&#215;</b> Arm toggle &nbsp; <b>&#9675;</b> Grip tilt (low/mid)</div>
                 </div>
               </div>
             </div>
@@ -294,11 +291,10 @@
               <div class="btn-group" id="crane-arm-group">
                 <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle">Grab / Release</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">High (180°)</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">Mid (135°)</span></div>
               <div class="btn-group" id="crane-grip-group">
                 <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
-                <button class="gbtn crane-grip-btn" id="crane-grip-mid" data-action="grip_mid">Mid</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-high" data-action="grip_high">High</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid">Mid</button>
               </div>
               <div style="margin-top:8px;font-size:.7rem;color:#80868b;line-height:1.45">Каналы клешни этой сборки (v1.6.2, подтверждено с железа): канал 5 — наклон (SERVO_CRANE_GRIP, ползунок «Crane Tilt»), канал 6 — захват (SERVO_CRANE_ARM, ползунок «Crane Grab»); канал 4 (локоть) — резерв, не подключён. Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
             </div>
@@ -383,6 +379,10 @@
             <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Main Headlight (robot-hat)</div>
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main">Headlight</button>
+            </div>
+            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Side Lights (габариты, L1)</div>
+            <div class="headlight-row" style="margin-bottom:10px">
+              <button class="headlight-btn off" id="hl-side" type="button">Side lights</button>
             </div>
             <div class="signal-section">
               <div class="signal-section-title">Turn Signals <span class="signal-toggle-hint">(toggle)</span></div>
@@ -501,7 +501,7 @@
           <div id="buzzer-controls">
             <div class="btn-group" id="buzzer-group">
               <button class="gbtn" data-buzzer="beep">Beep</button>
-              <button class="gbtn" data-buzzer="birthday">Birthday</button>
+              <button class="gbtn" data-buzzer="tetris">Tetris 8-bit</button>
               <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
             </div>
           </div>

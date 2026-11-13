@@ -57,18 +57,28 @@ def main():
         except Exception as e:
             logger.warning(f'[Boot] DS4 start failed: {e}')
         try:
-            from picarpro.routes.bluetooth import load_config, pair_and_connect
+            from picarpro.routes.bluetooth import load_config, auto_reconnect
             cfg = load_config()
             mac = cfg.get('last_gamepad_mac')
             if mac:
                 def _auto():
-                    time.sleep(3.0)
-                    logger.info(f'[BT] auto-connecting to {mac}...')
-                    ok, msg = pair_and_connect(mac, state.ds4)
-                    if ok:
-                        logger.info(f'[BT] auto-connect OK: {msg}')
-                    else:
-                        logger.warning(f'[BT] auto-connect failed: {msg}')
+                    # Только connect уже сопряжённого геймпада. Раньше при
+                    # выключенном геймпаде код удалял сопряжение и пытался
+                    # спарить заново — после каждой загрузки приходилось
+                    # спаривать геймпад вручную. Повторяем лишь пока не готов
+                    # сам Bluetooth (служба поднимается позже сервиса).
+                    for delay in (3.0, 15.0, 45.0):
+                        time.sleep(delay)
+                        logger.info(f'[BT] auto-connecting to {mac}...')
+                        ok, msg = auto_reconnect(mac, state.ds4)
+                        if ok:
+                            logger.info(f'[BT] auto-connect OK: {msg}')
+                            return
+                        logger.warning(f'[BT] auto-connect: {msg}')
+                        low = msg.lower()
+                        if 'adapter' in low or 'busy' in low or 'no response' in low:
+                            continue          # BT ещё поднимается
+                        return    # выключен/не сопряжён: сам подключится по кнопке PS
                 threading.Thread(target=_auto, daemon=True).start()
         except Exception as e:
             logger.warning(f'[Boot] BT auto-connect setup failed: {e}')

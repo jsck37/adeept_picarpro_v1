@@ -12,18 +12,19 @@ except ImportError:
 
 from config import (
     DS4_DEVICE_NAME, DS4_DEADZONE,
-    DS4_STEER_SENSITIVITY, DS4_CAM_SENSITIVITY,
+    DS4_STEER_SENSITIVITY, DS4_CAM_STEP_DEG, DS4_CAM_STEP_INTERVAL_S,
     DS4_HEARTBEAT_TIMEOUT, DS4_WATCHDOG_INTERVAL, DS4_READ_TIMEOUT,
     DEFAULT_SPEED, SERVO_CAM_PAN, SERVO_CAM_TILT,
     SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
-    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID,
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_STEER_RANGE,
 )
 
-CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
-CRANE_GRIP_LABELS = ['low', 'mid', 'high']
+# v1.6.4: позиция «high» убрана по требованию владельца (low/mid)
+CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID]
+CRANE_GRIP_LABELS = ['low', 'mid']
 
 _BTN_TL2 = getattr(ecodes, 'BTN_TL2', None) if HAS_EVDEV else None
 _BTN_TR2 = getattr(ecodes, 'BTN_TR2', None) if HAS_EVDEV else None
@@ -65,16 +66,16 @@ class DS4Controller:
         self._cam_pan = self._cam_tilt = 90
         self._headlights_on = False
         self._crane_arm_closed = False
-        self._crane_grip_index = 2
+        self._crane_grip_index = 1          # старт: mid (high убран v1.6.4)
         self._crane_grip_direction = -1
         self._lock = threading.Lock()
         self._smooth_lock = threading.Lock()
         self._smooth_targets = {}
+        self._last_cam_step = {'pan': 0.0, 'tilt': 0.0}
         self._left_blinking = False
         self._right_blinking = False
         self._auto_mode_active = False
         self._turbo_active = False
-        self._police_turbo_on = False
         self._rainbow_on = False
         self._rescan_flag = threading.Event()
         self._dpad_left_pressed = False
@@ -120,7 +121,6 @@ class DS4Controller:
             'connect_count': self._connect_count,
             'turbo': self._turbo_active,
             'rainbow': self._rainbow_on,
-            'police_turbo': self._police_turbo_on,
             'crane_arm_closed': self._crane_arm_closed,
             'crane_grip': grip,
         }
@@ -349,26 +349,11 @@ class DS4Controller:
         if self._shared_state:
             self._shared_state.crane_grip_position = label
 
-    def _start_auto(self, mode):
-        """Запуск автономного режима с геймпада (камера подключается через
-        set_camera, а не прямой записью в приватный атрибут)."""
-        st = self._shared_state
-        if not (self._autonomous and st):
-            return
-        if not st.camera:
-            st.init_camera()
-        if st.camera:
-            self._autonomous.set_camera(st.camera)
-            ok, _ = self._autonomous.start(mode)
-            self._auto_mode_active = bool(ok)
-
     def _btn_press(self, code):
-        if code in (ecodes.BTN_NORTH, ecodes.BTN_Y):
-            self._start_auto('trackLineCV')
-            return
-        if code in (ecodes.BTN_WEST, ecodes.BTN_X):
-            self._start_auto('trackHand')
-            return
+        # v1.6.4: △ (CV line) и □ (hand track) больше не запускают
+        # автономные режимы — кнопки «пустые» (останавливают активный
+        # режим наравне с остальными); Options/Share (police) и PS
+        # (home all servos) тоже убраны.
         self._stop_auto_if_active()
         if code in (ecodes.BTN_SOUTH, ecodes.BTN_A):
             if self._servos:
@@ -391,20 +376,6 @@ class DS4Controller:
         elif _BTN_TR2 is not None and code == _BTN_TR2:
             self._r2 = 1.0
             self._apply_turbo()
-        elif code == ecodes.BTN_MODE:
-            if self._servos:
-                self._servos.move_init()
-                self._cam_pan = self._cam_tilt = 90
-                self._crane_arm_closed = False
-                self._crane_grip_index = 2
-                self._crane_grip_direction = -1
-                if self._shared_state:
-                    self._shared_state.crane_arm_closed = False
-                    self._shared_state.crane_grip_position = 'high'
-        elif code == ecodes.BTN_START:
-            self._toggle_police_turbo()
-        elif code == ecodes.BTN_SELECT:
-            self._toggle_police_only()
 
     def _smooth_crane(self, sid, target, step=DS4_CRANE_STEP, delay=0.03):
         if not self._servos:
@@ -452,51 +423,42 @@ class DS4Controller:
 
     def _apply_turbo(self):
         turbo_on = (self._l2 > 0.5 or self._r2 > 0.5)
-        self._turbo_active = turbo_on
-        if turbo_on:
+        if turbo_on != self._turbo_active:
+            self._turbo_active = turbo_on
             self._apply_move()
 
     def _apply_move(self):
+        """v1.6.4: turbo (L2/R2) = потолок скорости 100 %, но БЕЗ
+        принудительного движения вперёд — направление и факт движения
+        задаёт только левый стик; нейтраль = стоим на месте. Режим
+        police+turbo (Options) удалён."""
         if not self._motors or not self._servos:
             return
         if self._shared_state and self._shared_state.web_active:
             return
         lx, ly = self._lx, self._ly
-        if self._turbo_active:
-            speed = 100
-            d = 'forward'
-        elif self._police_turbo_on:
-            speed = 100
-            d = 'forward' if ly >= 0 else 'backward'
-            if math.hypot(lx, ly) < 0.05:
-                self._motors.stop()
-                self._servos.set_angle(SERVO_STEERING, 90)
-                return
-        else:
-            if math.hypot(lx, ly) < 0.05:
-                self._motors.stop()
-                self._servos.set_angle(SERVO_STEERING, 90)
-                return
-            if self._shared_state:
-                self._speed = self._shared_state.speed
-            speed = self._speed
-            d = 'forward' if ly >= 0 else 'backward'
+        if math.hypot(lx, ly) < 0.05:
+            self._motors.stop()
+            self._servos.set_angle(SERVO_STEERING, 90)
+            return
+        if self._shared_state:
+            self._speed = self._shared_state.speed
+        speed = 100 if self._turbo_active else self._speed
+        d = 'forward' if ly >= 0 else 'backward'
         if abs(lx) < 0.1:
             turn = 'no'
         else:
             turn = 'right' if lx > 0 else 'left'
-        if self._turbo_active or self._police_turbo_on:
-            s = 100
-        else:
-            abs_ly = abs(ly)
-            s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) if abs_ly > 0.1 else 0
+        abs_ly = abs(ly)
+        if self._turbo_active:
+            s = 100 if abs_ly > 0.1 else 0        # турбо: всегда 100 %, но едем
+        else:                                     # только когда стик отклонён
+            s = max(10, int(speed * abs_ly * DS4_SPEED_MULT)) \
+                if abs_ly > 0.1 else 0
             s = min(100, s)
         if s > 0:
             if turn == 'no':
                 left = right = 1.0
-            elif self._police_turbo_on:
-                # разворот одним бортом (стоячий борт — внутренний)
-                left, right = (0.0, 1.0) if turn == 'left' else (1.0, 0.0)
             else:
                 # чем дальше стик отклонён, тем круче дуга: раньше было
                 # наоборот (полный стик давал ПОЛОГУЮ дугу, лёгкий — крутую)
@@ -508,29 +470,32 @@ class DS4Controller:
         self._servos.set_angle(SERVO_STEERING, steer)
 
     def _apply_pan_tilt(self):
+        """v1.6.4: камера двигается ШАГОМ ровно DS4_CAM_STEP_DEG (5°) и не
+        чаще, чем раз в DS4_CAM_STEP_INTERVAL_S: раньше шаг рос с отклонением
+        стика до 6° за событие при десятках событий в секунду — камера
+        «улетала». Направление сохранено (v1.6.1): стик вправо = pan меньше."""
         if not self._servos:
             return
         rx, ry = self._rx, self._ry
-        if abs(rx) < DS4_DEADZONE and abs(ry) < DS4_DEADZONE:
-            return
-        if abs(rx) >= DS4_DEADZONE:
-            # v1.6.1: стик вправо = камера вправо = pan МЕНЬШЕ (тот же
-            # смысл, что у стрелки вправо: pan -5). Раньше было наоборот —
-            # камера уходила влево при наклоне стика вправо.
+        now = time.monotonic()
+        if abs(rx) >= DS4_DEADZONE \
+                and now - self._last_cam_step['pan'] >= DS4_CAM_STEP_INTERVAL_S:
             cur = self._servos.get_angle(SERVO_CAM_PAN)
-            step = max(1, int(abs(rx) * 6 * DS4_CAM_SENSITIVITY))
-            new = min(180, cur - step) if rx > 0 else max(0, cur + step)
+            new = min(180, cur - DS4_CAM_STEP_DEG) if rx > 0 \
+                else max(0, cur + DS4_CAM_STEP_DEG)
             if new != cur:
                 self._servos.set_angle(SERVO_CAM_PAN, new)
                 self._cam_pan = new
-        if abs(ry) >= DS4_DEADZONE:
-            # стик вверх = камера вверх = tilt больше (как стрелка вверх)
+            self._last_cam_step['pan'] = now
+        if abs(ry) >= DS4_DEADZONE \
+                and now - self._last_cam_step['tilt'] >= DS4_CAM_STEP_INTERVAL_S:
             cur = self._servos.get_angle(SERVO_CAM_TILT)
-            step = max(1, int(abs(ry) * 5 * DS4_CAM_SENSITIVITY))
-            new = min(180, cur + step) if ry > 0 else max(0, cur - step)
+            new = min(180, cur + DS4_CAM_STEP_DEG) if ry > 0 \
+                else max(0, cur - DS4_CAM_STEP_DEG)
             if new != cur:
                 self._servos.set_angle(SERVO_CAM_TILT, new)
                 self._cam_tilt = new
+            self._last_cam_step['tilt'] = now
 
     def _apply_dpad(self):
         if self._hat_y < 0 and not self._dpad_up_pressed:
@@ -578,32 +543,6 @@ class DS4Controller:
             self._leds.set_mode('off', (0, 0, 0))
             if self._shared_state:
                 self._shared_state.led_mode = 'off'
-
-    def _toggle_police_turbo(self):
-        self._police_turbo_on = not self._police_turbo_on
-        if self._police_turbo_on:
-            if self._leds:
-                self._leds.set_mode('police', (255, 0, 0))
-            if self._shared_state:
-                self._shared_state.led_mode = 'police'
-        else:
-            if self._leds:
-                self._leds.set_mode('off', (0, 0, 0))
-            if self._shared_state:
-                self._shared_state.led_mode = 'off'
-        self._apply_move()
-
-    def _toggle_police_only(self):
-        if self._leds:
-            if self._police_turbo_on:
-                self._police_turbo_on = False
-                self._leds.set_mode('off', (0, 0, 0))
-                if self._shared_state:
-                    self._shared_state.led_mode = 'off'
-            else:
-                self._leds.set_mode('police', (255, 0, 0))
-                if self._shared_state:
-                    self._shared_state.led_mode = 'police'
 
     def _start_left_blinker(self):
         if self._left_blinking:

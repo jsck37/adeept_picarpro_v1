@@ -17,6 +17,8 @@ from config import (
     CV_LINE_POS_1, CV_LINE_POS_2,
     FINDCOLOR_AREA_MIN, WATCHDOG_THRESHOLD, WATCHDOG_MIN_AREA,
     WATCHDOG_COOLDOWN_S,
+    CAMERA_IDLE_BACKOFF_CPU_PCT, CAMERA_IDLE_BACKOFF_MAX,
+    CAMERA_SLEEP_SKIP_CPU_PCT,
 )
 
 try:
@@ -55,6 +57,23 @@ LINE_BAND_PAD = 6            # запас строк вокруг опорных
 
 DEFAULT_HAND_LOW = np.array([0, 30, 50], dtype=np.uint8) if _HAS_CV2 else None
 DEFAULT_HAND_HIGH = np.array([25, 255, 255], dtype=np.uint8) if _HAS_CV2 else None
+
+
+def _system_load_pct():
+    """Загрузка системы 0-100 (max из CPU и RAM) или None, если не удалось.
+
+    v1.6.4: основа адаптивного энергосбережения — «мало простоя процессора
+    и памяти» означает, что робот занят (стрим/CV/навигация), и в этом
+    состоянии энергосбережение камеры должно вести себя иначе.
+    """
+    try:
+        from picarpro.utils.system_info import SystemInfo
+        cpu = SystemInfo.get_cpu_usage() or 0.0
+        ram = SystemInfo.get_ram_info() or {}
+        mem_pct = ram.get('percent') or 0.0
+        return max(float(cpu), float(mem_pct))
+    except Exception:
+        return None
 
 
 class CVThread(threading.Thread):
@@ -790,8 +809,23 @@ class Camera:
                 demand = self._has_demand()
                 if demand:
                     last_demand = t_loop
+                # --- адаптивное энергосбережение (v1.6.4) -------------------
+                # Загрузка системы (max из CPU и RAM): чем она выше, тем реже
+                # фон захватывает кадры (ядра отдаются активным задачам —
+                # стриму/CV/навигации), а полный сон CSI при высокой загрузке
+                # запрещён: пробуждение под нагрузкой занимало секунды и
+                # выглядело как «всё лагает при малом простое».
+                load = _system_load_pct()
+                if load is None:
+                    idle_backoff, can_sleep = 1.0, True
+                else:
+                    idle_backoff = 1.0 + (CAMERA_IDLE_BACKOFF_MAX - 1.0) * max(
+                        0.0, min(1.0, (load - CAMERA_IDLE_BACKOFF_CPU_PCT)
+                                 / max(1.0, 100.0 - CAMERA_IDLE_BACKOFF_CPU_PCT)))
+                    can_sleep = load < CAMERA_SLEEP_SKIP_CPU_PCT
                 # --- сон при отсутствии потребителей ---
                 if (not demand and not self._asleep and CAMERA_SLEEP_AFTER_S > 0
+                        and can_sleep
                         and t_loop - last_demand > CAMERA_SLEEP_AFTER_S):
                     self._asleep = self._sleep_camera()
                 if self._asleep:
@@ -871,8 +905,10 @@ class Camera:
                         time.sleep(sleep_s)
                 else:
                     # фоновый редкий захват, чтобы _last_raw и статус не
-                    # протухали; появление спроса будит цикл немедленно
-                    self._wake.wait(CAMERA_IDLE_INTERVAL_S)
+                    # протухали; появление спроса будит цикл немедленно.
+                    # При высокой загрузке системы интервал растёт до
+                    # CAMERA_IDLE_BACKOFF_MAX × base (адаптивно, v1.6.4)
+                    self._wake.wait(CAMERA_IDLE_INTERVAL_S * idle_backoff)
                     self._wake.clear()
             except Exception as e:
                 consecutive_errors += 1

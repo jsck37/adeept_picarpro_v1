@@ -23,7 +23,7 @@ class SharedState:
         self.left_blinker = False
         self.right_blinker = False
         self.crane_arm_closed = False
-        self.crane_grip_position = 'high'
+        self.crane_grip_position = 'mid'   # v1.6.4: high убран
         self.led_mode = 'off'
         self.led_color = (255, 0, 0)
         self.ws_clients = set()
@@ -349,6 +349,8 @@ class SharedState:
             },
             'headlight': self.switches.headlight_state
                          if self.switches and self.switches._initialized else False,
+            'side_lights': (self.switches.get_state(0) or self.switches.get_state(1))
+                           if self.switches and self.switches._initialized else False,
             'left_blinker': self.left_blinker,
             'right_blinker': self.right_blinker,
             'ir_left': ir_l, 'ir_middle': ir_m, 'ir_right': ir_r,

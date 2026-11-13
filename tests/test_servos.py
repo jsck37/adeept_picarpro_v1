@@ -68,9 +68,10 @@ class TestInit:
         assert all(s is not None for s in servos._servos)
 
     def test_init_angles_applied(self, servos):
-        # v1.6.0: каналы клешни 4/5 (плечо=наклон, захват)
+        # v1.6.0: каналы клешни 4/5 (плечо=наклон, захват);
+        # v1.6.4: старт grip = mid 135 (high 180 удалён)
         from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
-        assert servos.get_angle(SERVO_CRANE_GRIP) == 180  # CRANE_GRIP_HIGH
+        assert servos.get_angle(SERVO_CRANE_GRIP) == 135  # CRANE_GRIP_MID
         assert servos.get_angle(SERVO_CRANE_ARM) == 100   # CRANE_ARM_OPEN
         assert servos.get_angle(0) == 90
 

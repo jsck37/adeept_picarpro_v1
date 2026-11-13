@@ -43,7 +43,7 @@ var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 var craneArmClosed = false;
-var craneGripPosition = 'high';
+var craneGripPosition = 'mid';   // v1.6.4: high убран
 var logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
 var logFilters = { info: true, warn: true, error: true, debug: true };
 var logSortMode = 'time';
@@ -118,6 +118,7 @@ function sendCommand(cmd, params) {
       'buzzer_stop': '/cmd/buzzer_stop',
       'cv_mode': '/cmd/cv_mode', 'auto': '/cmd/auto', 'crane': '/cmd/crane',
       'voice': '/cmd/voice', 'headlight': '/cmd/headlight', 'blinker': '/cmd/blinker',
+      'side_lights': '/cmd/side_lights',
       'hand_color': '/cmd/hand_color', 'servo_get_limits': '/cmd/servo_get_limits',
       'i2c_scan': '/cmd/i2c_scan',
       'web_active': '/cmd/web_active', 'clear_log': '/cmd/clear_log',
@@ -620,6 +621,11 @@ function updateStatus(d) {
     var hlMainBtn = document.getElementById('hl-main');
     if (hlMainBtn) hlMainBtn.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
   }
+  if (d.side_lights !== undefined) {
+    hlSideOn = d.side_lights;
+    var hlSideBtn = document.getElementById('hl-side');
+    if (hlSideBtn) hlSideBtn.className = 'headlight-btn ' + (hlSideOn ? 'on' : 'off');
+  }
   if (d.left_blinker !== undefined) {
     hlLeftSignal = d.left_blinker;
     document.getElementById('hl-left-signal').className = 'signal-btn ' + (hlLeftSignal ? 'on' : 'off');
@@ -676,17 +682,14 @@ function updateCraneArmUI() {
 function updateCraneGripUI() {
   var lowBtn = document.getElementById('crane-grip-low');
   var midBtn = document.getElementById('crane-grip-mid');
-  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
   if (!lowBtn) return;
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
-  highBtn.classList.remove('active');
-  var angleMap = { low: 100, mid: 135, high: 180 };
-  var labelMap = { low: 'Low', mid: 'Mid', high: 'High' };
+  var angleMap = { low: 100, mid: 135 };
+  var labelMap = { low: 'Low', mid: 'Mid' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
-  else if (craneGripPosition === 'high') highBtn.classList.add('active');
   if (label && angleMap[craneGripPosition] !== undefined) {
     label.textContent = labelMap[craneGripPosition] + ' (' + angleMap[craneGripPosition] + '\u00B0)';
   }
@@ -1083,7 +1086,7 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     var action = btn.dataset.action;
     if (action === 'grip_low') craneGripPosition = 'low';
     else if (action === 'grip_mid') craneGripPosition = 'mid';
-    else if (action === 'grip_high') craneGripPosition = 'high';
+    // v1.6.4: grip_high удалён — осталось low/mid
     sendCommand('crane', { action: action });
     updateCraneGripUI();
   });
@@ -1093,6 +1096,14 @@ document.getElementById('hl-main').addEventListener('click', function() {
   hlMainOn = !hlMainOn;
   sendCommand('headlight', { action: hlMainOn ? 'on' : 'off' });
   this.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+});
+
+// v1.6.4: боковые габариты (Side lights) — кнопка в окне фар + геймпад L1
+var hlSideOn = false;
+document.getElementById('hl-side').addEventListener('click', function() {
+  hlSideOn = !hlSideOn;
+  sendCommand('side_lights', { action: hlSideOn ? 'on' : 'off' });
+  this.className = 'headlight-btn ' + (hlSideOn ? 'on' : 'off');
 });
 
 document.getElementById('hl-left-signal').addEventListener('click', function() {
@@ -1243,38 +1254,79 @@ var btDevices = document.getElementById('bt-devices');
 var btScanning = document.getElementById('bt-scanning');
 var btSavedInfo = document.getElementById('bt-saved-info');
 
+function btMsg(text, color) {
+  // имя устройства приходит из эфира (его задаёт кто угодно рядом) — только textContent
+  btDevices.textContent = '';
+  var d = document.createElement('div');
+  d.style.cssText = 'font-size:.75rem;padding:4px;color:' + (color || '#5f6368');
+  d.textContent = text;
+  btDevices.appendChild(d);
+  btDeviceList.style.display = '';
+}
+
+function renderBtDevices(devs) {
+  btDevices.textContent = '';
+  devs.forEach(function(dev) {
+    var item = document.createElement('div');
+    item.className = 'bt-device-item' + (dev.is_gamepad ? ' bt-gamepad' : '');
+    var label = document.createElement('span');
+    label.className = 'bt-device-name';
+    var tags = [];
+    if (dev.connected) tags.push('connected'); else if (dev.paired) tags.push('paired');
+    if (dev.rssi !== null && dev.rssi !== undefined) tags.push(dev.rssi + ' dBm');
+    label.textContent = dev.name + ' (' + dev.mac + ')' + (tags.length ? ' \u00B7 ' + tags.join(', ') : '');
+    var btn = document.createElement('button');
+    btn.className = 'btn-sm btn-primary bt-connect-btn';
+    btn.dataset.mac = dev.mac;
+    btn.textContent = dev.connected ? 'Connected' : (dev.paired ? 'Connect' : 'Pair');
+    btn.disabled = !!dev.connected;
+    btn.addEventListener('click', function() {
+      var label0 = btn.textContent;
+      btn.textContent = '...';
+      btn.disabled = true;
+      if (!dev.paired) toast('Pairing: keep the controller in pairing mode (hold Share + PS)', 'info');
+      fetch('/api/bt/connect', { method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ mac: dev.mac, name: dev.name }) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) { toast('Connected!', 'success'); btn.textContent = 'Connected'; }
+          else { toast(d.message || d.error || 'Connection failed', 'error'); btn.textContent = label0; btn.disabled = false; }
+        })
+        .catch(function() { toast('Connection error', 'error'); btn.textContent = label0; btn.disabled = false; });
+    });
+    item.appendChild(label);
+    item.appendChild(btn);
+    btDevices.appendChild(item);
+  });
+  btDeviceList.style.display = '';
+}
+
 btScanBtn.addEventListener('click', function() {
+  if (btScanBtn.disabled) return;
+  btScanBtn.disabled = true;
   btScanning.style.display = '';
   btDeviceList.style.display = 'none';
-  btDevices.innerHTML = '';
-  fetch('/api/bt/scan', { headers: (function(){ var h = {}; var t = getToken(); if (t) h['X-Auth-Token'] = t; return h; })() }).then(function(r) { return r.json(); }).then(function(d) {
-    btScanning.style.display = 'none';
-    if (d.devices && d.devices.length > 0) {
-      btDeviceList.style.display = '';
-      d.devices.forEach(function(dev) {
-        var item = document.createElement('div');
-        item.className = 'bt-device-item' + (dev.is_gamepad ? ' bt-gamepad' : '');
-        item.innerHTML = '<span class="bt-device-name">' + dev.name + ' (' + dev.mac + ')</span>' +
-          '<button class="btn-sm btn-primary bt-connect-btn" data-mac="' + dev.mac + '">Connect</button>';
-        btDevices.appendChild(item);
-        item.querySelector('.bt-connect-btn').addEventListener('click', function() {
-          var btn = this;
-          btn.textContent = '...';
-          fetch('/api/bt/connect', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ mac: dev.mac, name: dev.name }) }).then(function(r) { return r.json(); }).then(function(d) {
-            if (d.ok) { toast('Connected!', 'success'); btn.textContent = 'Connected'; }
-            else { toast(d.message || d.error || 'Connection failed', 'error'); btn.textContent = 'Connect'; }
-          }).catch(function() { toast('Connection error', 'error'); btn.textContent = 'Connect'; });
-        });
-      });
-    } else {
-      btDeviceList.style.display = '';
-      btDevices.innerHTML = '<div style="font-size:.75rem;color:#5f6368;padding:4px">No devices found</div>';
-    }
-  }).catch(function() {
-    btScanning.style.display = 'none';
-    btDeviceList.style.display = '';
-    btDevices.innerHTML = '<div style="font-size:.75rem;color:#ea4335;padding:4px">Scan failed</div>';
-  });
+  btDevices.textContent = '';
+  fetch('/api/bt/scan', { headers: authHeaders() })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      btScanning.style.display = 'none';
+      btScanBtn.disabled = false;
+      if (d.ok === false) {
+        var hint = d.error || 'Scan failed';
+        if (d.diagnose && d.diagnose.rfkill_blocked) hint += ' (Bluetooth is blocked by rfkill)';
+        btMsg(hint, '#ea4335');
+      } else if (d.devices && d.devices.length > 0) {
+        renderBtDevices(d.devices);
+      } else {
+        btMsg('No devices found. Put the controller in pairing mode (hold Share + PS) and scan again.');
+      }
+    })
+    .catch(function() {
+      btScanning.style.display = 'none';
+      btScanBtn.disabled = false;
+      btMsg('Scan failed', '#ea4335');
+    });
 });
 
 btAutoBtn.addEventListener('click', function() {

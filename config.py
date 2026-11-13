@@ -81,7 +81,7 @@ SERVO_CRANE_GRIP = 5   # наклон клешни (подъём/опускан�
 SERVO_INIT_ANGLES = {
     0: 90, 1: 90, 2: 90, 3: 90,
     4: 90,    # канал 4 — локоть/резерв на этой сборке
-    5: None,  # -> CRANE_GRIP_HIGH (наклон клешни)
+    5: None,  # -> CRANE_GRIP_MID (наклон клешни; v1.6.4: high убран)
     6: None,  # -> CRANE_ARM_OPEN (захват)
 }
 
@@ -127,12 +127,13 @@ SERVO_LIMITS = {
 }
 
 # Клешня — все углы внутри SERVO_LIMITS (раньше OPEN=80 и GRIP_HIGH=190
-# упирались в механический стоп: серво стояло под током и перегревалось)
+# упирались в механический стоп: серво стояло под током и перегревалось).
+# v1.6.4: позиция GRIP_HIGH (180°) удалена по требованию владельца —
+# осталось только Low/Mid.
 CRANE_ARM_OPEN = 100
 CRANE_ARM_CLOSED = 150
 CRANE_GRIP_LOW = 100
 CRANE_GRIP_MID = 135
-CRANE_GRIP_HIGH = 180
 
 # ---------------------------------------------------------------------------
 # Зуммер — GPIO 24, PWM для мелодий (BUZZER_PASSIVE=False для активного)
@@ -205,6 +206,15 @@ CAMERA_RESOLUTION = (640, 480)
 CAMERA_FPS = 15
 CAMERA_JPEG_QUALITY = 60
 CAMERA_IDLE_INTERVAL_S = 0.5    # период захвата без потребителей
+# v1.6.4: адаптивное энергосбережение. Загрузка системы (max из CPU и RAM)
+# выше CAMERA_IDLE_BACKOFF_CPU_PCT — фоновый захват реже (интервал плавно
+# растёт до CAMERA_IDLE_BACKOFF_MAX × base): ядра отдаются активным задачам
+# (стрим/CV), а не фону. Уход в полный сон камеры (CAMERA_SLEEP_AFTER_S)
+# разрешён только ниже CAMERA_SLEEP_SKIP_CPU_PCT: пробуждение CSI под
+# высокой загрузкой занимает секунды и выглядело как «всё лагает».
+CAMERA_IDLE_BACKOFF_CPU_PCT = 80.0
+CAMERA_IDLE_BACKOFF_MAX = 3.0
+CAMERA_SLEEP_SKIP_CPU_PCT = 85.0
 CAMERA_FLIP_HORIZONTAL = False
 CAMERA_FLIP_VERTICAL = False
 
@@ -274,7 +284,11 @@ VOICE_OUTPUT_FILE = "/tmp/picarpro_voice.txt"
 DS4_DEVICE_NAME = "Wireless Controller"
 DS4_DEADZONE = 0.12
 DS4_STEER_SENSITIVITY = 1.0
-DS4_CAM_SENSITIVITY = 1.2
+# v1.6.4: правый стик (камера) двигает серву шагом ровно DS4_CAM_STEP_DEG
+# градусов не чаще, чем раз в DS4_CAM_STEP_INTERVAL_S (раньше шаг рос с
+# отклонением стика до 6° за событие при десятках событий в секунду).
+DS4_CAM_STEP_DEG = 5
+DS4_CAM_STEP_INTERVAL_S = 0.15
 DS4_HEARTBEAT_TIMEOUT = 10.0
 DS4_WATCHDOG_INTERVAL = 3.0
 DS4_READ_TIMEOUT = 2.0
@@ -425,10 +439,10 @@ BT_CONFIG_FILE = BASE_DIR / 'bt_config.json'
 ULTRASONIC_IDLE_INTERVAL_S = 1.0
 ULTRASONIC_ACTIVE_INTERVAL_S = 0.1     # HC-SR04: не чаще ~1 раза в 60 мс
 ULTRASONIC_STALE_S = 0.6
-# Серво, которое качает датчик в режиме radarScan (в исходной прошивке это
-# рулевое серво). Если датчик у вас установлен на панораме камеры —
-# укажите SERVO_CAM_PAN.
-ULTRASONIC_SCAN_SERVO = SERVO_STEERING
+# Серво, которое качает датчик в режиме radarScan. v1.6.4: SERVO_CAM_PAN —
+# радар сканирует панорамой камеры (датчик стоит на камере), а не рулевым
+# серво: раньше машина «сканировала колёсами» — руль вилял на месте.
+ULTRASONIC_SCAN_SERVO = SERVO_CAM_PAN
 
 # ---------------------------------------------------------------------------
 # Автономные режимы: маневренность

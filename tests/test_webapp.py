@@ -195,8 +195,8 @@ class TestBluetoothInjection:
                             tmp_path / 'bt.json')
 
         monkeypatch.setattr('picarpro.web.app.pair_and_connect',
-                            lambda mac, ds4=None: called.append(mac)
-                            or (True, 'ok'))
+                            lambda mac, ds4=None, allow_pairing=True:
+                            called.append(mac) or (True, 'ok'))
         r = client.post('/api/bt/connect',
                         json={'mac': 'AA:BB:CC:DD:EE:FF'})
         assert r.status_code == 200
@@ -207,7 +207,7 @@ class TestBluetoothInjection:
         monkeypatch.setattr('picarpro.routes.bluetooth.BT_CONFIG_FILE',
                             tmp_path / 'bt.json')
         monkeypatch.setattr('picarpro.web.app.pair_and_connect',
-                            lambda mac, ds4=None: called.append(mac)
-                            or (True, 'ok'))
+                            lambda mac, ds4=None, allow_pairing=True:
+                            called.append(mac) or (True, 'ok'))
         client.post('/api/bt/connect', json={'mac': 'aa:bb:cc:dd:ee:ff'})
         assert called == ['AA:BB:CC:DD:EE:FF']

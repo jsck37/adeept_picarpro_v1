@@ -42,8 +42,8 @@ class TestServos:
         for angle in (config.CRANE_ARM_OPEN, config.CRANE_ARM_CLOSED):
             assert config.SERVO_LIMITS[config.SERVO_CRANE_ARM]['min'] <= angle \
                 <= config.SERVO_LIMITS[config.SERVO_CRANE_ARM]['max']
-        for angle in (config.CRANE_GRIP_LOW, config.CRANE_GRIP_MID,
-                      config.CRANE_GRIP_HIGH):
+        # v1.6.4: CRANE_GRIP_HIGH удалён — остались low/mid
+        for angle in (config.CRANE_GRIP_LOW, config.CRANE_GRIP_MID):
             assert config.SERVO_LIMITS[config.SERVO_CRANE_GRIP]['min'] <= angle \
                 <= config.SERVO_LIMITS[config.SERVO_CRANE_GRIP]['max']
 

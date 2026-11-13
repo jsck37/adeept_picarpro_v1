@@ -14,7 +14,7 @@ from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
 from config import (
     SERVO_COUNT, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
-    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID,
     SWITCH_PINS, DEFAULT_SPEED,
 )
 
@@ -110,7 +110,7 @@ def process(state, data, client=None):
         if state.servos:
             state.servos.move_init()
             state.crane_arm_closed = False
-            state.crane_grip_position = 'high'
+            state.crane_grip_position = 'mid'   # v1.6.4: high убран
             r = {'ok': True}
 
     elif cmd == 'servo_get_limits':
@@ -135,7 +135,8 @@ def process(state, data, client=None):
             r = {'ok': True, 'mode': mode}
 
     elif cmd == 'buzzer':
-        key = {'beep': 'beep', 'birthday': 'happy_birthday',
+        # v1.6.4: birthday заменён на Tetris (8-бит, ~10 с)
+        key = {'beep': 'beep', 'tetris': 'tetris',
                'alarm': 'alarm'}.get(str(p.get('melody', 'beep')))
         if key and state.buzzer:
             state.buzzer.play_melody(key)
@@ -153,7 +154,7 @@ def process(state, data, client=None):
             'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED, True, None),
             'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, None, 'low'),
             'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID, None, 'mid'),
-            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH, None, 'high'),
+            # v1.6.4: grip_high (180°) удалён по требованию владельца
         }
         if act == 'arm_toggle' and state.servos:
             new_closed = not state.crane_arm_closed
@@ -193,6 +194,18 @@ def process(state, data, client=None):
             else:
                 state.switches.headlight_toggle()
             r = {'ok': True, 'headlight': state.switches.headlight_state}
+
+    elif cmd == 'side_lights':
+        # v1.6.4: боковые габариты (каналы 0/1 switch-модуля) в окне фар
+        action = str(p.get('action', 'toggle'))
+        if state.switches and state.switches._initialized:
+            on_now = (state.switches.get_state(0)
+                      or state.switches.get_state(1))
+            enable = True if action == 'on' else \
+                False if action == 'off' else not on_now
+            (state.switches.on if enable else state.switches.off)(0)
+            (state.switches.on if enable else state.switches.off)(1)
+            r = {'ok': True, 'side_lights': enable}
 
     elif cmd == 'blinker':
         side = str(p.get('side', ''))
@@ -363,7 +376,10 @@ def process(state, data, client=None):
 
     elif cmd == 'bt_scan':
         from picarpro.routes.bluetooth import scan_devices
-        r = {'ok': True, 'devices': scan_devices()}
+        try:
+            r = {'ok': True, 'devices': scan_devices()}
+        except Exception as e:      # занято / нет адаптера: понятная ошибка, не traceback
+            r = {'ok': False, 'cmd': cmd, 'devices': [], 'error': str(e)[:200]}
 
     elif cmd == 'bt_connect':
         from picarpro.routes.bluetooth import pair_and_connect

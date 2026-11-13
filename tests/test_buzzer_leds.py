@@ -41,8 +41,12 @@ class TestBuzzer:
         time.sleep(0.05)
         assert fake_gpio.pwm_for(24).duty_cycle == 0
 
-    def test_birthday_melody_plays(self, buzzer, fake_gpio):
-        buzzer.play_melody('happy_birthday')
+    def test_tetris_melody_plays(self, buzzer, fake_gpio):
+        """v1.6.4: birthday заменён на Tetris (Korobeiniki, ~10 с, 8-бит)."""
+        from picarpro.hardware.buzzer import TETRIS
+        total = sum(d for _, d in TETRIS)
+        assert abs(total - 10.0) < 0.05, f'Tetris {total:.2f} с, а не ~10 с'
+        buzzer.play_melody('tetris')
         time.sleep(0.05)
         pwm = fake_gpio.pwm_for(24)
         # нота открывается
@@ -50,7 +54,7 @@ class TestBuzzer:
         buzzer.stop()
 
     def test_stop_stops_melody(self, buzzer, fake_gpio):
-        buzzer.play_melody('happy_birthday')
+        buzzer.play_melody('tetris')
         time.sleep(0.05)
         buzzer.stop()
         time.sleep(0.05)
