@@ -384,6 +384,17 @@ YOLO_INPUT_SIZE = 640          # вход сети: 640 у официально�
 YOLO_CONFIDENCE = 0.45         # порог уверенности
 YOLO_NMS_THRESHOLD = 0.45      # порог NMS
 YOLO_FRAME_SKIP = 3            # инференс каждый N-й кадр (разгрузка CPU)
+# v1.6.6: СЕГМЕНТАЦИЯ объектов. YOLO_TASK = 'seg' — yolov5n-seg (маски
+# объектов рисуются на видео полупрозрачным цветом по классу), 'detect' —
+# только рамки. Модель ищется сначала «на месте» (/home/pi/models), затем
+# в архиве прошивки (models/, туда её кладёт setup.py) — интернет не
+# обязателен. Замер: seg ~190 МБ пик RSS (detect ~150 МБ) — в 500 МБ ок.
+YOLO_TASK = 'seg'
+YOLO_MODEL_BUNDLED = str(BASE_DIR / 'models' / 'yolov5n.onnx')
+YOLO_SEG_MODEL_PATH = '/home/pi/models/yolov5n-seg.onnx'
+YOLO_SEG_MODEL_BUNDLED = str(BASE_DIR / 'models' / 'yolov5n-seg.onnx')
+YOLO_MASK_THRESHOLD = 0.5      # порог бинаризации маски
+YOLO_MAX_MASKS = 8             # верхний предел масок на кадр (ОЗУ/CPU)
 
 # ---------------------------------------------------------------------------
 # ArUco-навигация — порт из репозитория hugo-Peltier/Adeept-picarPro

@@ -11,19 +11,37 @@ torch занимает ~700–800 МБ, а OOM-killer при 1 ГБ ОЗУ уб�
 * **инференс каждый N-й кадр** (`YOLO_FRAME_SKIP`) — MJPEG-стрим не тормозит;
 * инференс живёт в отдельном потоке CVThread (`picarpro/camera/yolo_detector.py`).
 
-## Шаг 1. Модель — скачивается автоматически (v1.6.5)
+## Шаг 1. Модели — поставляются с прошивкой (v1.6.6)
 
-`setup.py` на этапе [8/8] сам скачивает **готовый ONNX** с официального
-релиза ultralytics/yolov5 v7.0 — экспортировать ничего не нужно:
+`setup.py` копирует модели из архива прошивки (`models/`) в
+`/home/pi/models/` — интернет не обязателен; детекционная модель при
+отсутствии также может скачаться с официального релиза ultralytics/yolov5
+v7.0 (`YOLO_MODEL_URL`, проверка SHA-256). Вместе с ней создаётся
+`classes.txt` (COCO-80). Пропуск этапа: `PICARPRO_SKIP_YOLO=1`.
 
-* модель: `yolov5n.onnx` (YOLOv5 **nano**, 1.9M параметров, 3.8 МБ, вход 640×640);
-* URL: `https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.onnx`;
-* целостность проверяется по SHA-256 (`YOLO_MODEL_SHA256` в `config.py`);
-* вместе с моделью создаётся `classes.txt` (COCO-80);
-* пропуск этапа: `PICARPRO_SKIP_YOLO=1`.
+| Модель | Задача | Вход | Размер | Пик RSS (замер cv2.dnn) |
+|---|---|---|---|---|
+| `yolov5n.onnx` | детекции (рамки) | 640 | 3.8 МБ | ~150 МБ |
+| `yolov5n-seg.onnx` | сегментация (маски) | 640 | 8 МБ | ~190 МБ |
 
-Память (замер cv2.dnn, CPU, чтение + инференс 640): **пик ~150 МБ RSS** —
-режим YOLO работает при ~500 МБ свободной ОЗУ вместе с MJPEG-стримом.
+Обе проверены через cv2.dnn на реальных кадрах (bus.jpg: 4 человека, маски
+совпадают с силуэтами). Режим YOLO работает при ~500 МБ свободной ОЗУ
+вместе с MJPEG-стримом.
+
+## Сегментация (v1.6.6)
+
+`config.py`: `YOLO_TASK = 'seg'` (по умолчанию) — режим YOLO в веб-панели
+рисует на видео полупрозрачные маски объектов (цвет по классу), в статусе
+(`yolo_status` / `d.yolo`) у каждого объекта — `mask_area` (px) и
+`mask_pct` (% кадра). `YOLO_TASK = 'detect'` — только рамки (чуть легче).
+
+Модель ищется по цепочке: `YOLO_SEG_MODEL_PATH` (/home/pi/models) →
+`YOLO_SEG_MODEL_BUNDLED` (models/ в прошивке); если seg-модели нет —
+автоматический откат на детекционную. Порог маски — `YOLO_MASK_THRESHOLD`
+(0.5), максимум масок на кадр — `YOLO_MAX_MASKS` (8). Реализация — схема
+YOLACT, как в ultralytics: маска = sigmoid(proto @ коэффициенты), обрезка
+по bbox, растяжка в кадр; поддержаны и v5-seg (117 столбцов), и
+v8-seg (116, channels first) выходы ONNX.
 
 ## Шаг 2. Своп на Pi
 
@@ -36,10 +54,14 @@ sudo bash tools/setup_swap.sh --zram
 ## Шаг 3. Конфиг (уже настроен в config.py)
 
 ```python
+YOLO_TASK = 'seg'          # 'seg' — маски, 'detect' — рамки
 YOLO_MODEL_PATH = '/home/pi/models/yolov5n.onnx'
+YOLO_SEG_MODEL_PATH = '/home/pi/models/yolov5n-seg.onnx'
 YOLO_CLASSES_FILE = '/home/pi/models/classes.txt'
 YOLO_INPUT_SIZE = 640      # как у официального v7.0 ONNX!
 YOLO_CONFIDENCE = 0.45
+YOLO_MASK_THRESHOLD = 0.5
+YOLO_MAX_MASKS = 8
 YOLO_FRAME_SKIP = 3
 ```
 
@@ -62,7 +84,14 @@ scp models/yolov5n.onnx classes.txt pi@<IP>:/home/pi/models/
 ```
 
 и в `config.py` поставьте `YOLO_INPUT_SIZE = 320` (должен совпадать с
-экспортом). Экспорт с динамическими осями или свежими opset (ultralytics 8.x
+экспортом). Сегментационную модель экспортируют так же, но с seg-весами
+(`yolov5n-seg.pt`); ультралайтовый CLI:
+
+```bash
+yolo export model=yolov5n-seg.pt format=onnx opset=12 imgsz=640 dynamic=False
+```
+
+Экспорт с динамическими осями или свежими opset (ultralytics 8.x
 по умолчанию) cv2.dnn читает НЕ всегда — держитесь opset 12 и
 `dynamic=False` (так делает `tools/fetch_yolo.py`).
 

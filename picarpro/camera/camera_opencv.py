@@ -390,7 +390,7 @@ class CVThread(threading.Thread):
         if self.overlay_wanted:
             bgr = self._to_bgr(frame)
             self.yolo.draw(bgr, objs)
-            cv2.putText(bgr, f'YOLO {len(objs)} obj '
+            cv2.putText(bgr, f'YOLO-{self.yolo.task} {len(objs)} obj '
                              f'({self.yolo.last_infer_ms:.0f} ms)',
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                         (0, 255, 255), 2)

@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Automated setup for PiCar Pro (Flask + WebSocket) on Raspberry Pi 3B+.
-
-АДАПТАЦИЯ коммита 4870e2b под текущую структуру репозитория (v1.4.0):
-* точка входа boot.py вместо Server/WebServer.py;
-* HOTSPOT_* читаются из config.py в корне;
-* добалены зависимости текущей прошивки: RPi.GPIO, spidev, smbus2 (pip;
-  v1.4.1 — серво через smbus2, без adafruit/Blinka),
-  python3-dev, python3-picamera2 + python3-libcamera на Debian 12+ (apt);
-* на Trixie do_camera не вызывается (удалён из raspi-config);
-* очищается /etc/sysctl.d/99-picarpro-swap.conf от прежней версии стека
-  и маскируется zramswap.service (zram-tools);
-* проверка места на диске поднята до 2600 МБ (2 ГБ под /var/swap);
-* v1.4.0: в config.txt гарантированы dtparam=spi=on (WS2812-лента через
-  SPI0) и camera_auto_detect=1 (CSI-камера на Bookworm/Trixie без
-  raspi-config).
-Вся остальная логика оригинала сохранена без изменений."""
+"""Automated setup for PiCar Pro (Flask + WebSocket) on Raspberry Pi 3B+."""
 
 import os
 import sys
@@ -498,8 +483,8 @@ def stage_6_wifi_hotspot(debian_ver):
 
     print(f"\n  Hotspot SSID : {BOLD}{cfg['ssid']}{RST}")
     print(f"  Hotspot pass : {BOLD}{cfg['pass']}{RST}")
-    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (auto = наименее занятый из 1/6/11 при каждой загрузке)")
-    print(f"  AP band      : {BOLD}{cfg['band']}{RST}  (g = 2.4 ГГц, видят все; a = 5 ГГц, меньше помех)")
+    print(f"  AP channel   : {BOLD}{cfg['ch']}{RST}  (auto = least busy of 1/6/11 on each load)")
+    print(f"  AP band      : {BOLD}{cfg['band']}{RST}  (g = 2.4 GHz; a = 5 GHz)")
     print(f"  AP IP        : {BOLD}{cfg['ip']}{RST}  (SSH: <user>@{cfg['ip']}, UI: http://{cfg['ip']}:5000)")
     if input(f"  {YLW}?{RST} Change? (y/N): ").strip().lower() == 'y':
         v = input(f"  {YLW}?{RST} SSID [{cfg['ssid']}]: ").strip()
@@ -544,7 +529,7 @@ def stage_6_wifi_hotspot(debian_ver):
 
     print(f"  {GRN}[+]{RST} AP '{cfg['ssid']}' @ ch{cfg['ch']}, Pi IP {cfg['ip']}")
     print(f"        SSH: ssh <user>@{cfg['ip']}   UI: http://{cfg['ip']}:5000")
-    print("        Точка доступа поднимается при каждой загрузке автоматически.")
+    print("         The hotspot rises automatically at each boot.")
     return cfg
 
 
@@ -596,9 +581,9 @@ WantedBy=multi-user.target
 
 
 def stage_8_yolo_model():
-    """Модель YOLO для режима yoloDetect. Нестрашно, если её нет: остальное
-    работает без неё. Пропустить: PICARPRO_SKIP_YOLO=1."""
-    print(f"\n  {BLU}[8/8]{RST} YOLO model (object detection)...")
+    """Модели YOLO (детекции/сегментации) для режима yoloDetect. Нестрашно,
+    если их нет: остальное работает без них. Пропустить: PICARPRO_SKIP_YOLO=1."""
+    print(f"\n  {BLU}[8/8]{RST} YOLO models (detect / segment)...")
     if os.environ.get("PICARPRO_SKIP_YOLO") == "1":
         print("  skipped (PICARPRO_SKIP_YOLO=1)")
         return
@@ -606,7 +591,8 @@ def stage_8_yolo_model():
         sys.path.insert(0, thisPath)
         sys.path.insert(0, os.path.join(thisPath, "tools"))
         from config import (YOLO_MODEL_PATH, YOLO_CLASSES_FILE,
-                            YOLO_MODEL_URL, YOLO_MODEL_SHA256)
+                            YOLO_MODEL_URL, YOLO_MODEL_SHA256,
+                            YOLO_SEG_MODEL_PATH)
         from yolo_common import download_file, write_classes
     except Exception as e:
         print(f"  {YLW}[!]{RST} YOLO step skipped: {e}")
@@ -616,6 +602,25 @@ def stage_8_yolo_model():
         user = os.environ.get("SUDO_USER")
         if user:
             run_cmd(f'chown -R {user}:{user} "{os.path.dirname(path)}"', critical=False)
+
+    models_dir = os.path.dirname(YOLO_MODEL_PATH)
+    os.makedirs(models_dir, exist_ok=True)
+
+    # v1.6.6: модели едут в архиве прошивки (models/) — интернет не нужен.
+    # Если модель уже на месте (обновление поверх) — не перезаписываем.
+    bundled_dir = os.path.join(thisPath, "models")
+    copied = 0
+    for fn in ("yolov5n.onnx", "yolov5n-seg.onnx"):
+        src = os.path.join(bundled_dir, fn)
+        dst = os.path.join(models_dir, fn)
+        if os.path.isfile(src) and not os.path.isfile(dst):
+            try:
+                shutil.copy2(src, dst)
+                copied += 1
+            except Exception as e:
+                print(f"  {YLW}[!]{RST} copy {fn} failed: {e}")
+    if copied:
+        print(f"  {GRN}[+]{RST} {copied} model(s) copied from firmware bundle")
 
     if not os.path.exists(YOLO_MODEL_PATH) and YOLO_MODEL_URL:
         print(f"  Downloading {YOLO_MODEL_URL} ...")
@@ -630,12 +635,14 @@ def stage_8_yolo_model():
             write_classes(YOLO_CLASSES_FILE)       # COCO-80, как у стандартных моделей
             print(f"  {GRN}[+]{RST} classes.txt created (COCO-80)")
         _fix_owner(YOLO_MODEL_PATH)
-        print(f"  {GRN}[+]{RST} YOLO ready: {YOLO_MODEL_PATH}")
+        seg_ok = os.path.exists(YOLO_SEG_MODEL_PATH)
+        print(f"  {GRN}[+]{RST} YOLO ready: {YOLO_MODEL_PATH}"
+              + (" (seg: ok)" if seg_ok else " (seg: no model -> masks off)"))
         return
     print(f"  {YLW}[!]{RST} YOLO model not found: {YOLO_MODEL_PATH}")
-    print("      Не удалось скачать YOLO_MODEL_URL (нет интернета / обрыв связи).")
-    print("      На ПК:  pip install ultralytics && python3 tools/fetch_yolo.py --scp <user>@<ip робота>")
-    print("      или положите .onnx + classes.txt в /home/pi/models и перезапустите setup.py.")
+    print("      Failed to download YOLO_MODEL_URL (no internet connection/connection lost).")
+    print("      On PC: pip install ultralytics && python3 tools/fetch_yolo.py --scp <user>@<robot IP>")
+    print("      Or put .onnx + classes.txt in /home/pi/models and rerun setup.py.")
 
 
 def main():
