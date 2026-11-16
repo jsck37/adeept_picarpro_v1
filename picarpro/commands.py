@@ -293,8 +293,12 @@ def process(state, data, client=None):
 
     elif cmd == 'auto':
         func = str(p.get('func', 'stop'))
+        # obstacleGrab/mazeU добавлены: были в autonomous.ALL_MODES и кнопках
+        # UI, но не в этом белом списке — кнопки «Grab»/«Maze U» отвечали
+        # «Unknown mode» (v1.6.8)
         valid = ('radarScan', 'automatic', 'trackLine', 'trackLineCV',
-                 'trackHand', 'findColor', 'watchDog', 'keepDistance', 'stop')
+                 'trackHand', 'findColor', 'watchDog', 'keepDistance',
+                 'obstacleGrab', 'mazeU', 'stop')
         if func not in valid:
             r['error'] = f'Unknown mode: {func}'
         elif not state.autonomous:

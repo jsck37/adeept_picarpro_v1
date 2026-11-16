@@ -190,6 +190,14 @@ class TestAutoModes:
         assert r['ok'] is True
         call(state, 'auto', {'func': 'stop'})
 
+    def test_obstacle_grab_and_maze_valid(self, state):
+        # v1.6.8: obstacleGrab/mazeU были в autonomous.ALL_MODES и кнопках UI,
+        # но не в белом списке команды auto — «Unknown mode»
+        for func in ('obstacleGrab', 'mazeU'):
+            r = call(state, 'auto', {'func': func})
+            assert r['ok'] is True, f'{func}: {r}'
+        call(state, 'auto', {'func': 'stop'})
+
 
 class TestSteady:
     def test_toggle(self, state):

@@ -444,3 +444,63 @@ body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-ri
 .upd-status[data-state="running"]{background:#e8f0fe;color:#1a73e8}
 .upd-status[data-state="done"]{background:#e6f4ea;color:#188038}
 .upd-status[data-state="error"]{background:#fce8e6;color:#d93025}
+
+/* ===================== v1.6.8: язык, fullscreen-камера, экстренный стоп ===================== */
+
+/* --- переключатель языка (RU по умолчанию / EN) --- */
+.lang-switch{display:flex;gap:2px;background:#f1f3f4;border-radius:999px;padding:2px}
+.lang-btn{padding:3px 9px;border-radius:999px;font-size:.7rem;font-weight:700;color:#5f6368;background:transparent;letter-spacing:.03em}
+.lang-btn.active{background:#1a73e8;color:#fff}
+
+/* --- кнопка «камера на весь экран» в заголовке карточки --- */
+.fs-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#e8f0fe;color:#1a73e8;flex-shrink:0}
+.fs-btn svg{width:15px;height:15px}
+.fs-btn:active{background:#1a73e8;color:#fff}
+
+/* --- подсказки внутри карточек режимов --- */
+.cv-hint,.auto-hint{font-size:.72rem;color:#80868b;margin-bottom:6px}
+
+/* --- АВАРИЙНЫЙ СТОП в карточке «Автономные режимы» --- */
+.auto-estop-btn{width:100%;margin-top:8px;padding:11px 14px;border-radius:10px;background:#d93025;color:#fff;font-size:.9rem;font-weight:800;letter-spacing:.06em;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 2px 8px rgba(217,48,37,.4);touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.auto-estop-btn svg{width:18px;height:18px;flex-shrink:0}
+.auto-estop-btn:active{background:#a50e0e;transform:scale(.98)}
+
+/* --- полноэкранный режим камеры (drive mode) --- */
+#drive-overlay{display:none;position:fixed;inset:0;z-index:500;background:#000;flex-direction:column}
+body.drive-mode #drive-overlay{display:flex}
+body.drive-mode{overflow:hidden}
+body.drive-mode .status-bar,body.drive-mode .header,body.drive-mode .driver-banner,
+body.drive-mode .tab-content,body.drive-mode #low-voltage-banner{display:none!important}
+.drive-top{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;z-index:20;pointer-events:none}
+.drive-top .estop-btn,.drive-top .drive-exit-btn{pointer-events:auto}
+.drive-exit-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;backdrop-filter:blur(6px)}
+.drive-exit-btn svg{width:18px;height:18px}
+.drive-estop{min-height:40px}
+.drive-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;min-height:0}
+.drive-stage .camera-wrap{width:100%;height:100%;max-width:none;max-height:none;border-radius:0;aspect-ratio:auto;background:#000}
+.drive-stage .camera-wrap img{width:100%;height:100%;object-fit:contain}
+/* джойстики поверх видео: слева — колёса, справа — камера */
+.drive-joy{position:absolute;bottom:calc(64px + env(safe-area-inset-bottom));z-index:15;display:flex;flex-direction:column;align-items:center;gap:4px}
+.drive-joy-left{left:14px}
+.drive-joy-right{right:14px}
+.drive-joystick{width:min(34vw,150px);height:min(34vw,150px);opacity:.85;background:radial-gradient(circle,rgba(20,20,20,.8) 0%,rgba(10,10,10,.85) 100%)}
+.drive-joystick:active{opacity:1}
+.drive-joy-label{color:rgba(255,255,255,.75);font-size:.68rem;white-space:nowrap}
+/* мини статус-бар быстрых кнопок снизу по центру */
+.drive-quickbar{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));z-index:16;display:flex;gap:8px;background:rgba(20,20,20,.6);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:8px;max-width:calc(100vw - 20px)}
+.quick-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:58px;padding:6px 8px;border-radius:10px;background:rgba(255,255,255,.1);color:#e8eaed;font-size:.68rem;font-weight:600}
+.quick-btn svg{width:18px;height:18px}
+.quick-btn.off{background:rgba(255,255,255,.1);color:#9aa0a6}
+.quick-btn.on{background:#1a73e8;color:#fff;box-shadow:0 0 8px rgba(26,115,232,.6)}
+.quick-btn:active{transform:scale(.95)}
+/* в узком ландшафте джойстики прижимаются к бокам, кнопки — по центру */
+@media (max-height:520px){
+  .drive-joy{bottom:calc(58px + env(safe-area-inset-bottom))}
+  .drive-joystick{width:min(30vh,140px);height:min(30vh,140px)}
+  .quick-btn{min-width:50px;padding:5px 6px}
+}
+@media (max-width:600px){
+  .quick-btn span{font-size:.62rem}
+  .drive-estop{padding:6px 12px}
+}
+

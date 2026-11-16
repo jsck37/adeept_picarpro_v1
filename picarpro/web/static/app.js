@@ -10,6 +10,83 @@
   };
 })();
 
+// ===================== i18n (v1.6.8) =====================
+// Русский — язык по умолчанию, английский — дополнительный.
+// Словари лежат отдельными файлами: translate/ru.js и translate/en.js.
+var I18N = {
+  ru: window.I18N_RU || {},
+  en: window.I18N_EN || {},
+};
+var LANG = 'ru';
+try {
+  var savedLang = localStorage.getItem('picarpro_lang');
+  if (savedLang === 'en' || savedLang === 'ru') LANG = savedLang;
+} catch (e) {}
+
+// t('key') -> строка; t('key', {n: 5}) подставляет {n}, {s}, {v} и т.п.
+function t(key, params) {
+  var dict = I18N[LANG] || I18N.ru;
+  var s = dict[key];
+  if (s === undefined || s === null) s = I18N.en[key];
+  if (s === undefined || s === null) s = key;
+  if (params) {
+    Object.keys(params).forEach(function (k) {
+      s = s.split('{' + k + '}').join(String(params[k]));
+    });
+  }
+  return s;
+}
+
+function applyI18n() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-i18n]').forEach(function (el) {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
+    el.title = t(el.dataset.i18nTitle);
+  });
+  updateDynamicLabels();
+  buildServoGrid();   // имена серво переведённые
+}
+
+// Динамические надписи, которые JS расставляет по ходу работы
+function updateDynamicLabels() {
+  var jl = document.getElementById('joystick-label');
+  var fjl = document.getElementById('fs-joystick-label');
+  var defWheels = t('joy_wheels_default');
+  if (jl && !(wheelsStick && wheelsStick.active())) jl.textContent = defWheels;
+  if (fjl && !(fsWheelsStick && fsWheelsStick.active())) fjl.textContent = defWheels;
+  var cl = document.getElementById('cam-joystick-label');
+  var fcl = document.getElementById('fs-cam-joystick-label');
+  var defCam = t('joy_cam_default');
+  if (cl && !(camStick && camStick.active())) cl.textContent = defCam;
+  if (fcl && !(fsCamStick && fsCamStick.active())) fcl.textContent = defCam;
+  setDriver(currentDriver);
+  updateCraneArmUI();
+  updateCraneGripUI();
+  setPortedMode('push', portedModes.push.active);
+  var lStat = document.getElementById('blinker-left-status');
+  if (lStat && hlLeftSignal !== undefined) refreshBlinkerText('left');
+  var rStat = document.getElementById('blinker-right-status');
+  if (rStat && hlRightSignal !== undefined) refreshBlinkerText('right');
+  var countEl = document.getElementById('console-line-count');
+  if (countEl) {
+    var out = document.getElementById('console-output');
+    var n = out ? out.children.length : 0;
+    countEl.textContent = n === 1 ? t('console_lines_one') : t('console_lines_fmt', {n: n});
+  }
+}
+
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem('picarpro_lang', l); } catch (e) {}
+  var ruBtn = document.getElementById('lang-ru');
+  var enBtn = document.getElementById('lang-en');
+  if (ruBtn) ruBtn.classList.toggle('active', l === 'ru');
+  if (enBtn) enBtn.classList.toggle('active', l === 'en');
+  applyI18n();
+}
+
 // Идентификатор этого устройства (вкладки) для арбитража управления
 var CLIENT_ID = (function () {
   var k = 'picarpro_cid';
@@ -23,20 +100,20 @@ var currentDriver = null;
 var wsAttempt = 0;
 var statusPending = null;   // статус, накопленный пока вкладка скрыта
 
+// v1.6.8: каналы 3 и 4 убраны — на этой сборке не используются
+// (канал 4 — локоть/резерв, канал 3 — резерв; см. config.py).
 var servoDefs = [
-  { id: 0, name: 'Steering', min: 30, max: 150, init: 90 },
-  { id: 1, name: 'Cam Pan',  min: 0,  max: 180, init: 90 },
-  { id: 2, name: 'Cam Tilt', min: 80, max: 170, init: 90 },
-  { id: 3, name: 'Servo 3',  min: 0,  max: 180, init: 90 },
-  // v1.6.2 (подтверждено с железа): наклон клешни — канал 5, захват —
-  // канал 6, канал 4 (локоть) — резерв, не подключён.
-  { id: 4, name: 'Servo 4',    min: 0,   max: 180, init: 90 },
-  { id: 5, name: 'Crane Tilt', min: 0,   max: 180, init: 180 },
-  { id: 6, name: 'Crane Grab', min: 100, max: 180, init: 100 },
+  { id: 0, nameKey: 'servo_0', min: 30, max: 150, init: 90 },
+  { id: 1, nameKey: 'servo_1', min: 0,  max: 180, init: 90 },
+  { id: 2, nameKey: 'servo_2', min: 80, max: 170, init: 90 },
+  // Клешня: наклон — канал 5, захват — канал 6.
+  { id: 5, nameKey: 'servo_5', min: 0,   max: 180, init: 180 },
+  { id: 6, nameKey: 'servo_6', min: 100, max: 180, init: 100 },
 ];
 // Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
 
 var hlMainOn = false;
+var hlSideOn = false;
 var hlLeftSignal = false;
 var hlRightSignal = false;
 var currentLedMode = 'off';
@@ -63,19 +140,19 @@ var pollTimer = null;
 function getToken() {
   return localStorage.getItem('picarpro_token') || '';
 }
-function setToken(t) {
-  if (t) localStorage.setItem('picarpro_token', t);
+function setToken(t_) {
+  if (t_) localStorage.setItem('picarpro_token', t_);
   else localStorage.removeItem('picarpro_token');
 }
 function authHeaders() {
   var h = {'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID};
-  var t = getToken();
-  if (t) h['X-Auth-Token'] = t;
+  var tok = getToken();
+  if (tok) h['X-Auth-Token'] = tok;
   return h;
 }
 function handleUnauthorized() {
-  var t = prompt('PiCar Pro: access token required');
-  if (t !== null) { setToken(t.trim()); location.reload(); }
+  var tok = prompt(t('auth_prompt'));
+  if (tok !== null) { setToken(tok.trim()); location.reload(); }
 }
 
 function toast(msg, type) {
@@ -204,7 +281,9 @@ function updateVideoFeed() {
   var img = document.getElementById('camera-feed');
   if (!img) return;
   var controlTab = document.getElementById('content-control');
-  var visible = controlTab && controlTab.classList.contains('active') && !document.hidden;
+  // в полноэкранном режиме поток нужен всегда (не только на вкладке Control)
+  var driveMode = document.body.classList.contains('drive-mode');
+  var visible = (controlTab && controlTab.classList.contains('active') && !document.hidden) || driveMode;
   var want = visible ? FEED_URL : FEED_OFF;
   if (img.dataset.feedState !== want) {
     img.dataset.feedState = want;
@@ -239,15 +318,17 @@ function toggleHwSection(cardId, tagId, available) {
   }
 }
 
+// v1.6.8: окна mpu6050, ds4, missions, cv и autonomous — ВСЕГДА активны,
+// без проверки «Module not found»: их отсутствие не блокирует интерфейс
+// (датчики просто показывают N/A, режимы сообщат об ошибке при запуске).
+// Проверка осталась только для реально опциональных модулей.
 function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
-  toggleHwSection('card-autonomous', 'auto-missing-tag', hw.autonomous);
   toggleHwSection(null, 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
   toggleHwSection('card-buzzer', 'buzzer-missing-tag', hw.buzzer);
-  toggleHwSection(null, 'mpu-missing-tag', hw.mpu6050);
   toggleHwSection(null, 'claw-missing-tag', hw.crane);
   toggleHwSection('card-voice', 'voice-missing-tag', hw.voice);
 }
@@ -259,8 +340,8 @@ function setDriver(driver) {
   var chip = document.getElementById('driver-chip');
   if (chip) {
     chip.dataset.state = st;
-    chip.textContent = st === 'you' ? 'You drive'
-      : (st === 'other' ? 'Another device drives' : 'Control free');
+    chip.textContent = st === 'you' ? t('driver_chip_you')
+      : (st === 'other' ? t('driver_chip_other') : t('driver_chip_free'));
   }
   document.body.classList.toggle('not-driver', st === 'other');
 }
@@ -277,12 +358,12 @@ function handleResponse(m) {
     var now = Date.now();
     if (now - lastNotDriverToast > 3000) {   // не спамим при драге джойстика
       lastNotDriverToast = now;
-      toast('Controlled by another device \u2014 press \u201cTake control\u201d', 'error');
+      toast(t('toast_not_driver'), 'error');
     }
     return;
   }
   if (m.error) toast(m.error, 'error');
-  if (m.interrupted_auto) toast('Auto mode stopped by manual control', 'info');
+  if (m.interrupted_auto) toast(t('toast_interrupted'), 'info');
   if (m.cmd === 'servo_get_limits' && m.ok) applyServoLimits(m.limits);
 }
 
@@ -378,7 +459,7 @@ function wsConnect() {
 function startPolling() {
   if (pollTimer) return;
   function poll() {
-    fetch('/api/status', { headers: (function(){ var h = {}; var t = getToken(); if (t) h['X-Auth-Token'] = t; return h; })() })
+    fetch('/api/status', { headers: (function(){ var h = {}; var tok = getToken(); if (tok) h['X-Auth-Token'] = tok; return h; })() })
       .then(function(r) {
         if (r.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
         return r.json();
@@ -391,7 +472,7 @@ function startPolling() {
 }
 
 function fetchConsoleHistory() {
-  fetch('/api/logs', { headers: (function(){ var h = {}; var t = getToken(); if (t) h['X-Auth-Token'] = t; return h; })() })
+  fetch('/api/logs', { headers: (function(){ var h = {}; var tok = getToken(); if (tok) h['X-Auth-Token'] = tok; return h; })() })
     .then(function(r) { return r.json(); }).then(function(d) {
     if (d.lines) {
       // только последние 250 строк — на телефоне 800 DOM-узлов тормозят
@@ -457,9 +538,29 @@ function drawRadar(points, offline) {
     ctx.fillStyle = '#ffb74d';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('HC-SR04 offline', cx, 16);
+    ctx.fillText(t('radar_offline'), cx, 16);
   }
 }
+
+// Подпись активного CV-режима на бейдже поверх видео
+var CV_LABEL_KEYS = {
+  findlineCV: 'cv_label_line', trackHand: 'cv_label_hand',
+  findColor: 'cv_label_color', watchDog: 'cv_label_watchdog',
+  yoloDetect: 'cv_label_yolo', yoloSeg: 'cv_label_yolo_seg',
+  yoloSemantic: 'cv_label_yolo_sem',
+};
+function setCvBadge(mode) {
+  var badge = document.getElementById('cv-badge');
+  if (!badge) return;
+  if (mode && mode !== 'none') {
+    var key = CV_LABEL_KEYS[mode];
+    badge.textContent = t('cv_badge_prefix') + (key ? t(key) : mode);
+    badge.classList.add('visible');
+  } else {
+    badge.classList.remove('visible');
+  }
+}
+
 function updateStatus(d) {
   if (!d) return;
   if ('driver' in d) setDriver(d.driver);
@@ -491,19 +592,11 @@ function updateStatus(d) {
     spdEl.textContent = d.speed + '%';
     spdEl.classList.remove('turbo');
   }
-  var autoModeLabels = {
-    'none': 'Ready', 'radarScan': 'Radar', 'automatic': 'Auto Drive',
-    'trackLine': 'IR Line', 'trackLineCV': 'CV Line', 'trackHand': 'Hand Track',
-    'keepDistance': 'Distance', 'findColor': 'Color Track', 'watchDog': 'Watchdog',
-    'obstacleGrab': 'Obstacle Grab', 'mazeU': 'Maze U'
-  };
   if (d.auto_mode !== undefined) currentAutoMode = d.auto_mode;
   var radarBox = document.getElementById('radar-box');
   if (radarBox) radarBox.style.display = currentAutoMode === 'radarScan' ? 'block' : 'none';
   if (d.radar_data) drawRadar(d.radar_data, d.ultra_ok === false);
   else if (currentAutoMode === 'radarScan') drawRadar([], d.ultra_ok === false);
-  var sbModule = document.getElementById('sb-module');
-  if (sbModule) sbModule.textContent = autoModeLabels[d.auto_mode || 'none'] || d.auto_mode || 'Ready';
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
@@ -549,29 +642,23 @@ function updateStatus(d) {
   if (!('ir_left' in d)) {
     // не менялось
   } else if (d.ir_left !== undefined && d.ir_left !== null) {
-    document.getElementById('ir-left-val').textContent = d.ir_left ? 'LINE' : 'CLEAR';
-    document.getElementById('ir-left-val').style.color = d.ir_left ? '#ea4335' : '#34a853';
+    setIrVal('ir-left-val', d.ir_left);
   } else {
-    document.getElementById('ir-left-val').textContent = 'N/A';
-    document.getElementById('ir-left-val').style.color = '#9aa0a6';
+    setIrVal('ir-left-val', null);
   }
   if (!('ir_middle' in d)) {
     // не менялось
   } else if (d.ir_middle !== undefined && d.ir_middle !== null) {
-    document.getElementById('ir-middle-val').textContent = d.ir_middle ? 'LINE' : 'CLEAR';
-    document.getElementById('ir-middle-val').style.color = d.ir_middle ? '#ea4335' : '#34a853';
+    setIrVal('ir-middle-val', d.ir_middle);
   } else {
-    document.getElementById('ir-middle-val').textContent = 'N/A';
-    document.getElementById('ir-middle-val').style.color = '#9aa0a6';
+    setIrVal('ir-middle-val', null);
   }
   if (!('ir_right' in d)) {
     // не менялось
   } else if (d.ir_right !== undefined && d.ir_right !== null) {
-    document.getElementById('ir-right-val').textContent = d.ir_right ? 'LINE' : 'CLEAR';
-    document.getElementById('ir-right-val').style.color = d.ir_right ? '#ea4335' : '#34a853';
+    setIrVal('ir-right-val', d.ir_right);
   } else {
-    document.getElementById('ir-right-val').textContent = 'N/A';
-    document.getElementById('ir-right-val').style.color = '#9aa0a6';
+    setIrVal('ir-right-val', null);
   }
   var lvBanner = document.getElementById('low-voltage-banner');
   if (lvBanner && 'low_voltage' in d) lvBanner.style.display = d.low_voltage ? 'block' : 'none';
@@ -592,19 +679,21 @@ function updateStatus(d) {
     var steadyOn = !!d.steady_active;
     steadyItem.style.display = hw.mpu6050 ? '' : 'none';
     var stEl = document.getElementById('sb-steady');
-    stEl.textContent = steadyOn ? 'ON' : 'OFF';
+    stEl.textContent = steadyOn ? t('on') : t('off');
     stEl.style.color = steadyOn ? '#34a853' : '#9aa0a6';
     var stBtn = document.getElementById('steady-toggle');
     if (stBtn) stBtn.classList.toggle('active', steadyOn);
   }
   var ds4 = d.ds4;
   if (ds4) {
-    document.getElementById('sb-ds4').textContent = ds4.connected ? 'ON' : '--';
+    document.getElementById('sb-ds4').textContent = ds4.connected ? t('on') : '--';
     var ds4Dot = document.getElementById('ds4-status-dot');
     var ds4Text = document.getElementById('ds4-status-text');
     if (ds4Dot) ds4Dot.style.background = ds4.connected ? '#34a853' : '#ea4335';
     if (ds4Text) {
-      ds4Text.textContent = ds4.connected ? 'Connected (' + ds4.connect_count + '\u00D7)' : 'Not connected';
+      ds4Text.textContent = ds4.connected
+        ? t('ds4_connected_fmt', {n: ds4.connect_count})
+        : t('ds4_not_connected');
       ds4Text.style.color = ds4.connected ? '#34a853' : '#9aa0a6';
     }
     var btDiscBtn = document.getElementById('bt-disconnect-btn');
@@ -627,37 +716,27 @@ function updateStatus(d) {
     updateCraneGripUI();
   }
   if (d.cv_mode !== undefined) {
-    var badge = document.getElementById('cv-badge');
-    if (d.cv_mode && d.cv_mode !== 'none') {
-      badge.textContent = 'CV: ' + d.cv_mode;
-      badge.classList.add('visible');
-    } else {
-      badge.classList.remove('visible');
-    }
+    setCvBadge(d.cv_mode);
   }
   if (d.headlight !== undefined) {
     hlMainOn = d.headlight;
-    var hlMainBtn = document.getElementById('hl-main');
-    if (hlMainBtn) hlMainBtn.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
+    setHeadlightUI(hlMainOn);
   }
   if (d.side_lights !== undefined) {
     hlSideOn = d.side_lights;
-    var hlSideBtn = document.getElementById('hl-side');
-    if (hlSideBtn) hlSideBtn.className = 'headlight-btn ' + (hlSideOn ? 'on' : 'off');
+    setSideLightsUI(hlSideOn);
   }
   if (d.left_blinker !== undefined) {
     hlLeftSignal = d.left_blinker;
     document.getElementById('hl-left-signal').className = 'signal-btn ' + (hlLeftSignal ? 'on' : 'off');
-    var lStat = document.getElementById('blinker-left-status');
-    if (lStat) { lStat.textContent = hlLeftSignal ? 'ON' : 'OFF'; lStat.style.color = hlLeftSignal ? '#fbbc04' : '#9aa0a6'; }
+    refreshBlinkerText('left');
     var lDot = document.getElementById('blinker-left-dot');
     if (lDot) lDot.dataset.on = hlLeftSignal ? '1' : '0';
   }
   if (d.right_blinker !== undefined) {
     hlRightSignal = d.right_blinker;
     document.getElementById('hl-right-signal').className = 'signal-btn ' + (hlRightSignal ? 'on' : 'off');
-    var rStat = document.getElementById('blinker-right-status');
-    if (rStat) { rStat.textContent = hlRightSignal ? 'ON' : 'OFF'; rStat.style.color = hlRightSignal ? '#fbbc04' : '#9aa0a6'; }
+    refreshBlinkerText('right');
     var rDot = document.getElementById('blinker-right-dot');
     if (rDot) rDot.dataset.on = hlRightSignal ? '1' : '0';
   }
@@ -669,7 +748,7 @@ function updateStatus(d) {
     var vStop = document.getElementById('voice-stop-btn');
     if (vDot) vDot.style.background = v.active ? '#34a853' : (v.available ? '#fbbc04' : '#9aa0a6');
     if (vText) {
-      vText.textContent = v.active ? 'Listening...' : (v.available ? 'Ready' : 'Inactive');
+      vText.textContent = v.active ? t('voice_listening') : (v.available ? t('voice_ready') : t('voice_inactive'));
       vText.style.color = v.active ? '#34a853' : '#9aa0a6';
     }
     if (vStart && vStop) {
@@ -686,16 +765,75 @@ function updateStatus(d) {
   }
 }
 
+function setIrVal(id, val) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (val === null || val === undefined) {
+    el.textContent = t('ir_na');
+    el.style.color = '#9aa0a6';
+  } else if (val) {
+    el.textContent = t('ir_line');
+    el.style.color = '#ea4335';
+  } else {
+    el.textContent = t('ir_clear');
+    el.style.color = '#34a853';
+  }
+}
+
+function refreshBlinkerText(side) {
+  var statEl = document.getElementById('blinker-' + side + '-status');
+  if (!statEl) return;
+  var on = side === 'left' ? hlLeftSignal : hlRightSignal;
+  statEl.textContent = on ? t('on') : t('off');
+  statEl.style.color = on ? '#fbbc04' : '#9aa0a6';
+}
+
+// Фары/габариты: состояния синхронизируются и в карточке, и в мини-статус-баре
+// полноэкранного режима
+function setHeadlightUI(on) {
+  var btn = document.getElementById('hl-main');
+  if (btn) btn.className = 'headlight-btn ' + (on ? 'on' : 'off');
+  var q = document.getElementById('fs-hl-main');
+  if (q) q.className = 'quick-btn ' + (on ? 'on' : 'off');
+}
+function setSideLightsUI(on) {
+  var btn = document.getElementById('hl-side');
+  if (btn) btn.className = 'headlight-btn ' + (on ? 'on' : 'off');
+  var q = document.getElementById('fs-hl-side');
+  if (q) q.className = 'quick-btn ' + (on ? 'on' : 'off');
+}
+
+function toggleHeadlight() {
+  hlMainOn = !hlMainOn;
+  sendCommand('headlight', { action: hlMainOn ? 'on' : 'off' });
+  setHeadlightUI(hlMainOn);
+}
+function toggleSideLights() {
+  hlSideOn = !hlSideOn;
+  sendCommand('side_lights', { action: hlSideOn ? 'on' : 'off' });
+  setSideLightsUI(hlSideOn);
+}
+
 function updateCraneArmUI() {
   var toggleBtn = document.getElementById('crane-arm-toggle');
-  if (!toggleBtn) return;
-  if (craneArmClosed) {
-    toggleBtn.classList.add('active');
-    toggleBtn.textContent = 'Release';
-  } else {
-    toggleBtn.classList.remove('active');
-    toggleBtn.textContent = 'Grab / Release';
+  if (toggleBtn) {
+    if (craneArmClosed) {
+      toggleBtn.classList.add('active');
+      toggleBtn.textContent = t('crane_release');
+    } else {
+      toggleBtn.classList.remove('active');
+      toggleBtn.textContent = t('crane_grab_release');
+    }
   }
+  // синхронная кнопка в мини-статус-баре полноэкранного режима
+  var q = document.getElementById('fs-crane-arm');
+  if (q) q.className = 'quick-btn ' + (craneArmClosed ? 'on' : 'off');
+}
+
+function toggleCraneArm() {
+  craneArmClosed = !craneArmClosed;
+  sendCommand('crane', { action: craneArmClosed ? 'arm_close' : 'arm_open' });
+  updateCraneArmUI();
 }
 
 function updateCraneGripUI() {
@@ -706,18 +844,19 @@ function updateCraneGripUI() {
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
   var angleMap = { low: 100, mid: 135 };
-  var labelMap = { low: 'Low', mid: 'Mid' };
+  var keyMap = { low: 'grip_low', mid: 'grip_mid' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
-  if (label && angleMap[craneGripPosition] !== undefined) {
-    label.textContent = labelMap[craneGripPosition] + ' (' + angleMap[craneGripPosition] + '\u00B0)';
+  if (label && keyMap[craneGripPosition] !== undefined) {
+    label.textContent = t('grip_label_fmt',
+      {s: t(keyMap[craneGripPosition]), a: angleMap[craneGripPosition]});
   }
 }
 
 // ===================== Servo Control (степперы ±1°) =====================
 // Степперы: точная настройка по 1 градусу с удержанием (автоповтор)
 // и прямым вводом угла. Лимиты — только из config.py (SERVO_LIMITS),
-// редактирование из UI удалено v1.3.0.
+// редактирование из UI удалено v1.3.0. Каналы 3 и 4 убраны (v1.6.8).
 
 function servoDefById(id) {
   for (var i = 0; i < servoDefs.length; i++) {
@@ -747,16 +886,19 @@ function sendServoAngle(id, angle) {
 function buildServoGrid() {
   var grid = document.getElementById('servo-grid');
   if (!grid) return;
+  var hadFocus = document.activeElement && document.activeElement.matches &&
+                 document.activeElement.matches('input.servo-angle-input');
+  if (hadFocus) return;   // не пересобираем, пока пользователь вводит угол
   grid.innerHTML = '';
   servoDefs.forEach(function(s) {
     if (s.cur === undefined) s.cur = s.init;
     var item = document.createElement('div');
     item.className = 'servo-item';
-    item.innerHTML = '<label>' + s.name + ' <span class="val" data-servo-val="' + s.id + '">' + s.cur + '\u00B0</span></label>' +
+    item.innerHTML = '<label>' + t(s.nameKey) + ' <span class="val" data-servo-val="' + s.id + '">' + s.cur + '\u00B0</span></label>' +
       '<div class="servo-step-row">' +
-      '<button type="button" class="servo-step-btn" data-servo-dec="' + s.id + '" title="\u22121\u00B0 (удерживайте для автоповтора)">&minus;</button>' +
+      '<button type="button" class="servo-step-btn" data-servo-dec="' + s.id + '" title="' + t('servo_step_minus') + '">&minus;</button>' +
       '<input type="number" class="servo-angle-input" data-servo="' + s.id + '" min="' + s.min + '" max="' + s.max + '" value="' + s.cur + '">' +
-      '<button type="button" class="servo-step-btn" data-servo-inc="' + s.id + '" title="+1\u00B0 (удерживайте для автоповтора)">+</button>' +
+      '<button type="button" class="servo-step-btn" data-servo-inc="' + s.id + '" title="' + t('servo_step_plus') + '">+</button>' +
       '</div>' +
       '<div class="servo-limits-row"><span class="servo-limit-label">' + s.min + '\u2013' + s.max + '\u00B0</span></div>';
     grid.appendChild(item);
@@ -824,13 +966,21 @@ var joystickContainer = document.getElementById('joystick-container');
 var joystickKnob = document.getElementById('joystick-knob');
 var joystickLabel = document.getElementById('joystick-label');
 
-var dirLabels = {
-  forward: 'Forward', backward: 'Backward',
-  forward_left: 'Fwd-Left', forward_right: 'Fwd-Right',
-  backward_left: 'Back-Left', backward_right: 'Back-Right', stop: 'Stopped',
-  steer_left: 'Steer left', steer_right: 'Steer right',
-  spin_left: 'Spin left', spin_right: 'Spin right'
-};
+// Подпись направления движения по логическому dir (dir_forward и т.д.)
+function dirLabel(dir) {
+  var s = t('dir_' + dir);
+  return s === ('dir_' + dir) ? dir : s;
+}
+function setWheelLabels(txt) {
+  if (joystickLabel) joystickLabel.textContent = txt;
+  var fjl = document.getElementById('fs-joystick-label');
+  if (fjl) fjl.textContent = txt;
+}
+function setCamLabels(txt) {
+  if (camJoystickLabel) camJoystickLabel.textContent = txt;
+  var fcl = document.getElementById('fs-cam-joystick-label');
+  if (fcl) fcl.textContent = txt;
+}
 
 // Универсальный джойстик на Pointer Events: у каждого свой pointerId, поэтому
 // «колёса» и «камера» работают одновременно двумя пальцами. Раньше оба
@@ -890,14 +1040,17 @@ function sendMoveDir(dir, force) {
   }
 }
 
-var wheelsStick = makeStick(joystickContainer, joystickKnob, 24, function(dx, dy) {
+function onWheelsMove(dx, dy) {
   var dir = PanelCore.vectorToDir(dx, dy, 10);
-  if (joystickLabel) joystickLabel.textContent = dirLabels[dir] || dir;
+  setWheelLabels(dirLabel(dir) || dir);
   sendMoveDir(dir, true);          // тот же темп повторов, что и раньше (150 мс)
-}, function() {
-  if (joystickLabel) joystickLabel.textContent = 'Wheels \u2014 WASD / joystick';
+}
+function onWheelsEnd() {
+  setWheelLabels(t('joy_wheels_default'));
   sendMoveDir('stop', false);
-});
+}
+
+var wheelsStick = makeStick(joystickContainer, joystickKnob, 24, onWheelsMove, onWheelsEnd);
 
 var camJoystickContainer = document.getElementById('cam-joystick-container');
 var camJoystickKnob = document.getElementById('cam-joystick-knob');
@@ -928,20 +1081,81 @@ function setCamera(newPan, newTilt) {
   }
 }
 
-var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, function(dx, dy, r) {
+function onCamMove(dx, dy, r) {
   // v1.6.1: драг в ту же сторону, что стрелки (см. PanelCore.stickToCam):
   // вверх — камера поднимается, вправо — панорама вправо (pan уменьшается).
   var tgt = PanelCore.stickToCam(dx, dy, r);
   var newPan = camClamp(1, tgt.pan);
   var newTilt = camClamp(2, tgt.tilt);
   setCamera(newPan, newTilt);
-  if (camJoystickLabel) {
-    camJoystickLabel.textContent = (Math.abs(dx) < 5 && Math.abs(dy) < 5)
-      ? 'Camera \u2014 drag / arrows' : 'Pan:' + newPan + '\u00B0 Tilt:' + newTilt + '\u00B0';
-  }
-}, function() {
-  if (camJoystickLabel) camJoystickLabel.textContent = 'Camera \u2014 drag / arrows';
-});
+  var txt = (Math.abs(dx) < 5 && Math.abs(dy) < 5)
+    ? t('joy_cam_default')
+    : t('joy_cam_pos_fmt', {p: newPan, t: newTilt});
+  setCamLabels(txt);
+}
+function onCamEnd() {
+  setCamLabels(t('joy_cam_default'));
+}
+
+var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, onCamMove, onCamEnd);
+
+// ---- полноэкранный режим камеры (v1.6.8) --------------------------------
+// Видео разворачивается на весь экран, слева джойстик движения,
+// справа джойстик камеры, снизу мини статус-бар быстрых кнопок
+// (фары / габариты / гудок / клешня). Видео-элемент переносится в оверлей,
+// поэтому MJPEG-поток не открывается второй раз.
+var driveOverlay = document.getElementById('drive-overlay');
+var driveStage = document.getElementById('drive-stage');
+var cameraWrap = document.querySelector('#card-camera .camera-wrap');
+var CAMERA_BODY = 'camera-body';
+
+function enterDriveMode() {
+  if (!cameraWrap || !driveStage) return;
+  driveStage.insertBefore(cameraWrap, driveStage.firstChild);
+  document.body.classList.add('drive-mode');
+  // пытаемся занять настоящий fullscreen (спрятать адресную строку браузера);
+  // на iOS Safari Fullscreen API нет — оверлей и так закрывает весь экран
+  var el = document.documentElement;
+  try {
+    var p = null;
+    if (el.requestFullscreen) p = el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) p = el.webkitRequestFullscreen();
+    if (p && p.catch) p.catch(function() {});
+  } catch (e) {}
+  updateVideoFeed();
+}
+function exitDriveMode() {
+  var body = document.getElementById(CAMERA_BODY);
+  if (cameraWrap && body) body.insertBefore(cameraWrap, body.firstChild);
+  document.body.classList.remove('drive-mode');
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } catch (e) {}
+  onWheelsEnd();
+  onCamEnd();
+  updateVideoFeed();
+}
+
+var fsEnterBtn = document.getElementById('fs-enter-btn');
+if (fsEnterBtn) {
+  fsEnterBtn.addEventListener('click', function(e) {
+    // кнопка живёт внутри collapsible-заголовка карточки — без
+    // stopPropagation клик ещё и сворачивал бы карточку камеры
+    e.stopPropagation();
+    enterDriveMode();
+  });
+}
+var driveExitBtn = document.getElementById('drive-exit');
+if (driveExitBtn) driveExitBtn.addEventListener('click', exitDriveMode);
+
+// Джойстики полноэкранного режима — те же обработчики, другие контейнеры
+var fsWheelsStick = makeStick(
+  document.getElementById('fs-joystick-container'),
+  document.getElementById('fs-joystick-knob'), 24, onWheelsMove, onWheelsEnd);
+var fsCamStick = makeStick(
+  document.getElementById('fs-cam-joystick-container'),
+  document.getElementById('fs-cam-joystick-knob'), 21, onCamMove, onCamEnd);
 
 // ---- клавиатура: W/A/S/D — колёса (A/D сами по себе только руль),
 // Q/E — разворот на месте, Пробел — стоп, Esc — аварийный стоп,
@@ -952,19 +1166,25 @@ var camStick = makeStick(camJoystickContainer, camJoystickKnob, 21, function(dx,
 // (v1.6.1: убрана инверсия tilt у стрелок и I/K).
 var heldKeys = {};
 function typingTarget(e) {
-  var t = e.target && e.target.tagName;
-  return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT';
+  var tag = e.target && e.target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 function applyKeyDir() {
   var dir = PanelCore.combineKeys(heldKeys);
-  if (joystickLabel && !(wheelsStick && wheelsStick.active())) {
-    joystickLabel.textContent = dir === 'stop' ? 'Wheels \u2014 WASD / joystick' : (dirLabels[dir] || dir);
+  if (!(wheelsStick && wheelsStick.active()) && !(fsWheelsStick && fsWheelsStick.active())) {
+    setWheelLabels(dir === 'stop' ? t('joy_wheels_default') : (dirLabel(dir) || dir));
   }
   sendMoveDir(dir, false);
 }
 document.addEventListener('keydown', function(e) {
   if (typingTarget(e) || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key === 'Escape') { emergencyStop(); e.preventDefault(); return; }
+  if (e.key === 'Escape') {
+    // Esc: выход из полноэкранного режима + аварийный стоп (всегда)
+    if (document.body.classList.contains('drive-mode')) exitDriveMode();
+    emergencyStop();
+    e.preventDefault();
+    return;
+  }
   if (e.key === ' ') {
     heldKeys = {};
     sendMoveDir('stop', false);
@@ -998,6 +1218,8 @@ function releaseAllInputs() {
   heldKeys = {};
   if (wheelsStick) wheelsStick.release();
   if (camStick) camStick.release();
+  if (fsWheelsStick) fsWheelsStick.release();
+  if (fsCamStick) fsCamStick.release();
   if (lastSentDir !== 'stop') sendMoveDir('stop', false);
 }
 window.addEventListener('blur', releaseAllInputs);
@@ -1010,38 +1232,46 @@ document.addEventListener('visibilitychange', function() {
 
 function emergencyStop() {
   heldKeys = {};
-  if (wheelsStick) wheelsStick.release();
+  releaseAllInputs();
   lastSentDir = 'stop';
   sendCommand('estop', {});
-  toast('EMERGENCY STOP', 'error');
+  toast(t('toast_estop'), 'error');
 }
 
+// ---- Компьютерное зрение: режимы с оверлеем поверх камеры ---------------
+// (Color, CV Line, Hand, WatchDog, Yolo*). trackLineCV/trackHand/findColor/
+// watchDog стартуют как авто-режимы с камерой — сервер сам вешает оверлей.
 document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.cv-btn[data-cv]').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     var mode = btn.dataset.cv;
-    var badge = document.getElementById('cv-badge');
     var handRow = document.getElementById('hand-color-row');
-    if (mode === 'findlineCV') {
-      badge.textContent = 'CV: Line Follow';
-      badge.classList.add('visible');
+    if (mode === 'none') {
+      setCvBadge('none');
+      sendCommand('auto', { func: 'stop' });
+      sendCommand('cv_mode', { mode: 'none' });
+      if (handRow) handRow.style.display = 'none';
+    } else if (mode === 'findlineCV') {
+      setCvBadge(mode);
       sendCommand('auto', { func: 'trackLineCV' });
       if (handRow) handRow.style.display = 'none';
     } else if (mode === 'trackHand') {
-      badge.textContent = 'CV: Hand Track';
-      badge.classList.add('visible');
+      setCvBadge(mode);
       sendCommand('auto', { func: 'trackHand' });
       if (handRow) handRow.style.display = '';
     } else if (mode === 'findColor') {
-      badge.textContent = 'CV: Color Track';
-      badge.classList.add('visible');
+      setCvBadge(mode);
       sendCommand('auto', { func: 'findColor' });
       if (handRow) handRow.style.display = '';
+    } else if (mode === 'watchDog') {
+      setCvBadge(mode);
+      sendCommand('auto', { func: 'watchDog' });
+      if (handRow) handRow.style.display = 'none';
     } else {
-      badge.textContent = 'CV: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
-      badge.classList.toggle('visible', mode !== 'none');
-      if (mode !== 'none') sendCommand('auto', { func: 'stop' });
+      // чистые CV-режимы (YOLO*): только оверлей, робот стоит
+      setCvBadge(mode);
+      sendCommand('auto', { func: 'stop' });
       sendCommand('cv_mode', { mode: mode });
       if (handRow) handRow.style.display = 'none';
     }
@@ -1081,7 +1311,7 @@ if (handColorApply) {
       v_high: parseInt(document.getElementById('hand-v-high').value),
     });
     document.querySelectorAll('#hand-color-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
-    toast('Custom hand color applied', 'success');
+    toast(t('toast_hand_color'), 'success');
   });
 }
 
@@ -1093,11 +1323,7 @@ if (speedSlider) {
 }
 
 document.querySelectorAll('.crane-arm-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    craneArmClosed = !craneArmClosed;
-    sendCommand('crane', { action: craneArmClosed ? 'arm_close' : 'arm_open' });
-    updateCraneArmUI();
-  });
+  btn.addEventListener('click', toggleCraneArm);
 });
 
 document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
@@ -1111,19 +1337,9 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
   });
 });
 
-document.getElementById('hl-main').addEventListener('click', function() {
-  hlMainOn = !hlMainOn;
-  sendCommand('headlight', { action: hlMainOn ? 'on' : 'off' });
-  this.className = 'headlight-btn ' + (hlMainOn ? 'on' : 'off');
-});
-
+document.getElementById('hl-main').addEventListener('click', toggleHeadlight);
 // v1.6.4: боковые габариты (Side lights) — кнопка в окне фар + геймпад L1
-var hlSideOn = false;
-document.getElementById('hl-side').addEventListener('click', function() {
-  hlSideOn = !hlSideOn;
-  sendCommand('side_lights', { action: hlSideOn ? 'on' : 'off' });
-  this.className = 'headlight-btn ' + (hlSideOn ? 'on' : 'off');
-});
+document.getElementById('hl-side').addEventListener('click', toggleSideLights);
 
 document.getElementById('hl-left-signal').addEventListener('click', function() {
   hlLeftSignal = !hlLeftSignal;
@@ -1132,15 +1348,13 @@ document.getElementById('hl-left-signal').addEventListener('click', function() {
     document.getElementById('hl-right-signal').className = 'signal-btn off';
     var rDot = document.getElementById('blinker-right-dot');
     if (rDot) rDot.dataset.on = '0';
-    var rStat = document.getElementById('blinker-right-status');
-    if (rStat) { rStat.textContent = 'OFF'; rStat.style.color = '#9aa0a6'; }
+    refreshBlinkerText('right');
   }
   sendCommand('blinker', { side: 'left', active: hlLeftSignal });
   this.className = 'signal-btn ' + (hlLeftSignal ? 'on' : 'off');
   var lDot = document.getElementById('blinker-left-dot');
   if (lDot) lDot.dataset.on = hlLeftSignal ? '1' : '0';
-  var lStat = document.getElementById('blinker-left-status');
-  if (lStat) { lStat.textContent = hlLeftSignal ? 'ON' : 'OFF'; lStat.style.color = hlLeftSignal ? '#fbbc04' : '#9aa0a6'; }
+  refreshBlinkerText('left');
 });
 
 document.getElementById('hl-right-signal').addEventListener('click', function() {
@@ -1150,15 +1364,13 @@ document.getElementById('hl-right-signal').addEventListener('click', function() 
     document.getElementById('hl-left-signal').className = 'signal-btn off';
     var lDot = document.getElementById('blinker-left-dot');
     if (lDot) lDot.dataset.on = '0';
-    var lStat = document.getElementById('blinker-left-status');
-    if (lStat) { lStat.textContent = 'OFF'; lStat.style.color = '#9aa0a6'; }
+    refreshBlinkerText('left');
   }
   sendCommand('blinker', { side: 'right', active: hlRightSignal });
   this.className = 'signal-btn ' + (hlRightSignal ? 'on' : 'off');
   var rDot = document.getElementById('blinker-right-dot');
   if (rDot) rDot.dataset.on = hlRightSignal ? '1' : '0';
-  var rStat = document.getElementById('blinker-right-status');
-  if (rStat) { rStat.textContent = hlRightSignal ? 'ON' : 'OFF'; rStat.style.color = hlRightSignal ? '#fbbc04' : '#9aa0a6'; }
+  refreshBlinkerText('right');
 });
 
 var ledColorInput = document.getElementById('led-color');
@@ -1203,13 +1415,18 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
 updateCraneArmUI();
 updateCraneGripUI();
 
+// ---- Автономные режимы (v1.6.8): Radar, Auto Drive, IR Line, Distance,
+// Grab, Maze U. Режимы с оверлеем камеры вынесены в «Компьютерное зрение».
+// Кнопка «Stop» заменена на «АВАРИЙНЫЙ СТОП» (estop) — задание v1.6.8.
 document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('#auto-group .gbtn').forEach(function(b) { b.classList.remove('active'); });
-    if (btn.dataset.auto !== 'stop') btn.classList.add('active');
+    btn.classList.add('active');
     sendCommand('auto', { func: btn.dataset.auto });
   });
 });
+var autoEstopBtn = document.getElementById('auto-estop');
+if (autoEstopBtn) autoEstopBtn.addEventListener('click', emergencyStop);
 
 var voiceStartBtn = document.getElementById('voice-start-btn');
 var voiceStopBtn = document.getElementById('voice-stop-btn');
@@ -1233,8 +1450,7 @@ if (steadyToggle) {
 
 // --- Push Mode: расталкивание препятствий клешнёй по HC-SR04 ----------------
 var portedModes = {
-  push:  { btn: 'push-toggle', cmd: 'push', active: false,
-           labelOn: 'Stop Push', labelOff: 'Push Mode' },
+  push:  { btn: 'push-toggle', cmd: 'push', active: false },
 };
 
 Object.keys(portedModes).forEach(function(key) {
@@ -1246,7 +1462,7 @@ Object.keys(portedModes).forEach(function(key) {
     sendCommand(m.cmd, { action: action });
     // оптимистичное переключение — статус с сервера подтвердит/откатит
     setPortedMode(key, !m.active);
-    toast(m.labelOff + ': ' + (m.active ? 'запущен' : 'остановлен'));
+    toast(m.active ? t('toast_push_stopped') : t('toast_push_started'));
   });
 });
 
@@ -1257,7 +1473,7 @@ function setPortedMode(key, active) {
   var btn = document.getElementById(m.btn);
   if (btn) {
     btn.classList.toggle('active', m.active);
-    btn.textContent = m.active ? m.labelOn : m.labelOff;
+    btn.textContent = m.active ? t('push_btn_on') : t('push_btn_off');
   }
 }
 
@@ -1287,27 +1503,28 @@ function renderBtDevices(devs) {
     var label = document.createElement('span');
     label.className = 'bt-device-name';
     var tags = [];
-    if (dev.connected) tags.push('connected'); else if (dev.paired) tags.push('paired');
+    if (dev.connected) tags.push(t('bt_tag_connected')); else if (dev.paired) tags.push(t('bt_tag_paired'));
     if (dev.rssi !== null && dev.rssi !== undefined) tags.push(dev.rssi + ' dBm');
     label.textContent = dev.name + ' (' + dev.mac + ')' + (tags.length ? ' \u00B7 ' + tags.join(', ') : '');
     var btn = document.createElement('button');
     btn.className = 'btn-sm btn-primary bt-connect-btn';
     btn.dataset.mac = dev.mac;
-    btn.textContent = dev.connected ? 'Connected' : (dev.paired ? 'Connect' : 'Pair');
+    btn.textContent = dev.connected ? t('bt_state_connected')
+      : (dev.paired ? t('bt_state_connect') : t('bt_state_pair'));
     btn.disabled = !!dev.connected;
     btn.addEventListener('click', function() {
       var label0 = btn.textContent;
       btn.textContent = '...';
       btn.disabled = true;
-      if (!dev.paired) toast('Pairing: keep the controller in pairing mode (hold Share + PS)', 'info');
+      if (!dev.paired) toast(t('toast_pairing_hint'), 'info');
       fetch('/api/bt/connect', { method: 'POST', headers: authHeaders(),
         body: JSON.stringify({ mac: dev.mac, name: dev.name }) })
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          if (d.ok) { toast('Connected!', 'success'); btn.textContent = 'Connected'; }
-          else { toast(d.message || d.error || 'Connection failed', 'error'); btn.textContent = label0; btn.disabled = false; }
+          if (d.ok) { toast(t('toast_connected'), 'success'); btn.textContent = t('bt_state_connected'); }
+          else { toast(d.message || d.error || t('toast_conn_failed'), 'error'); btn.textContent = label0; btn.disabled = false; }
         })
-        .catch(function() { toast('Connection error', 'error'); btn.textContent = label0; btn.disabled = false; });
+        .catch(function() { toast(t('toast_conn_error'), 'error'); btn.textContent = label0; btn.disabled = false; });
     });
     item.appendChild(label);
     item.appendChild(btn);
@@ -1328,49 +1545,49 @@ btScanBtn.addEventListener('click', function() {
       btScanning.style.display = 'none';
       btScanBtn.disabled = false;
       if (d.ok === false) {
-        var hint = d.error || 'Scan failed';
-        if (d.diagnose && d.diagnose.rfkill_blocked) hint += ' (Bluetooth is blocked by rfkill)';
+        var hint = d.error || t('toast_scan_failed');
+        if (d.diagnose && d.diagnose.rfkill_blocked) hint += t('toast_scan_rfkill');
         btMsg(hint, '#ea4335');
       } else if (d.devices && d.devices.length > 0) {
         renderBtDevices(d.devices);
       } else {
-        btMsg('No devices found. Put the controller in pairing mode (hold Share + PS) and scan again.');
+        btMsg(t('toast_scan_empty'));
       }
     })
     .catch(function() {
       btScanning.style.display = 'none';
       btScanBtn.disabled = false;
-      btMsg('Scan failed', '#ea4335');
+      btMsg(t('toast_scan_failed'), '#ea4335');
     });
 });
 
 btAutoBtn.addEventListener('click', function() {
   fetch('/api/bt/auto_connect', { method: 'POST', headers: authHeaders() }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.ok) toast('Auto-connect started', 'success');
-    else toast(d.error || d.message || 'Auto-connect failed', 'error');
-  }).catch(function() { toast('Auto-connect error', 'error'); });
+    if (d.ok) toast(t('toast_auto_connect_ok'), 'success');
+    else toast(d.error || d.message || t('toast_auto_connect_fail'), 'error');
+  }).catch(function() { toast(t('toast_auto_connect_error'), 'error'); });
 });
 
 btDisconnectBtn.addEventListener('click', function() {
   fetch('/api/bt/disconnect', { method: 'POST', headers: authHeaders() }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.ok) toast('Disconnected', 'success');
-    else toast(d.error || 'Disconnect failed', 'error');
-  }).catch(function() { toast('Disconnect error', 'error'); });
+    if (d.ok) toast(t('toast_disconnected'), 'success');
+    else toast(d.error || t('toast_disconnect_failed'), 'error');
+  }).catch(function() { toast(t('toast_disconnect_error'), 'error'); });
 });
 
-fetch('/api/bt/status', { headers: (function(){ var h = {}; var t = getToken(); if (t) h['X-Auth-Token'] = t; return h; })() }).then(function(r) { return r.json(); }).then(function(d) {
+fetch('/api/bt/status', { headers: (function(){ var h = {}; var tok = getToken(); if (tok) h['X-Auth-Token'] = tok; return h; })() }).then(function(r) { return r.json(); }).then(function(d) {
   if (d.saved_mac && btSavedInfo) {
-    btSavedInfo.textContent = 'Saved: ' + d.saved_mac;
+    btSavedInfo.textContent = t('bt_saved_fmt', {s: d.saved_mac});
   }
 }).catch(function() {});
 
 function getLogLevel(text) {
   if (!text) return 'debug';
-  var t = text.toUpperCase();
-  if (t.indexOf('| ERROR') !== -1 || t.indexOf('[ERROR]') !== -1) return 'error';
-  if (t.indexOf('| WARNING') !== -1 || t.indexOf('| WARN') !== -1 || t.indexOf('[WARN') !== -1) return 'warn';
-  if (t.indexOf('| DEBUG') !== -1 || t.indexOf('[DEBUG]') !== -1) return 'debug';
-  if (t.indexOf('| INFO') !== -1 || t.indexOf('[INFO]') !== -1) return 'info';
+  var up = text.toUpperCase();
+  if (up.indexOf('| ERROR') !== -1 || up.indexOf('[ERROR]') !== -1) return 'error';
+  if (up.indexOf('| WARNING') !== -1 || up.indexOf('| WARN') !== -1 || up.indexOf('[WARN') !== -1) return 'warn';
+  if (up.indexOf('| DEBUG') !== -1 || up.indexOf('[DEBUG]') !== -1) return 'debug';
+  if (up.indexOf('| INFO') !== -1 || up.indexOf('[INFO]') !== -1) return 'info';
   return 'info';
 }
 
@@ -1401,7 +1618,7 @@ function appendConsoleLine(text, ts) {
     }
     if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
     var countEl = document.getElementById('console-line-count');
-    if (countEl) countEl.textContent = output.children.length + ' lines';
+    if (countEl) countEl.textContent = t('console_lines_fmt', {n: output.children.length});
   }
   updateLogCounters();
 }
@@ -1461,7 +1678,7 @@ document.getElementById('console-clear-btn').addEventListener('click', function(
   logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
   updateLogCounters();
   var countEl = document.getElementById('console-line-count');
-  if (countEl) countEl.textContent = '0 lines';
+  if (countEl) countEl.textContent = t('console_lines_fmt', {n: 0});
   sendCommand('clear_log', {});
 });
 
@@ -1480,7 +1697,7 @@ function renderMissionList(list) {
     var o = document.createElement('option');
     o.value = m.name;
     o.dataset.builtin = m.builtin ? '1' : '0';
-    o.textContent = m.name + ' (' + m.steps + ' steps, ~' + m.sec + ' s)' + (m.builtin ? '' : ' *');
+    o.textContent = t('mission_steps_fmt', {s: m.name, n: m.steps, sec: m.sec}) + (m.builtin ? '' : ' *');
     missionSel.appendChild(o);
   });
   if (prev) missionSel.value = prev;
@@ -1493,7 +1710,7 @@ function updateMissionButtons() {
   document.getElementById('mission-start').disabled = st.active || st.recording || !sel;
   document.getElementById('mission-stop').disabled = !st.active;
   document.getElementById('mission-home').disabled = st.active || st.recording || !st.has_path;
-  document.getElementById('mission-rec').textContent = st.recording ? 'Stop & save' : 'Record path';
+  document.getElementById('mission-rec').textContent = st.recording ? t('mission_rec_stop') : t('mission_rec');
   document.getElementById('mission-rec').dataset.rec = st.recording ? '1' : '0';
   document.getElementById('mission-del').style.display =
     (sel && sel.dataset.builtin === '0') ? '' : 'none';
@@ -1506,13 +1723,13 @@ function renderMissionStatus(s) {
   });
   var el = document.getElementById('mission-status');
   if (el) {
-    var txt = 'Idle', st = s.state || 'idle';
-    if (missionState.recording) txt = 'Recording\u2026 drive the robot (' + (s.rec_events || 0) + ' moves)';
-    else if (missionState.active) txt = 'Running ' + (s.name || '') + ': ' + (s.done || 0) + '/' + (s.total || 0);
-    else if (st === 'done') txt = 'Finished: ' + (s.name || '');
-    else if (st === 'stopped') txt = 'Stopped';
-    else if (st === 'obstacle') txt = 'Stopped: obstacle ahead';
-    else if (st === 'error') txt = 'Error: ' + (s.error || 'unknown');
+    var txt = t('mission_idle'), st = s.state || 'idle';
+    if (missionState.recording) txt = t('mission_txt_recording_fmt', {n: s.rec_events || 0});
+    else if (missionState.active) txt = t('mission_txt_running_fmt', {s: s.name || '', done: s.done || 0, n: s.total || 0});
+    else if (st === 'done') txt = t('mission_txt_done_fmt', {s: s.name || ''});
+    else if (st === 'stopped') txt = t('mission_txt_stopped');
+    else if (st === 'obstacle') txt = t('mission_txt_obstacle');
+    else if (st === 'error') txt = t('mission_txt_error_fmt', {s: s.error || '?'});
     el.textContent = txt;
     el.dataset.state = missionState.active ? 'running'
       : (missionState.recording ? 'recording' : st);
@@ -1534,13 +1751,13 @@ document.getElementById('mission-rec').addEventListener('click', function() {
     sendCommand('mission', {action: 'record_start'});
   } else {
     var name = '';
-    try { name = (window.prompt('Save recorded path as (leave empty to keep only for "Return home"):', '') || '').trim(); } catch (e) {}
+    try { name = (window.prompt(t('mission_prompt_save'), '') || '').trim(); } catch (e) {}
     sendCommand('mission', {action: 'record_stop', save_as: name});
   }
 });
 document.getElementById('mission-del').addEventListener('click', function() {
   if (missionSel && missionSel.value &&
-      (!window.confirm || window.confirm('Delete mission "' + missionSel.value + '"?'))) {
+      (!window.confirm || window.confirm(t('mission_confirm_delete', {s: missionSel.value})))) {
     sendCommand('mission', {action: 'delete', name: missionSel.value});
   }
 });
@@ -1568,7 +1785,7 @@ function loadUpdateInfo() {
         sel.appendChild(o);
       });
       document.getElementById('upd-rollback').disabled = !i.backups.length;
-      if (i.pending) updMsg('New version is on probation: it will auto-roll back if it fails to start.', 'running');
+      if (i.pending) updMsg(t('upd_pending'), 'running');
       return i;
     })
     .catch(function() {});
@@ -1576,25 +1793,25 @@ function loadUpdateInfo() {
 
 // После установки сервис перезапускается: ждём возвращения и перезагружаем страницу
 function waitForRestart(expectVersion) {
-  updMsg('Installed. Restarting the robot\u2026 this page will reload.', 'running');
+  updMsg(t('upd_installed'), 'running');
   var tries = 0;
-  var t = setInterval(function() {
-    if (++tries > 60) { clearInterval(t); updMsg('Robot did not come back in 2 minutes \u2014 check it manually.', 'error'); return; }
+  var timer = setInterval(function() {
+    if (++tries > 60) { clearInterval(timer); updMsg(t('upd_timeout'), 'error'); return; }
     fetch('/api/update/info', {headers: authHeaders(), cache: 'no-store'})
       .then(function(r) { return r.json(); })
       .then(function(i) {
-        if (i && i.ok && (!expectVersion || i.version === expectVersion)) { clearInterval(t); location.reload(); }
+        if (i && i.ok && (!expectVersion || i.version === expectVersion)) { clearInterval(timer); location.reload(); }
       })
       .catch(function() {});
   }, 2000);
 }
 
 function updateResult(r) {
-  if (!r || !r.ok) { updMsg('Failed: ' + ((r && r.error) || 'unknown error'), 'error'); return; }
+  if (!r || !r.ok) { updMsg(t('upd_failed', {s: (r && r.error) || '?'}), 'error'); return; }
   var note = (r.config_changed && r.config_changed.length)
-    ? ' config.py replaced (old one saved as config_user_prev.py); changed defaults: ' + r.config_changed.slice(0, 6).join(', ') : '';
-  if (r.restarting) { updMsg('Updated ' + r.from + ' \u2192 ' + r.to + '.' + note, 'running'); waitForRestart(r.to); }
-  else updMsg('Updated ' + r.from + ' \u2192 ' + r.to + '. Restart the service manually.' + note, 'done');
+    ? t('upd_config_note', {s: r.config_changed.slice(0, 6).join(', ')}) : '';
+  if (r.restarting) { updMsg(t('upd_updated_fmt', {a: r.from, b: r.to}) + note, 'running'); waitForRestart(r.to); }
+  else updMsg(t('upd_updated_fmt', {a: r.from, b: r.to}) + t('upd_manual_restart') + note, 'done');
   loadUpdateInfo();
 }
 
@@ -1603,51 +1820,68 @@ var updFileInput = document.getElementById('upd-file');
 if (updFileInput) {
   updFileInput.addEventListener('change', function() {
     var nameEl = document.getElementById('upd-file-name');
-    if (nameEl) nameEl.textContent = this.files.length ? this.files[0].name : 'Choose .tar.gz / .zip…';
+    if (nameEl) nameEl.textContent = this.files.length ? this.files[0].name : t('upd_choose');
   });
 }
 
 document.getElementById('upd-go').addEventListener('click', function() {
   var f = document.getElementById('upd-file').files[0];
-  if (!f) { updMsg('Choose an archive first.', 'error'); return; }
-  if (window.confirm && !window.confirm('Install ' + f.name + '? The robot will stop and restart.')) return;
+  if (!f) { updMsg(t('upd_choose_first'), 'error'); return; }
+  if (window.confirm && !window.confirm(t('upd_install_confirm', {s: f.name}))) return;
   var xhr = new XMLHttpRequest();
   xhr.open('POST', '/api/update');
   var h = authHeaders();
   Object.keys(h).forEach(function(k) { if (k.toLowerCase() !== 'content-type') xhr.setRequestHeader(k, h[k]); });
   xhr.upload.onprogress = function(e) {
-    if (e.lengthComputable) updMsg('Uploading\u2026 ' + Math.round(e.loaded * 100 / e.total) + '%', 'running');
+    if (e.lengthComputable) updMsg(t('upd_uploading', {n: Math.round(e.loaded * 100 / e.total)}), 'running');
   };
   xhr.onload = function() {
     var r = null;
     try { r = JSON.parse(xhr.responseText); } catch (e) {}
     if (xhr.status === 401) { handleUnauthorized(); return; }
-    if (xhr.status === 409) { updMsg('Another device is driving \u2014 press "Take control" first.', 'error'); return; }
+    if (xhr.status === 409) { updMsg(t('upd_not_driver'), 'error'); return; }
     updateResult(r);
   };
-  xhr.onerror = function() { updMsg('Upload failed (connection lost).', 'error'); };
+  xhr.onerror = function() { updMsg(t('upd_upload_lost'), 'error'); };
   var fd = new FormData();
   fd.append('file', f);
-  updMsg('Uploading\u2026', 'running');
+  updMsg(t('upd_uploading', {n: 0}), 'running');
   xhr.send(fd);
 });
 
 document.getElementById('upd-rollback').addEventListener('click', function() {
   var name = document.getElementById('upd-backups').value;
-  if (!name || (window.confirm && !window.confirm('Roll back to ' + name + '?'))) return;
+  if (!name || (window.confirm && !window.confirm(t('upd_rollback_confirm', {s: name})))) return;
   fetch('/api/update/rollback', {method: 'POST', headers: authHeaders(), body: JSON.stringify({name: name})})
     .then(function(r) { return r.json(); })
     .then(updateResult)
-    .catch(function() { updMsg('Rollback request failed.', 'error'); });
+    .catch(function() { updMsg(t('upd_rollback_failed'), 'error'); });
 });
 
 loadUpdateInfo();
 
-buildServoGrid();
-restoreCollapsed();
-wsConnect();
-fetchConsoleHistory();
-updateVideoFeed();
+// ---- переключатель языка (RU по умолчанию / EN) ----
+var langRuBtn = document.getElementById('lang-ru');
+var langEnBtn = document.getElementById('lang-en');
+if (langRuBtn) langRuBtn.addEventListener('click', function() { setLang('ru'); });
+if (langEnBtn) langEnBtn.addEventListener('click', function() { setLang('en'); });
+
+// ---- быстрые кнопки мини статус-бара полноэкранного режима ----
+var fsHlMain = document.getElementById('fs-hl-main');
+if (fsHlMain) fsHlMain.addEventListener('click', toggleHeadlight);
+var fsHlSide = document.getElementById('fs-hl-side');
+if (fsHlSide) fsHlSide.addEventListener('click', toggleSideLights);
+var fsBuzzer = document.getElementById('fs-buzzer');
+if (fsBuzzer) {
+  fsBuzzer.addEventListener('click', function() {
+    sendCommand('buzzer', { melody: 'beep' });
+    // короткая вспышка — гудок мгновенный, состояния не хранит
+    fsBuzzer.classList.add('on');
+    setTimeout(function() { fsBuzzer.classList.remove('on'); }, 300);
+  });
+}
+var fsCraneArm = document.getElementById('fs-crane-arm');
+if (fsCraneArm) fsCraneArm.addEventListener('click', toggleCraneArm);
 
 // кнопки шапки
 document.getElementById('estop-btn').addEventListener('click', emergencyStop);
@@ -1666,3 +1900,10 @@ document.querySelectorAll('.tab-btn').forEach(function(b) {
   if (window.ResizeObserver) new ResizeObserver(setH).observe(sb);
   else window.addEventListener('resize', setH);
 })();
+
+// ---- инициализация ----
+setLang(LANG);          // применяет словарь и подсвечивает активный язык
+restoreCollapsed();
+wsConnect();
+fetchConsoleHistory();
+updateVideoFeed();

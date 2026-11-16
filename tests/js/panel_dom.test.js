@@ -34,8 +34,13 @@ function boot(opts) {
   w.Element.prototype.releasePointerCapture = function () {};
   const rect = { left: 0, top: 0, width: 140, height: 140, right: 140, bottom: 140 };
   w.Element.prototype.getBoundingClientRect = function () { return rect; };
+  w.eval(fs.readFileSync(path.join(STATIC, 'translate/ru.js'), 'utf8'));
+  w.eval(fs.readFileSync(path.join(STATIC, 'translate/en.js'), 'utf8'));
   w.eval(fs.readFileSync(path.join(STATIC, 'panel-core.js'), 'utf8'));
   w.eval(fs.readFileSync(path.join(STATIC, 'app.js'), 'utf8'));
+  // Язык по умолчанию — русский; исторические проверки ниже написаны под
+  // английские строки — включаем EN явно (RU проверяется отдельным тестом).
+  w.eval('setLang("en")');
   const ws = sockets[0];
   ws.open();
   return { w, ws, sockets, doc: w.document, fetchLog };
@@ -233,3 +238,129 @@ test('обновление: без выбранного файла — подс�
   assert.match(doc.getElementById('upd-status').textContent, /Choose an archive/);
   assert.strictEqual(fetchLog.length, before);
 });
+
+// ===================== v1.6.8: новые проверки =====================
+
+test('i18n: русский — язык по умолчанию, EN переключается', { skip: !JSDOM }, () => {
+  const { w, ws, doc } = boot();
+  // boot() включил EN; проверяем переключение обратно на RU (по умолчанию)
+  w.eval('setLang("ru")');
+  assert.strictEqual(doc.documentElement.lang, 'ru');
+  assert.strictEqual(doc.getElementById('estop-btn').textContent, 'СТОП');
+  assert.strictEqual(doc.querySelector('[data-i18n="card_cv"]').textContent, 'Компьютерное зрение');
+  ws.msg({ type: 'status', delta: false, data: { ir_left: 1 } });
+  assert.strictEqual(doc.getElementById('ir-left-val').textContent, 'ЛИНИЯ');
+  // и обратно на EN
+  w.eval('setLang("en")');
+  assert.strictEqual(doc.documentElement.lang, 'en');
+  assert.strictEqual(doc.getElementById('estop-btn').textContent, 'STOP');
+});
+
+test('i18n: словари RU/EN покрывают все data-i18n ключи и совпадают между собой', { skip: !JSDOM }, () => {
+  const { doc, w } = boot();
+  const htmlKeys = [...doc.querySelectorAll('[data-i18n]')].map((el) => el.dataset.i18n);
+  const titleKeys = [...doc.querySelectorAll('[data-i18n-title]')].map((el) => el.dataset.i18nTitle);
+  const ru = w.eval('Object.keys(I18N.ru)');
+  const en = w.eval('Object.keys(I18N.en)');
+  for (const k of [...htmlKeys, ...titleKeys]) {
+    assert.ok(ru.includes(k), 'нет RU-ключа: ' + k);
+    assert.ok(en.includes(k), 'нет EN-ключа: ' + k);
+  }
+  assert.deepStrictEqual([...ru].sort(), [...en].sort(), 'наборы ключей RU и EN различаются');
+  for (const k of ru) {
+    assert.notStrictEqual(w.eval(`I18N.ru[${JSON.stringify(k)}]`), '', 'пустой RU-ключ: ' + k);
+  }
+});
+
+test('servo-control: каналы 3 и 4 убраны, клешня (5,6) на месте', { skip: !JSDOM }, () => {
+  const { doc } = boot();
+  const inputs = [...doc.querySelectorAll('input.servo-angle-input')].map((i) => i.dataset.servo);
+  assert.ok(!inputs.includes('3'), 'канал 3 должен отсутствовать');
+  assert.ok(!inputs.includes('4'), 'канал 4 должен отсутствовать');
+  assert.ok(inputs.includes('0'), 'нет рулевого');
+  assert.ok(inputs.includes('5'), 'нет наклона клешни');
+  assert.ok(inputs.includes('6'), 'нет захвата клешни');
+});
+
+test('режимы: CV-режимы в окне CV, автономные — в Autonomous; Grab/Maze не «Unknown mode»', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  const autoBtns = [...doc.querySelectorAll('#auto-group .gbtn')].map((b) => b.dataset.auto);
+  // в Autonomous — только режимы без оверлея
+  assert.ok(autoBtns.includes('radarScan') && autoBtns.includes('automatic')
+    && autoBtns.includes('trackLine') && autoBtns.includes('keepDistance')
+    && autoBtns.includes('obstacleGrab') && autoBtns.includes('mazeU'));
+  assert.ok(!autoBtns.includes('findColor') && !autoBtns.includes('trackHand')
+    && !autoBtns.includes('watchDog') && !autoBtns.includes('trackLineCV'),
+    'CV-режимы должны быть в окне Computer Vision');
+  assert.ok(!autoBtns.includes('stop'), 'Stop заменён на отдельную аварийную кнопку');
+  // CV-режимы
+  const cvBtns = [...doc.querySelectorAll('.cv-btn[data-cv]')].map((b) => b.dataset.cv);
+  for (const m of ['none', 'findColor', 'findlineCV', 'trackHand', 'watchDog',
+                   'yoloDetect', 'yoloSeg', 'yoloSemantic']) {
+    assert.ok(cvBtns.includes(m), 'нет CV-режима ' + m);
+  }
+  // клик по «Захват» уходит в auto (раньше сервер отвечал Unknown mode)
+  doc.querySelector('[data-auto="obstacleGrab"]').click();
+  assert.deepStrictEqual(lastCmd(ws, 'auto').params, { func: 'obstacleGrab' });
+  doc.querySelector('[data-auto="mazeU"]').click();
+  assert.deepStrictEqual(lastCmd(ws, 'auto').params, { func: 'mazeU' });
+});
+
+test('аварийный стоп: кнопка в Autonomous и в шапке отправляют estop', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  doc.getElementById('auto-estop').click();
+  assert.ok(ws.sent.some((m) => m.cmd === 'estop'), 'auto-estop не отправил estop');
+  doc.getElementById('estop-btn').click();
+  assert.strictEqual(ws.sent.filter((m) => m.cmd === 'estop').length, 2);
+});
+
+test('окна mpu6050/ds4/missions/cv/autonomous всегда активны (без «Module not found»)', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  ws.msg({ type: 'status', delta: false, data: { hw: {
+    motors: false, servos: false, leds: false, buzzer: false, switches: false,
+    ultrasonic: false, mpu6050: false, oled: false, camera: false,
+    autonomous: false, crane: false, ds4: false, voice: false } } });
+  // даже при полностью мёртвом «железе» эти карточки не блокируются
+  for (const id of ['card-cv', 'card-autonomous', 'card-ds4', 'card-missions']) {
+    const card = doc.getElementById(id);
+    assert.ok(card, 'нет карточки ' + id);
+    assert.ok(!card.classList.contains('hw-missing'), id + ' заблокирован');
+  }
+  assert.strictEqual(doc.querySelector('#card-autonomous .hw-missing-tag'), null,
+    'в Autonomous не должно быть тега «Module not found»');
+});
+
+test('полноэкранный режим: камера переносится в оверлей, джойстики работают, выход возвращает', { skip: !JSDOM }, () => {
+  const { w, ws, doc } = boot();
+  const camWrap = doc.querySelector('#card-camera .camera-wrap');
+  doc.getElementById('fs-enter-btn').click();
+  assert.ok(doc.body.classList.contains('drive-mode'), 'body не в drive-mode');
+  assert.strictEqual(doc.getElementById('drive-stage').querySelector('.camera-wrap'), camWrap,
+    'видео не перенесено в оверлей');
+  // джойстик движения в оверлее управляет колёсами
+  const fsWheels = doc.getElementById('fs-joystick-container');
+  pointer(w, fsWheels, 'pointerdown', 1, 70, 10);
+  assert.strictEqual(moves(ws).pop(), 'forward');
+  pointer(w, fsWheels, 'pointerup', 1, 70, 10);
+  // выход возвращает видео в карточку
+  doc.getElementById('drive-exit').click();
+  assert.ok(!doc.body.classList.contains('drive-mode'));
+  assert.strictEqual(doc.getElementById('camera-body').querySelector('.camera-wrap'), camWrap);
+});
+
+test('мини статус-бар: быстрые кнопки фар/габаритов/гудка/клешни отправляют команды', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  doc.getElementById('fs-hl-main').click();
+  assert.deepStrictEqual(lastCmd(ws, 'headlight').params, { action: 'on' });
+  doc.getElementById('fs-hl-side').click();
+  assert.deepStrictEqual(lastCmd(ws, 'side_lights').params, { action: 'on' });
+  doc.getElementById('fs-buzzer').click();
+  assert.deepStrictEqual(lastCmd(ws, 'buzzer').params, { melody: 'beep' });
+  doc.getElementById('fs-crane-arm').click();
+  assert.deepStrictEqual(lastCmd(ws, 'crane').params, { action: 'arm_close' });
+  // статус с сервера синхронизирует обе кнопки (карточка + quickbar)
+  ws.msg({ type: 'status', delta: false, data: { headlight: true, side_lights: true } });
+  assert.ok(doc.getElementById('fs-hl-main').classList.contains('on'));
+  assert.ok(doc.getElementById('fs-hl-side').classList.contains('on'));
+});
+

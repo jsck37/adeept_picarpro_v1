@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -12,29 +12,29 @@
 <body>
 
 <div class="status-bar" id="status-bar">
-  <div class="sb-item"><span class="sb-label">CPU</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_cpu">ЦП</span><span class="sb-value" id="sb-cpu-temp">--</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">CPU %</span><span class="sb-value" id="sb-cpu-usage">--</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_cpu_pct">ЦП %</span><span class="sb-value" id="sb-cpu-usage">--</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">RAM</span><span class="sb-value" id="sb-ram">--</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_ram">ОЗУ</span><span class="sb-value" id="sb-ram">--</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Dist</span><span class="sb-value" id="sb-distance">--</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_dist">Дист</span><span class="sb-value" id="sb-distance">--</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">IMU</span><span class="sb-value" id="sb-imu">--</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_imu">IMU</span><span class="sb-value" id="sb-imu">--</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">Speed</span><span class="sb-value" id="sb-speed">50%</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_speed">Скор</span><span class="sb-value" id="sb-speed">50%</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item"><span class="sb-label">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
-  <div class="sb-item" id="sb-battery-item" style="display:none"><span class="sb-label">BAT</span><span class="sb-value" id="sb-battery">--</span></div>
-  <div class="sb-item" id="sb-steady-item" style="display:none"><span class="sb-label">Steady</span><span class="sb-value" id="sb-steady">OFF</span></div>
+  <div class="sb-item"><span class="sb-label" data-i18n="sb_ds4">DS4</span><span class="sb-value" id="sb-ds4">--</span></div>
+  <div class="sb-item" id="sb-battery-item" style="display:none"><span class="sb-label" data-i18n="sb_bat">АКБ</span><span class="sb-value" id="sb-battery">--</span></div>
+  <div class="sb-item" id="sb-steady-item" style="display:none"><span class="sb-label" data-i18n="sb_steady">Стаб</span><span class="sb-value" id="sb-steady">OFF</span></div>
   <div class="sb-sep"></div>
-  <div class="sb-item" id="sb-clients-item"><span class="sb-label">Devices</span><span class="sb-value" id="sb-clients">--</span></div>
+  <div class="sb-item" id="sb-clients-item"><span class="sb-label" data-i18n="sb_devices">Устройства</span><span class="sb-value" id="sb-clients">--</span></div>
   <div class="sb-sep"></div>
   <div class="conn-dot" id="connection-dot"></div>
 </div>
 
-<div id="low-voltage-banner" style="display:none;background:#ea4335;color:#fff;padding:8px 16px;font-weight:600;text-align:center;font-size:.9rem;animation:vblink 1s infinite">
-  Low voltage warning Please check your power supply
+<div id="low-voltage-banner" style="display:none;background:#ea4335;color:#fff;padding:8px 16px;font-weight:600;text-align:center;font-size:.9rem;animation:vblink 1s infinite" data-i18n="low_voltage">
+  Низкое напряжение! Проверьте питание
 </div>
 
 <header class="header">
@@ -43,19 +43,23 @@
     <span>PiCar Pro</span>
   </div>
   <nav class="tab-bar">
-    <button class="tab-btn active" data-tab="control">Control</button>
-    <button class="tab-btn" data-tab="console">Console</button>
-    <button class="tab-btn" data-tab="update">Update</button>
+    <button class="tab-btn active" data-tab="control" data-i18n="tab_control">Управление</button>
+    <button class="tab-btn" data-tab="console" data-i18n="tab_console">Консоль</button>
+    <button class="tab-btn" data-tab="update" data-i18n="tab_update">Обновление</button>
   </nav>
   <div class="hdr-actions">
-    <span class="driver-chip" id="driver-chip" data-state="free">Control free</span>
-    <button class="take-btn" id="take-control-btn" type="button">Take control</button>
-    <button class="estop-btn" id="estop-btn" type="button" title="Emergency stop (Esc)">STOP</button>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button class="lang-btn active" id="lang-ru" type="button" title="Русский">RU</button>
+      <button class="lang-btn" id="lang-en" type="button" title="English">EN</button>
+    </div>
+    <span class="driver-chip" id="driver-chip" data-state="free" data-i18n="driver_chip_free">Управление свободно</span>
+    <button class="take-btn" id="take-control-btn" type="button" data-i18n="take_control">Захватить управление</button>
+    <button class="estop-btn" id="estop-btn" type="button" data-i18n="estop_btn" data-i18n-title="estop_btn_title" title="Аварийный стоп (Esc)">СТОП</button>
   </div>
 </header>
 <div class="driver-banner" id="driver-banner">
-  <span>Another device is driving. You can watch, but your commands are ignored (Stop always works).</span>
-  <button class="take-btn" id="take-control-banner-btn" type="button">Take control</button>
+  <span data-i18n="banner_text">Роботом управляет другое устройство. Вы можете наблюдать, но ваши команды игнорируются (СТОП работает всегда).</span>
+  <button class="take-btn" id="take-control-banner-btn" type="button" data-i18n="take_control">Захватить управление</button>
 </div>
 
 <div class="tab-content active" id="content-control">
@@ -67,14 +71,19 @@
         <div class="card-title collapsible-header open" data-target="camera-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Camera
+            <span data-i18n="card_camera">Камера</span>
           </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="fs-btn" id="fs-enter-btn" type="button" data-i18n-title="fs_btn_title" title="Камера на весь экран (джойстики + быстрые кнопки)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/></svg>
+            </button>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
         </div>
         <div class="collapsible-body open" id="camera-body">
           <div class="camera-wrap">
             <img id="camera-feed" src="/video_feed" alt="Camera Feed" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>No Camera Feed</text></svg>'">
-            <div class="cv-badge" id="cv-badge">CV: Off</div>
+            <div class="cv-badge" id="cv-badge">CV</div>
           </div>
         </div>
       </div>
@@ -83,40 +92,42 @@
         <div class="card-title collapsible-header open" data-target="cv-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/></svg>
-            Computer Vision
+            <span data-i18n="card_cv">Компьютерное зрение</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="cv-body">
+          <div class="cv-hint" data-i18n="cv_hint">Режимы с оверлеем поверх картинки камеры:</div>
           <div class="cv-modes">
-            <button class="cv-btn active" data-cv="none">Off</button>
-            <button class="cv-btn" data-cv="findlineCV">CV Line</button>
-            <button class="cv-btn" data-cv="trackHand">Hand</button>
-            <button class="cv-btn" data-cv="findColor">Color</button>
-            <button class="cv-btn" data-cv="yoloDetect" title="YOLO: рамки объектов (ONNX, cv2.dnn)">YOLO</button>
-            <button class="cv-btn" data-cv="yoloSeg" title="YOLO-СЕГМЕНТАЦИЯ: маски найденных объектов">YOLO Mask</button>
-            <button class="cv-btn" data-cv="yoloSemantic" title="YOLO-СЕМАНТИКА: карта классов и их доля в кадре">YOLO Sem</button>
+            <button class="cv-btn active" data-cv="none" data-i18n="cv_off">Выкл</button>
+            <button class="cv-btn" data-cv="findColor" data-i18n="cv_color">Цвет</button>
+            <button class="cv-btn" data-cv="findlineCV" data-i18n="cv_line">CV Линия</button>
+            <button class="cv-btn" data-cv="trackHand" data-i18n="cv_hand">Рука</button>
+            <button class="cv-btn" data-cv="watchDog" data-i18n="cv_watchdog" data-i18n-title="cv_watchdog_title" title="Охрана: тревога при движении в кадре">Охрана</button>
+            <button class="cv-btn" data-cv="yoloDetect" data-i18n="cv_yolo" data-i18n-title="cv_yolo_title" title="YOLO: рамки объектов (ONNX, cv2.dnn)">YOLO</button>
+            <button class="cv-btn" data-cv="yoloSeg" data-i18n="cv_yolo_seg" data-i18n-title="cv_yolo_seg_title" title="YOLO-сегментация: маски найденных объектов">YOLO Маска</button>
+            <button class="cv-btn" data-cv="yoloSemantic" data-i18n="cv_yolo_sem" data-i18n-title="cv_yolo_sem_title" title="YOLO-семантика: карта классов и их доля в кадре">YOLO Сем</button>
           </div>
           <div id="hand-color-row" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #e0e0e0">
-            <div style="font-size:.75rem;color:#5f6368;font-weight:600;margin-bottom:4px">Hand color preset</div>
+            <div style="font-size:.75rem;color:#5f6368;font-weight:600;margin-bottom:4px" data-i18n="hand_preset_title">Цвет руки (пресет)</div>
             <div class="btn-group" id="hand-color-group">
-              <button class="gbtn active" data-hand-preset="skin">Skin</button>
-              <button class="gbtn" data-hand-preset="red">Red</button>
-              <button class="gbtn" data-hand-preset="green">Green</button>
-              <button class="gbtn" data-hand-preset="blue">Blue</button>
-              <button class="gbtn" data-hand-preset="yellow">Yellow</button>
+              <button class="gbtn active" data-hand-preset="skin" data-i18n="hand_skin">Кожа</button>
+              <button class="gbtn" data-hand-preset="red" data-i18n="hand_red">Красный</button>
+              <button class="gbtn" data-hand-preset="green" data-i18n="hand_green">Зелёный</button>
+              <button class="gbtn" data-hand-preset="blue" data-i18n="hand_blue">Синий</button>
+              <button class="gbtn" data-hand-preset="yellow" data-i18n="hand_yellow">Жёлтый</button>
             </div>
             <details style="margin-top:6px">
-              <summary style="font-size:.72rem;color:#5f6368;cursor:pointer">Custom HSV (advanced)</summary>
+              <summary style="font-size:.72rem;color:#5f6368;cursor:pointer" data-i18n="hand_custom">Свой HSV (расширенно)</summary>
               <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center;font-size:.7rem;color:#5f6368;margin-top:6px">
-                <span>H low</span><input type="range" id="hand-h-low" min="0" max="179" value="0"><span id="hand-h-low-val">0</span>
-                <span>S low</span><input type="range" id="hand-s-low" min="0" max="255" value="30"><span id="hand-s-low-val">30</span>
-                <span>V low</span><input type="range" id="hand-v-low" min="0" max="255" value="50"><span id="hand-v-low-val">50</span>
-                <span>H high</span><input type="range" id="hand-h-high" min="0" max="179" value="25"><span id="hand-h-high-val">25</span>
-                <span>S high</span><input type="range" id="hand-s-high" min="0" max="255" value="255"><span id="hand-s-high-val">255</span>
-                <span>V high</span><input type="range" id="hand-v-high" min="0" max="255" value="255"><span id="hand-v-high-val">255</span>
+                <span>H низ</span><input type="range" id="hand-h-low" min="0" max="179" value="0"><span id="hand-h-low-val">0</span>
+                <span>S низ</span><input type="range" id="hand-s-low" min="0" max="255" value="30"><span id="hand-s-low-val">30</span>
+                <span>V низ</span><input type="range" id="hand-v-low" min="0" max="255" value="50"><span id="hand-v-low-val">50</span>
+                <span>H верх</span><input type="range" id="hand-h-high" min="0" max="179" value="25"><span id="hand-h-high-val">25</span>
+                <span>S верх</span><input type="range" id="hand-s-high" min="0" max="255" value="255"><span id="hand-s-high-val">255</span>
+                <span>V верх</span><input type="range" id="hand-v-high" min="0" max="255" value="255"><span id="hand-v-high-val">255</span>
               </div>
-              <button class="btn-sm btn-primary" id="hand-color-apply" style="margin-top:6px">Apply custom</button>
+              <button class="btn-sm btn-primary" id="hand-color-apply" style="margin-top:6px" data-i18n="hand_apply">Применить</button>
             </details>
           </div>
         </div>
@@ -126,46 +137,45 @@
         <div class="card-title collapsible-header open" data-target="auto-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="2"/></svg>
-            Autonomous<span class="hw-missing-tag" id="auto-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_autonomous">Автономные режимы</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="auto-body">
           <div id="auto-controls">
+            <div class="auto-hint" data-i18n="auto_hint">Робот движется сам (без оверлея на камере):</div>
             <div class="btn-group" id="auto-group">
-              <button class="gbtn" data-auto="radarScan" title="Скан-радар панорамой ультразвука">Radar</button>
-              <button class="gbtn" data-auto="automatic" title="Автономная езда с объездом препятствий">Auto Drive</button>
-              <button class="gbtn" data-auto="trackLine" title="Следование по линии (ИК)">IR Line</button>
-              <button class="gbtn" data-auto="trackLineCV" title="Следование по линии (камера+ИК)">CV Line</button>
-              <button class="gbtn" data-auto="keepDistance" title="Удержание дистанции до цели">Keep Dist</button>
-              <button class="gbtn" data-auto="trackHand" title="Слежение камеры за рукой">Hand</button>
-              <button class="gbtn" data-auto="findColor" title="Следование за цветным объектом">Color</button>
-              <button class="gbtn" data-auto="watchDog" title="Охрана: тревога при движении">Watchdog</button>
-              <button class="gbtn" data-auto="obstacleGrab" title="Препятствие: подъезд по ультразвуку, поиск YOLO, захват клешнёй и перенос">Obstacle Grab</button>
-              <button class="gbtn" data-auto="mazeU" title="U-лабиринт: проход по ультразвуку (камера — для наблюдения)">Maze U</button>
-              <button class="gbtn" data-auto="stop" style="background:#ea4335;color:#fff">Stop</button>
+              <button class="gbtn" data-auto="radarScan" data-i18n="auto_radar" data-i18n-title="auto_radar_title" title="Скан-радар панорамой ультразвука">Радар</button>
+              <button class="gbtn" data-auto="automatic" data-i18n="auto_drive" data-i18n-title="auto_drive_title" title="Автономная езда с объездом препятствий">Автоездка</button>
+              <button class="gbtn" data-auto="trackLine" data-i18n="auto_ir_line" data-i18n-title="auto_ir_line_title" title="Следование по линии (ИК-датчики)">ИК Линия</button>
+              <button class="gbtn" data-auto="keepDistance" data-i18n="auto_distance" data-i18n-title="auto_distance_title" title="Удержание дистанции до цели">Дистанция</button>
+              <button class="gbtn" data-auto="obstacleGrab" data-i18n="auto_grab" data-i18n-title="auto_grab_title" title="Препятствие: подъезд по ультразвуку, поиск YOLO, захват клешнёй и перенос">Захват</button>
+              <button class="gbtn" data-auto="mazeU" data-i18n="auto_maze" data-i18n-title="auto_maze_title" title="U-лабиринт: проход по ультразвуку (камера — для наблюдения)">Лабиринт U</button>
             </div>
-            <div style="margin-top:6px;font-size:.72rem;color:#80868b">
+            <button class="auto-estop-btn" id="auto-estop" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/></svg>
+              <span data-i18n="auto_estop">АВАРИЙНЫЙ СТОП</span>
+            </button>
+            <div style="margin-top:6px;font-size:.72rem;color:#80868b" data-i18n="push_note">
               Push Mode (толчок клешнёй по HC-SR04, без камеры) — кнопка ниже.
             </div>
             <div id="radar-box" style="display:none;margin-top:8px">
               <canvas id="radar-canvas" width="280" height="190"
                       style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
-              <div style="margin-top:4px;font-size:.7rem;color:#80868b;line-height:1.45">
-                Radar: сканирует панорамой камеры (SERVO_CAM_PAN, v1.6.4) — колёса
-                стоят на месте. Серво настраивается в config.py (ULTRASONIC_SCAN_SERVO).
+              <div style="margin-top:4px;font-size:.7rem;color:#80868b;line-height:1.45" data-i18n="radar_note">
+                Радар: сканирует панорамой камеры (SERVO_CAM_PAN) — колёса стоят на месте. Серво настраивается в config.py (ULTRASONIC_SCAN_SERVO).
               </div>
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
-              <button class="gbtn" id="steady-toggle">Steady Cam</button>
-              <button class="gbtn" id="push-toggle" title="Расталкивание препятствий клешней по HC-SR04 (фон, без камеры)">Push Mode</button>
+              <button class="gbtn" id="steady-toggle" data-i18n="steady_cam">Стаб-камера</button>
+              <button class="gbtn" id="push-toggle" data-i18n="push_mode" data-i18n-title="push_mode_title" title="Расталкивание препятствий клешнёй по HC-SR04 (фон, без камеры)">Push Mode</button>
             </div>
             <div style="margin-top:8px;font-size:.75rem;color:#5f6368">
-              <div style="font-weight:600;margin-bottom:2px">IR Line Sensors</div>
+              <div style="font-weight:600;margin-bottom:2px" data-i18n="ir_sensors_title">ИК-датчики линии</div>
               <div style="display:flex;gap:12px">
-                <span>Left: <b id="ir-left-val">--</b></span>
-                <span>Middle: <b id="ir-middle-val">--</b></span>
-                <span>Right: <b id="ir-right-val">--</b></span>
+                <span><span data-i18n="ir_left">Слева:</span> <b id="ir-left-val">--</b></span>
+                <span><span data-i18n="ir_middle">Центр:</span> <b id="ir-middle-val">--</b></span>
+                <span><span data-i18n="ir_right">Справа:</span> <b id="ir-right-val">--</b></span>
               </div>
             </div>
           </div>
@@ -176,7 +186,7 @@
         <div class="card-title collapsible-header open" data-target="ds4-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
-            DS4 Controller
+            <span data-i18n="card_ds4">Геймпад DS4</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -186,29 +196,29 @@
               <div class="ds4-col">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                   <div id="ds4-status-dot" style="width:10px;height:10px;border-radius:50%;background:#ea4335"></div>
-                  <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6">Not connected</span>
+                  <span id="ds4-status-text" style="font-size:.78rem;color:#9aa0a6" data-i18n="ds4_not_connected">Не подключено</span>
                 </div>
                 <div class="bt-section">
                   <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-                    <button class="btn-sm btn-primary" id="bt-scan-btn">Scan BT</button>
-                    <button class="btn-sm btn-secondary" id="bt-auto-btn">Auto-Connect</button>
-                    <button class="btn-sm btn-danger" id="bt-disconnect-btn" style="display:none">Disconnect</button>
+                    <button class="btn-sm btn-primary" id="bt-scan-btn" data-i18n="bt_scan">Скан BT</button>
+                    <button class="btn-sm btn-secondary" id="bt-auto-btn" data-i18n="bt_auto">Автоподключение</button>
+                    <button class="btn-sm btn-danger" id="bt-disconnect-btn" style="display:none" data-i18n="bt_disconnect">Отключить</button>
                   </div>
                   <div id="bt-device-list" style="display:none;max-height:200px;overflow-y:auto;margin-bottom:8px">
-                    <div style="font-size:.72rem;color:#5f6368;margin-bottom:4px">Nearby devices:</div>
+                    <div style="font-size:.72rem;color:#5f6368;margin-bottom:4px" data-i18n="bt_nearby">Устройства рядом:</div>
                     <div id="bt-devices"></div>
                   </div>
-                  <div id="bt-scanning" style="display:none;font-size:.72rem;color:#fdd663">Scanning...</div>
+                  <div id="bt-scanning" style="display:none;font-size:.72rem;color:#fdd663" data-i18n="bt_scanning">Поиск...</div>
                   <div id="bt-saved-info" style="font-size:.7rem;color:#5f6368;margin-top:4px"></div>
                 </div>
               </div>
               <div class="ds4-col">
                 <div style="font-size:.68rem;color:#5f6368;line-height:1.6">
-                  <div><b>L-stick</b> Drive &nbsp; <b>R-stick</b> Camera (5&deg;/шаг)</div>
-                  <div><b>L2/R2</b> Speed 100% (без авто-вперёд) &nbsp; <b>L1</b> Side lights</div>
-                  <div><b>R1</b> Beep &nbsp; <b>Dpad&#9650;</b> Headlight</div>
-                  <div><b>Dpad&#9660;</b> Rainbow &nbsp; <b>Dpad&#9664;/&#9654;</b> Blinkers</div>
-                  <div><b>&#215;</b> Arm toggle &nbsp; <b>&#9675;</b> Grip tilt (low/mid)</div>
+                  <div><b>L-stick</b> <span data-i18n="ds4_help1">езда</span> &nbsp; <b>R-stick</b> <span data-i18n="ds4_help2">камера (5&deg;/шаг)</span></div>
+                  <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100% (без авто-вперёд)</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
+                  <div><b>R1</b> <span data-i18n="ds4_help5">гудок</span> &nbsp; <b>Dpad&#9650;</b> <span data-i18n="ds4_help6">фары</span></div>
+                  <div><b>Dpad&#9660;</b> <span data-i18n="ds4_help7">радуга</span> &nbsp; <b>Dpad&#9664;/&#9654;</b> <span data-i18n="ds4_help8">поворотники</span></div>
+                  <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/середина)</span></div>
                 </div>
               </div>
             </div>
@@ -220,7 +230,7 @@
         <div class="card-title collapsible-header open" data-target="voice-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            Voice Control<span class="hw-missing-tag" id="voice-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_voice">Голосовое управление</span><span class="hw-missing-tag" id="voice-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -228,20 +238,20 @@
           <div id="voice-controls">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <div id="voice-status-dot" style="width:10px;height:10px;border-radius:50%;background:#9aa0a6"></div>
-              <span id="voice-status-text" style="font-size:.78rem;color:#9aa0a6">Inactive</span>
+              <span id="voice-status-text" style="font-size:.78rem;color:#9aa0a6" data-i18n="voice_inactive">Не активен</span>
             </div>
             <div class="btn-group" id="voice-group">
-              <button class="gbtn" id="voice-start-btn" style="background:#34a853;color:#fff">Start</button>
-              <button class="gbtn" id="voice-stop-btn" style="background:#ea4335;color:#fff;display:none">Stop</button>
+              <button class="gbtn" id="voice-start-btn" style="background:#34a853;color:#fff" data-i18n="voice_start">Старт</button>
+              <button class="gbtn" id="voice-stop-btn" style="background:#ea4335;color:#fff;display:none" data-i18n="voice_stop">Стоп</button>
             </div>
             <div style="margin-top:8px">
-              <div style="font-size:.72rem;color:#5f6368;font-weight:600;margin-bottom:2px">Last Command</div>
+              <div style="font-size:.72rem;color:#5f6368;font-weight:600;margin-bottom:2px" data-i18n="voice_last_cmd">Последняя команда</div>
               <div id="voice-last-cmd" style="font-size:.82rem;font-family:'Courier New',monospace;font-weight:600;color:#1a73e8;min-height:1.2em;padding:3px 8px;background:#f8f9fa;border-radius:5px">&mdash;</div>
             </div>
             <div style="font-size:.72rem;color:#5f6368;line-height:1.5;margin-top:8px">
-              <div><b>forward</b> / <b>backward</b> / <b>stop</b> &mdash; Drive</div>
-              <div><b>look left</b> / <b>look right</b> &mdash; Steering</div>
-              <div><b>camera up</b> / <b>camera down</b> &mdash; Tilt</div>
+              <div><b>forward</b> / <b>backward</b> / <b>stop</b> &mdash; <span data-i18n="voice_help1">езда</span></div>
+              <div><b>look left</b> / <b>look right</b> &mdash; <span data-i18n="voice_help2">поворот</span></div>
+              <div><b>camera up</b> / <b>camera down</b> &mdash; <span data-i18n="voice_help3">наклон камеры</span></div>
             </div>
           </div>
         </div>
@@ -255,7 +265,7 @@
         <div class="card-title collapsible-header open" data-target="move-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-            Movement
+            <span data-i18n="card_move">Движение</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -267,7 +277,7 @@
                 <div class="joystick-crosshair"></div>
                 <div class="joystick-knob" id="joystick-knob"></div>
               </div>
-              <div class="joystick-label" id="joystick-label">Wheels — WASD / joystick</div>
+              <div class="joystick-label" id="joystick-label" data-i18n="joystick_wheels">Колёса — WASD / джойстик</div>
             </div>
             <div class="joystick-area">
               <div class="cam-joystick-container" id="cam-joystick-container">
@@ -275,13 +285,13 @@
                 <div class="cam-joystick-crosshair"></div>
                 <div class="cam-joystick-knob" id="cam-joystick-knob"></div>
                 <div class="cam-joystick-labels">
-                  <span class="cam-lbl cam-lbl-up">Up</span>
-                  <span class="cam-lbl cam-lbl-down">Down</span>
-                  <span class="cam-lbl cam-lbl-left">Left</span>
-                  <span class="cam-lbl cam-lbl-right">Right</span>
+                  <span class="cam-lbl cam-lbl-up" data-i18n="cam_up">Вверх</span>
+                  <span class="cam-lbl cam-lbl-down" data-i18n="cam_down">Вниз</span>
+                  <span class="cam-lbl cam-lbl-left" data-i18n="cam_left">Лево</span>
+                  <span class="cam-lbl cam-lbl-right" data-i18n="cam_right">Право</span>
                 </div>
               </div>
-              <div class="cam-joystick-label" id="cam-joystick-label">Camera — drag / arrows</div>
+              <div class="cam-joystick-label" id="cam-joystick-label" data-i18n="joystick_cam">Камера — тянуть / стрелки</div>
             </div>
           </div>
 
@@ -289,21 +299,21 @@
             <div class="card-title collapsible-header open" data-target="claw-body" style="margin-bottom:0">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
-                Crane<span class="hw-missing-tag" id="claw-missing-tag" style="display:none">Module not found</span>
+                <span data-i18n="card_crane">Клешня</span><span class="hw-missing-tag" id="claw-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
               </div>
               <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="collapsible-body open" id="claw-body">
-              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600">Arm</div>
+              <div style="margin-bottom:4px;font-size:.75rem;color:#5f6368;font-weight:600" data-i18n="crane_arm_title">Захват</div>
               <div class="btn-group" id="crane-arm-group">
-                <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle">Grab / Release</button>
+                <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle" data-i18n="crane_grab_release">Захватить / Отпустить</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600">Grip tilt <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">Mid (135°)</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:#5f6368;font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:#1a73e8">Середина (135&deg;)</span></div>
               <div class="btn-group" id="crane-grip-group">
-                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low">Low</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid">Mid</button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низ</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Середина</button>
               </div>
-              <div style="margin-top:8px;font-size:.7rem;color:#80868b;line-height:1.45">Каналы клешни этой сборки (v1.6.2, подтверждено с железа): канал 5 — наклон (SERVO_CRANE_GRIP, ползунок «Crane Tilt»), канал 6 — захват (SERVO_CRANE_ARM, ползунок «Crane Grab»); канал 4 (локоть) — резерв, не подключён. Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
+              <div style="margin-top:8px;font-size:.7rem;color:#80868b;line-height:1.45" data-i18n="crane_note">Каналы клешни: канал 5 — наклон (SERVO_CRANE_GRIP), канал 6 — захват (SERVO_CRANE_ARM). Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
             </div>
           </div>
 
@@ -311,11 +321,11 @@
             <div class="card-title" style="margin-bottom:6px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                Speed
+                <span data-i18n="speed_title">Скорость</span>
               </div>
             </div>
             <div class="slider-row">
-              <label>Motor</label>
+              <label data-i18n="speed_motor">Моторы</label>
               <input type="range" id="speed-slider" min="0" max="100" value="50">
               <span class="val" id="speed-val">50%</span>
             </div>
@@ -329,7 +339,7 @@
         <div class="card-title collapsible-header open" data-target="servo-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><line x1="14" y1="9" x2="20" y2="9"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="15" x2="20" y2="15"/></svg>
-            Servo Control<span class="hw-missing-tag" id="servo-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_servo">Сервоприводы</span><span class="hw-missing-tag" id="servo-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -344,7 +354,7 @@
         <div class="card-title collapsible-header open" data-target="mpu-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            IMU Sensor (MPU6050)
+            <span data-i18n="card_mpu">Гироскоп MPU6050</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -352,21 +362,21 @@
           <div id="mpu-controls">
             <div class="mpu-grid" id="mpu-grid">
               <div class="mpu-section">
-                <div class="mpu-section-title">Accelerometer (g)</div>
+                <div class="mpu-section-title" data-i18n="mpu_accel">Акселерометр (g)</div>
                 <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-ax">0.000</span></div>
                 <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-ay">0.000</span></div>
                 <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-az">0.000</span></div>
               </div>
               <div class="mpu-section">
-                <div class="mpu-section-title">Gyroscope (deg/s)</div>
+                <div class="mpu-section-title" data-i18n="mpu_gyro">Гироскоп (град/с)</div>
                 <div class="mpu-row"><span class="mpu-label">X</span><span class="mpu-val" id="mpu-gx">0.0</span></div>
                 <div class="mpu-row"><span class="mpu-label">Y</span><span class="mpu-val" id="mpu-gy">0.0</span></div>
                 <div class="mpu-row"><span class="mpu-label">Z</span><span class="mpu-val" id="mpu-gz">0.0</span></div>
               </div>
               <div class="mpu-section">
-                <div class="mpu-section-title">Orientation (deg)</div>
-                <div class="mpu-row"><span class="mpu-label">Roll</span><span class="mpu-val" id="mpu-roll">0.0</span></div>
-                <div class="mpu-row"><span class="mpu-label">Pitch</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
+                <div class="mpu-section-title" data-i18n="mpu_orient">Ориентация (град)</div>
+                <div class="mpu-row"><span class="mpu-label" data-i18n="mpu_roll">Крен</span><span class="mpu-val" id="mpu-roll">0.0</span></div>
+                <div class="mpu-row"><span class="mpu-label" data-i18n="mpu_pitch">Тангаж</span><span class="mpu-val" id="mpu-pitch">0.0</span></div>
               </div>
             </div>
           </div>
@@ -377,35 +387,35 @@
         <div class="card-title collapsible-header open" data-target="hl-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Headlights &amp; Signals<span class="hw-missing-tag" id="hl-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_hl">Фары и сигналы</span><span class="hw-missing-tag" id="hl-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="hl-body">
           <div id="hl-controls">
-            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Main Headlight (robot-hat)</div>
+            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600" data-i18n="hl_main_title">Основная фара (robot-hat)</div>
             <div class="headlight-row" style="margin-bottom:10px">
-              <button class="headlight-btn off" id="hl-main">Headlight</button>
+              <button class="headlight-btn off" id="hl-main" data-i18n="hl_main">Фара</button>
             </div>
-            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600">Side Lights (габариты, L1)</div>
+            <div style="margin-bottom:8px;font-size:.75rem;color:#5f6368;font-weight:600" data-i18n="hl_side_title">Габариты (боковые огни, L1)</div>
             <div class="headlight-row" style="margin-bottom:10px">
-              <button class="headlight-btn off" id="hl-side" type="button">Side lights</button>
+              <button class="headlight-btn off" id="hl-side" type="button" data-i18n="hl_side">Габариты</button>
             </div>
             <div class="signal-section">
-              <div class="signal-section-title">Turn Signals <span class="signal-toggle-hint">(toggle)</span></div>
+              <div class="signal-section-title"><span data-i18n="signals_title">Поворотники</span> <span class="signal-toggle-hint" data-i18n="signal_hint">(переключение)</span></div>
               <div class="signal-row">
                 <button class="signal-btn off" id="hl-left-signal" type="button">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                  <span>Left</span>
+                  <span data-i18n="signal_left">Лево</span>
                 </button>
                 <button class="signal-btn off" id="hl-right-signal" type="button">
-                  <span>Right</span>
+                  <span data-i18n="signal_right">Право</span>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                 </button>
               </div>
               <div class="signal-status">
-                <span class="signal-status-item"><i class="signal-dot" id="blinker-left-dot"></i>Left: <b id="blinker-left-status" style="color:#9aa0a6">OFF</b></span>
-                <span class="signal-status-item"><i class="signal-dot" id="blinker-right-dot"></i>Right: <b id="blinker-right-status" style="color:#9aa0a6">OFF</b></span>
+                <span class="signal-status-item"><i class="signal-dot" id="blinker-left-dot"></i><span data-i18n="blinker_left">Лево:</span> <b id="blinker-left-status" style="color:#9aa0a6">ВЫКЛ</b></span>
+                <span class="signal-status-item"><i class="signal-dot" id="blinker-right-dot"></i><span data-i18n="blinker_right">Право:</span> <b id="blinker-right-status" style="color:#9aa0a6">ВЫКЛ</b></span>
               </div>
             </div>
           </div>
@@ -416,14 +426,14 @@
         <div class="card-title collapsible-header open" data-target="led-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="20" height="4" rx="2"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
-            LED Strip<span class="hw-missing-tag" id="led-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_led">LED-лента</span><span class="hw-missing-tag" id="led-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="led-body">
           <div id="led-controls">
             <div class="led-color-row">
-              <label class="led-color-label">Color</label>
+              <label class="led-color-label" data-i18n="led_color">Цвет</label>
               <input type="color" id="led-color" value="#ff0000" class="led-color-input">
               <div id="led-color-presets" class="led-presets">
                 <button class="color-preset" data-hex="#ff0000" style="background:#ff0000" title="Red"></button>
@@ -437,13 +447,13 @@
               </div>
             </div>
             <div class="btn-group" id="led-group">
-              <button class="gbtn active" data-led="off">Off</button>
-              <button class="gbtn" data-led="solid">Solid</button>
-              <button class="gbtn" data-led="breath">Breath</button>
-              <button class="gbtn" data-led="flow">Flow</button>
-              <button class="gbtn" data-led="rainbow">Rainbow</button>
-              <button class="gbtn" data-led="police">Police</button>
-              <button class="gbtn" data-led="colorWipe">Wipe</button>
+              <button class="gbtn active" data-led="off" data-i18n="led_off">Выкл</button>
+              <button class="gbtn" data-led="solid" data-i18n="led_solid">Постоянный</button>
+              <button class="gbtn" data-led="breath" data-i18n="led_breath">Дыхание</button>
+              <button class="gbtn" data-led="flow" data-i18n="led_flow">Бегущий</button>
+              <button class="gbtn" data-led="rainbow" data-i18n="led_rainbow">Радуга</button>
+              <button class="gbtn" data-led="police" data-i18n="led_police">Полицейский</button>
+              <button class="gbtn" data-led="colorWipe" data-i18n="led_wipe">Заливка</button>
             </div>
           </div>
         </div>
@@ -453,14 +463,14 @@
         <div class="card-title collapsible-header open" data-target="missions-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M12 19h4.5a3.5 3.5 0 000-7h-9a3.5 3.5 0 010-7H12"/></svg>
-            Missions
+            <span data-i18n="card_missions">Миссии</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="missions-body">
           <div class="ms-body">
             <div class="ms-picker">
-              <span class="ms-picker-label">Mission</span>
+              <span class="ms-picker-label" data-i18n="mission_label">Миссия</span>
               <div class="ms-select-wrap">
                 <select id="mission-select" aria-label="Mission"></select>
                 <svg class="ms-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
@@ -469,28 +479,28 @@
             <div class="ms-actions">
               <button class="ms-btn ms-btn-start" id="mission-start" type="button">
                 <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
-                <span>Start</span>
+                <span data-i18n="mission_start">Старт</span>
               </button>
               <button class="ms-btn ms-btn-stop" id="mission-stop" type="button">
                 <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                <span>Stop</span>
+                <span data-i18n="mission_stop">Стоп</span>
               </button>
             </div>
             <div class="ms-tools">
-              <button class="ms-chip ms-chip-rec" id="mission-rec" type="button">Record path</button>
+              <button class="ms-chip ms-chip-rec" id="mission-rec" type="button" data-i18n="mission_rec">Записать маршрут</button>
               <button class="ms-chip" id="mission-home" type="button" disabled>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
-                <span>Return home</span>
+                <span data-i18n="mission_home">Домой</span>
               </button>
               <button class="ms-chip ms-chip-danger" id="mission-del" type="button" style="display:none">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                <span>Delete</span>
+                <span data-i18n="mission_del">Удалить</span>
               </button>
             </div>
-            <div class="mission-status" id="mission-status" data-state="idle">Idle</div>
+            <div class="mission-status" id="mission-status" data-state="idle" data-i18n="mission_idle">Ожидание</div>
             <div class="ms-hint">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              <span>Return home retraces the recorded path by dead reckoning (approximate; no odometry).</span>
+              <span data-i18n="mission_hint">«Домой» повторяет записанный маршрут счётом пройденного пути (примерно; одометрии нет).</span>
             </div>
           </div>
         </div>
@@ -500,16 +510,16 @@
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
-            Buzzer<span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none">Module not found</span>
+            <span data-i18n="card_buzzer">Зуммер</span><span class="hw-missing-tag" id="buzzer-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
           </div>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body open" id="buzzer-body">
           <div id="buzzer-controls">
             <div class="btn-group" id="buzzer-group">
-              <button class="gbtn" data-buzzer="beep">Beep</button>
-              <button class="gbtn" data-buzzer="tetris">Tetris 8-bit</button>
-              <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff">Stop</button>
+              <button class="gbtn" data-buzzer="beep" data-i18n="buzzer_beep">Гудок</button>
+              <button class="gbtn" data-buzzer="tetris" data-i18n="buzzer_tetris">Тетрис 8-bit</button>
+              <button class="gbtn" data-buzzer="stop" style="background:#ea4335;color:#fff" data-i18n="buzzer_stop">Стоп</button>
             </div>
           </div>
         </div>
@@ -525,7 +535,7 @@
       <div class="upd-header">
         <div class="upd-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          <span>System update</span>
+          <span data-i18n="upd_title">Обновление системы</span>
           <span class="upd-version-chip" id="upd-version">--</span>
         </div>
       </div>
@@ -533,24 +543,24 @@
         <div class="upd-step">
           <div class="upd-step-head">
             <span class="upd-step-num">1</span>
-            <span class="upd-step-title">Install archive</span>
+            <span class="upd-step-title" data-i18n="upd_step1">Установка архива</span>
           </div>
           <div class="upd-file-row">
             <label class="upd-file-label" for="upd-file">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              <span id="upd-file-name">Choose .tar.gz / .zip…</span>
+              <span id="upd-file-name" data-i18n="upd_choose">Выберите .tar.gz / .zip…</span>
             </label>
             <input type="file" id="upd-file" accept=".gz,.tgz,.tar.gz,.zip" aria-label="Update archive">
             <button class="ms-btn ms-btn-start upd-install-btn" id="upd-go" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>Upload &amp; install</span>
+              <span data-i18n="upd_install">Загрузить и установить</span>
             </button>
           </div>
         </div>
         <div class="upd-step">
           <div class="upd-step-head">
             <span class="upd-step-num">2</span>
-            <span class="upd-step-title">Roll back if needed</span>
+            <span class="upd-step-title" data-i18n="upd_step2">Откат при необходимости</span>
           </div>
           <div class="upd-file-row">
             <div class="ms-select-wrap upd-backup-wrap">
@@ -559,14 +569,14 @@
             </div>
             <button class="ms-chip" id="upd-rollback" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-              <span>Roll back</span>
+              <span data-i18n="upd_rollback">Откатить</span>
             </button>
           </div>
         </div>
-        <div class="mission-status upd-status" id="upd-status">Upload a project archive (.tar.gz / .zip). The previous version is backed up automatically.</div>
+        <div class="mission-status upd-status" id="upd-status" data-i18n="upd_status_default">Загрузите архив проекта (.tar.gz / .zip). Предыдущая версия сохраняется автоматически.</div>
         <div class="ms-hint">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          <span>The robot stops and restarts during install. Last 3 versions are kept as backups; <code>missions/</code> and <code>config_local.py</code> are preserved.</span>
+          <span data-i18n="upd_hint">Во время установки робот останавливается и перезапускается. Последние 3 версии хранятся как бэкапы; <code>missions/</code> и <code>config_local.py</code> сохраняются.</span>
         </div>
       </div>
     </div>
@@ -578,8 +588,8 @@
     <div class="console-toolbar">
       <div class="console-toolbar-left">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        <span class="console-title">Log Console</span>
-        <span class="console-line-count" id="console-line-count">0 lines</span>
+        <span class="console-title" data-i18n="console_title">Консоль логов</span>
+        <span class="console-line-count" id="console-line-count">0</span>
       </div>
       <div class="console-toolbar-center">
         <button class="log-filter-btn log-filter-info active" data-level="info" title="INFO"><span class="log-filter-label">[i]</span> <span class="log-filter-count" id="log-count-info">0</span></button>
@@ -587,21 +597,76 @@
         <button class="log-filter-btn log-filter-error active" data-level="error" title="ERROR"><span class="log-filter-label">[e]</span> <span class="log-filter-count" id="log-count-error">0</span></button>
         <button class="log-filter-btn log-filter-debug active" data-level="debug" title="DEBUG"><span class="log-filter-label">[d]</span> <span class="log-filter-count" id="log-count-debug">0</span></button>
         <select id="log-sort-select" class="log-sort-select" title="Sort order">
-          <option value="time">By Time</option>
-          <option value="level">By Level</option>
+          <option value="time" data-i18n="sort_time">По времени</option>
+          <option value="level" data-i18n="sort_level">По уровню</option>
         </select>
       </div>
       <div class="console-toolbar-right">
-        <label class="console-autoscroll-label"><input type="checkbox" id="console-autoscroll" checked> Auto-scroll</label>
-        <button class="btn-sm btn-secondary" id="console-clear-btn">Clear</button>
+        <label class="console-autoscroll-label"><input type="checkbox" id="console-autoscroll" checked> <span data-i18n="console_autoscroll">Автопрокрутка</span></label>
+        <button class="btn-sm btn-secondary" id="console-clear-btn" data-i18n="console_clear">Очистить</button>
       </div>
     </div>
     <div class="console-output" id="console-output"></div>
   </div>
 </div>
 
+<!-- ===== Полноэкранный режим камеры (джойстики + быстрые кнопки) ===== -->
+<div id="drive-overlay">
+  <div class="drive-top">
+    <button class="estop-btn drive-estop" id="drive-estop" type="button" data-i18n="estop_btn">СТОП</button>
+    <button class="drive-exit-btn" id="drive-exit" type="button" data-i18n-title="drive_exit_title" title="Выйти из полноэкранного режима (Esc)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><line x1="4" y1="4" x2="20" y2="20"/></svg>
+    </button>
+  </div>
+  <div class="drive-stage" id="drive-stage">
+    <!-- camera-wrap переносится сюда из карточки «Камера» -->
+  </div>
+  <div class="drive-joy drive-joy-left">
+    <div class="joystick-container drive-joystick" id="fs-joystick-container">
+      <div class="joystick-base"></div>
+      <div class="joystick-crosshair"></div>
+      <div class="joystick-knob" id="fs-joystick-knob"></div>
+    </div>
+    <div class="joystick-label drive-joy-label" id="fs-joystick-label"></div>
+  </div>
+  <div class="drive-joy drive-joy-right">
+    <div class="cam-joystick-container drive-joystick" id="fs-cam-joystick-container">
+      <div class="cam-joystick-base"></div>
+      <div class="cam-joystick-crosshair"></div>
+      <div class="cam-joystick-knob" id="fs-cam-joystick-knob"></div>
+      <div class="cam-joystick-labels">
+        <span class="cam-lbl cam-lbl-up" data-i18n="cam_up">Вверх</span>
+        <span class="cam-lbl cam-lbl-down" data-i18n="cam_down">Вниз</span>
+        <span class="cam-lbl cam-lbl-left" data-i18n="cam_left">Лево</span>
+        <span class="cam-lbl cam-lbl-right" data-i18n="cam_right">Право</span>
+      </div>
+    </div>
+    <div class="cam-joystick-label drive-joy-label" id="fs-cam-joystick-label"></div>
+  </div>
+  <div class="drive-quickbar" id="drive-quickbar">
+    <button class="quick-btn off" id="fs-hl-main" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <span data-i18n="q_headlight">Фары</span>
+    </button>
+    <button class="quick-btn off" id="fs-hl-side" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="10" width="6" height="4" rx="2"/><rect x="16" y="10" width="6" height="4" rx="2"/><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg>
+      <span data-i18n="q_side">Габариты</span>
+    </button>
+    <button class="quick-btn off" id="fs-buzzer" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+      <span data-i18n="q_buzzer">Гудок</span>
+    </button>
+    <button class="quick-btn off" id="fs-crane-arm" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
+      <span data-i18n="q_claw">Клешня</span>
+    </button>
+  </div>
+</div>
+
 <div class="toast-container" id="toast-container"></div>
 
+<script src="translate/ru.js"></script>
+<script src="translate/en.js"></script>
 <script src="panel-core.js"></script>
 <script src="app.js"></script>
 </body>

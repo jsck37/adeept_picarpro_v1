@@ -130,6 +130,16 @@ def create_app(state):
     def js_core():
         return _static('panel-core.js', 'application/javascript; charset=utf-8')
 
+    @app.route('/translate/<fname>')
+    def translate_js(fname):
+        # v1.6.8: словари интерфейса (ru — по умолчанию, en — дополнительный).
+        # Отдаём только .js из папки translate — остальное запрещено.
+        if (not fname.endswith('.js') or '/' in fname or '..' in fname
+                or fname.startswith('.')):
+            return Response('Not found', status=404, mimetype='text/plain')
+        return _static(os.path.join('translate', fname),
+                       'application/javascript; charset=utf-8')
+
     @app.route('/rpi_pinout.png')
     def pinout_img():
         return _static('rpi_pinout.png', 'image/png', max_age=86400)
