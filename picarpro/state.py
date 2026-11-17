@@ -9,6 +9,25 @@ from config import (SERVO_STEERING, DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL
                     WEB_ACTIVE_TTL_S)
 
 
+_CV2_FOUND = None
+
+
+def _cv2_installed():
+    """cv2 установлен? Результат кэшируется (get_status зовётся часто)."""
+    global _CV2_FOUND
+    if _CV2_FOUND is None:
+        import sys
+        if 'cv2' in sys.modules:           # уже импортирован (в т.ч. тестовый фейк)
+            _CV2_FOUND = True
+        else:
+            try:
+                import importlib.util
+                _CV2_FOUND = importlib.util.find_spec('cv2') is not None
+            except (ImportError, ValueError):
+                _CV2_FOUND = False
+    return _CV2_FOUND
+
+
 class SharedState:
     def __init__(self):
         self.speed = DEFAULT_SPEED
@@ -38,6 +57,7 @@ class SharedState:
         self.oled = None
         self.ds4 = None
         self.camera = None
+        self._camera_failed = False   # init_camera() упал: модуль CV «не найден»
         self.autonomous = None
         self.voice = None
         self.steady = None
@@ -295,8 +315,23 @@ class SharedState:
                 from picarpro.camera.camera_opencv import Camera
                 self.camera = Camera.get_instance()
                 self.camera.start()
+                self._camera_failed = False
             except Exception as e:
+                self._camera_failed = True
                 logger.error(f'[State] camera init failed: {e}')
+
+    def cv_available(self):
+        """Модуль компьютерного зрения «найден» (для проверки «Module not found»).
+
+        Камера создаётся лениво (первый /video_feed или CV-команда), поэтому
+        «camera is None» ещё не значит, что модуля нет: иначе карточка CV была бы
+        заблокирована ДО первого запуска и разблокировать её было бы нечем.
+        Нет модуля = камера уже не смогла стартовать или не установлен cv2."""
+        if self.camera is not None:
+            return True
+        if self._camera_failed:
+            return False
+        return _cv2_installed()
 
     def get_status(self):
         info = SystemInfo.get_all()
@@ -338,6 +373,15 @@ class SharedState:
                 'crane': self.servos is not None and self.servos._pwm_initialized,
                 'autonomous': self.autonomous is not None,
                 'ds4': self.ds4.connected if self.ds4 else False,
+                # v1.6.9: проверка «Module not found» для окон MPU6050 / DS4 /
+                # Миссии / CV / Autonomous. «ds4» выше — геймпад ПОДКЛЮЧЁН, а
+                # «ds4_found» — модуль есть (иначе карточку с кнопками
+                # Bluetooth нельзя было бы использовать, пока геймпад не
+                # подключён).
+                'ds4_found': self.ds4 is not None,
+                'missions': bool(self.motors is not None
+                                 and self.motors._initialized),
+                'cv': self.cv_available(),
                 'voice': self.voice._initialized if self.voice else False,
                 'battery_adc': self.voltage.has_adc if self.voltage else False,
             },

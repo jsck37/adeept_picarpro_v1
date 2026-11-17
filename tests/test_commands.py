@@ -252,3 +252,43 @@ class TestValidation:
     def test_i2c_scan(self, state):
         r = call(state, 'i2c_scan')
         assert r['ok'] is True
+
+
+class TestModuleNotFound:
+    """v1.6.9: единый ответ code=module_not_found (UI показывает переведённый тост)."""
+
+    def test_cv_without_camera(self, state, monkeypatch):
+        state.camera = None
+        monkeypatch.setattr(state, 'init_camera', lambda: None)
+        r = call(state, 'cv_mode', {'mode': 'findlineCV'})
+        assert r['ok'] is False
+        assert r['code'] == 'module_not_found' and r['module'] == 'cv'
+
+    def test_autonomous_missing(self, state):
+        state.autonomous = None
+        r = call(state, 'auto', {'mode': 'follow'})
+        assert r['ok'] is False
+        assert r['code'] == 'module_not_found' and r['module'] == 'autonomous'
+
+    def test_steady_without_mpu(self, state):
+        state.steady = None
+        r = call(state, 'steady', {'action': 'toggle'})
+        assert r['ok'] is False
+        assert r['code'] == 'module_not_found' and r['module'] == 'mpu6050'
+
+    def test_bt_connect_without_ds4(self, state):
+        state.ds4 = None
+        r = call(state, 'bt_connect', {'mac': 'AA:BB:CC:DD:EE:FF'})
+        assert r['ok'] is False
+        assert r['code'] == 'module_not_found' and r['module'] == 'ds4'
+
+    def test_mission_start_needs_motors(self, state):
+        state.motors._initialized = False
+        r = call(state, 'mission', {'action': 'start', 'name': 'square'})
+        assert r['ok'] is False
+        assert r['code'] == 'module_not_found' and r['module'] == 'missions'
+
+    def test_mission_list_still_works_without_motors(self, state):
+        state.motors._initialized = False
+        r = call(state, 'mission', {'action': 'list'})
+        assert r.get('code') != 'module_not_found'

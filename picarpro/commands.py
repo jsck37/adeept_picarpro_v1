@@ -48,6 +48,14 @@ def _service_cmd(svc, action):
     return r
 
 
+def _module_missing(r, module, error=None):
+    """Единый ответ «Module not found» (v1.6.9): код и имя модуля читает UI и
+    показывает переведённое сообщение (RU/EN), поле error — для логов и API."""
+    r.update({'ok': False, 'code': 'module_not_found', 'module': module,
+              'error': error or f'Module not found: {module}'})
+    return r
+
+
 def process(state, data, client=None):
     """Выполнить команду. client — идентификатор веб-устройства для арбитража
     управления (None — внутренний вызов без ограничений)."""
@@ -87,8 +95,13 @@ def process(state, data, client=None):
                 r['interrupted_auto'] = True
 
     elif cmd == 'mission':
-        r = state.missions.handle(str(p.get('action', 'status')), p)
-        r['cmd'] = cmd
+        action = str(p.get('action', 'status'))
+        motors_ok = state.motors is not None and state.motors._initialized
+        if not motors_ok and action in ('start', 'return_home', 'record_start'):
+            r = _module_missing({'cmd': cmd}, 'missions')
+        else:
+            r = state.missions.handle(action, p)
+            r['cmd'] = cmd
 
     elif cmd == 'estop':
         state.emergency_stop()
@@ -246,6 +259,8 @@ def process(state, data, client=None):
             if state.camera:
                 state.camera.set_cv_mode(m)
                 r = {'ok': True, 'mode': p.get('mode')}
+            else:
+                r = _module_missing({'cmd': cmd}, 'cv', 'Camera not available')
 
     elif cmd == 'yolo_status':
         r = {'ok': True}
@@ -265,7 +280,7 @@ def process(state, data, client=None):
     elif cmd == 'hand_color':
         state.init_camera()
         if not state.camera:
-            r['error'] = 'Camera not available'
+            _module_missing(r, 'cv', 'Camera not available')
         else:
             presets = {
                 'skin': (0, 30, 50, 25, 255, 255),
@@ -302,7 +317,7 @@ def process(state, data, client=None):
         if func not in valid:
             r['error'] = f'Unknown mode: {func}'
         elif not state.autonomous:
-            r['error'] = 'Autonomous controller not available'
+            _module_missing(r, 'autonomous', 'Autonomous controller not available')
         else:
             if func in ('trackLineCV', 'trackHand', 'findColor', 'watchDog'):
                 state.init_camera()
@@ -319,7 +334,9 @@ def process(state, data, client=None):
 
     elif cmd == 'steady':
         action = str(p.get('action', 'toggle'))
-        if state.steady:
+        if not state.steady:
+            _module_missing(r, 'mpu6050')
+        else:
             if action == 'on':
                 ok, msg = state.steady.start()
                 r = {'ok': ok, 'steady': True}
@@ -356,7 +373,9 @@ def process(state, data, client=None):
     elif cmd == 'bt_connect':
         from picarpro.routes.bluetooth import pair_and_connect
         mac = str(p.get('mac', '')).strip()
-        if mac:
+        if state.ds4 is None:
+            _module_missing(r, 'ds4')
+        elif mac:
             ok, msg = pair_and_connect(mac, state.ds4)
             r = {'ok': ok, 'message': msg}
         else:

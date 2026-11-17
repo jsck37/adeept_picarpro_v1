@@ -33,6 +33,14 @@ class TestStatic:
     def test_style_css(self, client):
         assert client.get('/style.css').status_code == 200
 
+    def test_theme_js(self, client):
+        """v1.6.9: theme.js отдаётся отдельным файлом (inline-скрипты запрещены CSP)."""
+        r = client.get('/theme.js')
+        assert r.status_code == 200
+        assert 'javascript' in r.headers['Content-Type']
+        assert b'PicarTheme' in r.data
+        assert b'theme.js' in client.get('/').data
+
     def test_docs_json(self, client):
         assert client.get('/docs/index.json').status_code == 200
         assert client.get('/docs/pinout.json').status_code == 200

@@ -37,6 +37,86 @@ function t(key, params) {
   return s;
 }
 
+// Склонение: tn('console_lines', 21) -> ключ console_lines_one / _few, иначе
+// console_lines_fmt. ru: 1, 21 -> one; 2-4, 22-24 -> few; остальное (в т.ч. 11-14) -> fmt.
+// en: только 1 -> one. Нет нужной формы в словаре — берём _fmt.
+function tn(base, n, params) {
+  var form = 'fmt', m10 = n % 10, m100 = n % 100;
+  if (LANG === 'ru') {
+    if (m10 === 1 && m100 !== 11) form = 'one';
+    else if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) form = 'few';
+  } else if (n === 1) {
+    form = 'one';
+  }
+  var key = base + '_' + form;
+  if (form !== 'fmt' && I18N[LANG] && I18N[LANG][key] === undefined) key = base + '_fmt';
+  var p = {n: n};
+  if (params) Object.keys(params).forEach(function (k) { p[k] = params[k]; });
+  return t(key, p);
+}
+
+// Сообщения сервера приходят по-английски (commands.py, app.py, missions.py,
+// bluetooth.py). Здесь они сопоставляются ключам словаря, чтобы интерфейс на
+// русском не показывал английские ошибки. Неизвестное сообщение — как есть.
+var SERVER_MSG = [
+  [/^Controlled by another device/i, 'toast_not_driver'],
+  [/^Unauthorized/i, 'err_unauthorized'],
+  [/^Invalid JSON/i, 'err_invalid_json'],
+  [/^(JSON )?object expected/i, 'err_object_expected'],
+  [/^bad dir: (.*)$/i, 'err_bad_dir_fmt'],
+  [/^Unknown mode: (.*)$/i, 'err_unknown_mode_fmt'],
+  [/^Camera not available/i, 'err_camera_unavailable'],
+  [/^Autonomous controller not available/i, 'err_auto_unavailable'],
+  [/^motors not available/i, 'err_motors_unavailable'],
+  [/^file required/i, 'err_file_required'],
+  [/^Bad path/i, 'err_bad_path'],
+  [/^(Valid )?MAC( address)? required/i, 'err_mac_required'],
+  [/^Invalid MAC/i, 'err_invalid_mac'],
+  [/^No saved gamepad MAC/i, 'err_no_saved_mac'],
+  [/^update failed: (.*)$/i, 'err_update_failed_fmt'],
+  [/^mission not found/i, 'err_mission_not_found'],
+  [/^mission is running/i, 'err_mission_running'],
+  [/^mission too long/i, 'err_mission_too_long'],
+  [/^built-in mission cannot be/i, 'err_mission_builtin'],
+  [/^bad name \(/i, 'err_mission_bad_name'],
+  [/^not recording/i, 'err_not_recording'],
+  [/^no recorded path/i, 'err_no_recorded_path'],
+  [/^stop recording first/i, 'err_stop_recording_first'],
+  [/^No Bluetooth adapter/i, 'bt_err_no_adapter'],
+  [/^Controller is not paired/i, 'bt_err_not_paired'],
+  [/^Controller not found/i, 'bt_err_not_found'],
+  [/^Stored pairing is invalid/i, 'bt_err_stale_pairing'],
+  [/^Paired, but the controller did not connect/i, 'bt_err_paired_no_connect'],
+  [/^Paired, but connection failed/i, 'bt_err_paired_failed'],
+  [/^Paired and connected to (.*)$/i, 'bt_ok_paired_fmt'],
+  [/^Already connected to (.*)$/i, 'bt_ok_already_fmt'],
+  [/^Connected to (.*)$/i, 'bt_ok_connected_fmt'],
+  [/^Connection failed/i, 'toast_conn_failed'],
+];
+// srvMsg(строка | ответ сервера) -> строка на языке интерфейса
+function srvMsg(src) {
+  if (src && typeof src === 'object') {
+    if (src.code === 'module_not_found') {
+      var mn = t('mod_name_' + src.module);
+      return t('toast_module_missing_fmt', {s: mn === 'mod_name_' + src.module ? (src.module || '?') : mn});
+    }
+    if (src.code === 'not_driver') return t('toast_not_driver');
+    src = src.message || src.error || '';
+  }
+  src = String(src || '');
+  for (var i = 0; i < SERVER_MSG.length; i++) {
+    var m = SERVER_MSG[i][0].exec(src);
+    if (m) return t(SERVER_MSG[i][1], {s: m[1] === undefined ? '' : m[1]});
+  }
+  return src;
+}
+// Встроенные миссии (square, zigzag…) показываем по-русски; свои — как назвал пользователь
+function missionLabel(name) {
+  var k = 'mission_name_' + name;
+  var s = t(k);
+  return s === k ? name : s;
+}
+
 function applyI18n() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-i18n]').forEach(function (el) {
@@ -45,6 +125,10 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
     el.title = t(el.dataset.i18nTitle);
   });
+  document.querySelectorAll('[data-i18n-aria]').forEach(function (el) {
+    el.setAttribute('aria-label', t(el.dataset.i18nAria));
+  });
+  syncThemeBtn();
   updateDynamicLabels();
   buildServoGrid();   // имена серво переведённые
 }
@@ -73,9 +157,30 @@ function updateDynamicLabels() {
   if (countEl) {
     var out = document.getElementById('console-output');
     var n = out ? out.children.length : 0;
-    countEl.textContent = n === 1 ? t('console_lines_one') : t('console_lines_fmt', {n: n});
+    countEl.textContent = tn('console_lines', n);
   }
 }
+
+// Переключатель темы (светлая/тёмная). Логика хранения — в theme.js (грузится в <head>).
+function syncThemeBtn() {
+  var b = document.getElementById('theme-btn');
+  if (!b) return;
+  var th = window.PicarTheme ? window.PicarTheme.get()
+    : (document.documentElement.getAttribute('data-theme') || 'light');
+  b.dataset.theme = th;
+  b.title = t(th === 'dark' ? 'theme_to_light' : 'theme_to_dark');
+  b.setAttribute('aria-label', t('theme_toggle'));
+}
+function toggleTheme() {
+  if (window.PicarTheme) window.PicarTheme.toggle();
+  else {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+  }
+  syncThemeBtn();
+}
+var themeBtnEl = document.getElementById('theme-btn');
+if (themeBtnEl) themeBtnEl.addEventListener('click', toggleTheme);
 
 function setLang(l) {
   LANG = l;
@@ -276,7 +381,17 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
 // ---- видео: пауза MJPEG-потока, когда он не виден (главный тормоз
 // телефонов — декодирование 15 fps JPEG в фоне) --------------------
 var FEED_URL = '/video_feed';
-var FEED_OFF = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22480%22><rect fill=%22%231a1a1a%22 width=%22640%22 height=%22480%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%235f6368%22 font-size=%2220%22 text-anchor=%22middle%22 dy=%22.3em%22>Video paused</text></svg>";
+// Заглушки строятся на текущем языке (раньше были «Video paused» / «No Camera Feed»
+// по-английски). Текст экранируем: в словаре могут быть & < >.
+function feedPlaceholder(textKey) {
+  var txt = t(textKey).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480">' +
+    '<rect fill="#1a1a1a" width="640" height="480"/>' +
+    '<text x="50%" y="50%" fill="#8a8f98" font-family="system-ui,Segoe UI,Roboto,Arial,sans-serif" font-size="20" text-anchor="middle" dy=".3em">' +
+    txt + '</text></svg>');
+}
+function feedOff() { return feedPlaceholder('video_paused'); }
 function updateVideoFeed() {
   var img = document.getElementById('camera-feed');
   if (!img) return;
@@ -284,13 +399,23 @@ function updateVideoFeed() {
   // в полноэкранном режиме поток нужен всегда (не только на вкладке Control)
   var driveMode = document.body.classList.contains('drive-mode');
   var visible = (controlTab && controlTab.classList.contains('active') && !document.hidden) || driveMode;
-  var want = visible ? FEED_URL : FEED_OFF;
+  var want = visible ? FEED_URL : feedOff();
   if (img.dataset.feedState !== want) {
     img.dataset.feedState = want;
     img.src = want;
   }
 }
 document.addEventListener('visibilitychange', updateVideoFeed);
+(function () {
+  var img = document.getElementById('camera-feed');
+  if (!img) return;
+  img.addEventListener('error', function () {
+    if (img.dataset.feedState === FEED_URL) {      // упал именно живой поток
+      img.dataset.feedState = 'error';
+      img.src = feedPlaceholder('no_camera_feed');
+    }
+  });
+})();
 
 function toggleHwSection(cardId, tagId, available) {
   var tagEl = document.getElementById(tagId);
@@ -318,13 +443,18 @@ function toggleHwSection(cardId, tagId, available) {
   }
 }
 
-// v1.6.8: окна mpu6050, ds4, missions, cv и autonomous — ВСЕГДА активны,
-// без проверки «Module not found»: их отсутствие не блокирует интерфейс
-// (датчики просто показывают N/A, режимы сообщат об ошибке при запуске).
-// Проверка осталась только для реально опциональных модулей.
+// v1.6.9: проверка «Module not found» вернулась для окон MPU6050, DS4,
+// Миссий, CV и Autonomous. Флаг, которого нет в ответе (старый сервер),
+// считается «модуль есть», чтобы не блокировать панель зря.
+function hwFlag(key) { return hw[key] !== false; }
 function updateHardwareUI(hardwareStatus) {
   if (!hardwareStatus) return;
   hw = hardwareStatus;
+  toggleHwSection('card-mpu', 'mpu-missing-tag', hw.mpu6050 === true);
+  toggleHwSection('card-ds4', 'ds4-missing-tag', hwFlag('ds4_found'));
+  toggleHwSection('card-missions', 'missions-missing-tag', hwFlag('missions'));
+  toggleHwSection('card-cv', 'cv-missing-tag', hwFlag('cv'));
+  toggleHwSection('card-autonomous', 'auto-missing-tag', hwFlag('autonomous'));
   toggleHwSection(null, 'servo-missing-tag', hw.servos);
   toggleHwSection('card-headlights', 'hl-missing-tag', hw.switches);
   toggleHwSection('card-led', 'led-missing-tag', hw.leds);
@@ -362,7 +492,7 @@ function handleResponse(m) {
     }
     return;
   }
-  if (m.error) toast(m.error, 'error');
+  if (m.error) toast(srvMsg(m), 'error');
   if (m.interrupted_auto) toast(t('toast_interrupted'), 'info');
   if (m.cmd === 'servo_get_limits' && m.ok) applyServoLimits(m.limits);
 }
@@ -669,7 +799,7 @@ function updateStatus(d) {
       batItem.style.display = '';
       var batEl = document.getElementById('sb-battery');
       batEl.textContent = bat.percent + '%';
-      batEl.style.color = bat.low ? '#ea4335' : '#34a853';
+      batEl.style.color = bat.low ? 'var(--danger)' : 'var(--ok)';
     } else {
       batItem.style.display = 'none';
     }
@@ -680,7 +810,7 @@ function updateStatus(d) {
     steadyItem.style.display = hw.mpu6050 ? '' : 'none';
     var stEl = document.getElementById('sb-steady');
     stEl.textContent = steadyOn ? t('on') : t('off');
-    stEl.style.color = steadyOn ? '#34a853' : '#9aa0a6';
+    stEl.style.color = steadyOn ? 'var(--ok)' : 'var(--muted)';
     var stBtn = document.getElementById('steady-toggle');
     if (stBtn) stBtn.classList.toggle('active', steadyOn);
   }
@@ -689,12 +819,12 @@ function updateStatus(d) {
     document.getElementById('sb-ds4').textContent = ds4.connected ? t('on') : '--';
     var ds4Dot = document.getElementById('ds4-status-dot');
     var ds4Text = document.getElementById('ds4-status-text');
-    if (ds4Dot) ds4Dot.style.background = ds4.connected ? '#34a853' : '#ea4335';
+    if (ds4Dot) ds4Dot.style.background = ds4.connected ? 'var(--ok)' : 'var(--danger)';
     if (ds4Text) {
       ds4Text.textContent = ds4.connected
         ? t('ds4_connected_fmt', {n: ds4.connect_count})
         : t('ds4_not_connected');
-      ds4Text.style.color = ds4.connected ? '#34a853' : '#9aa0a6';
+      ds4Text.style.color = ds4.connected ? 'var(--ok)' : 'var(--muted)';
     }
     var btDiscBtn = document.getElementById('bt-disconnect-btn');
     if (btDiscBtn) btDiscBtn.style.display = ds4.connected ? '' : 'none';
@@ -746,10 +876,10 @@ function updateStatus(d) {
     var vText = document.getElementById('voice-status-text');
     var vStart = document.getElementById('voice-start-btn');
     var vStop = document.getElementById('voice-stop-btn');
-    if (vDot) vDot.style.background = v.active ? '#34a853' : (v.available ? '#fbbc04' : '#9aa0a6');
+    if (vDot) vDot.style.background = v.active ? 'var(--ok)' : (v.available ? 'var(--warn)' : 'var(--muted)');
     if (vText) {
       vText.textContent = v.active ? t('voice_listening') : (v.available ? t('voice_ready') : t('voice_inactive'));
-      vText.style.color = v.active ? '#34a853' : '#9aa0a6';
+      vText.style.color = v.active ? 'var(--ok)' : 'var(--muted)';
     }
     if (vStart && vStop) {
       if (v.active) { vStart.style.display = 'none'; vStop.style.display = ''; }
@@ -770,13 +900,13 @@ function setIrVal(id, val) {
   if (!el) return;
   if (val === null || val === undefined) {
     el.textContent = t('ir_na');
-    el.style.color = '#9aa0a6';
+    el.style.color = 'var(--muted)';
   } else if (val) {
     el.textContent = t('ir_line');
-    el.style.color = '#ea4335';
+    el.style.color = 'var(--danger)';
   } else {
     el.textContent = t('ir_clear');
-    el.style.color = '#34a853';
+    el.style.color = 'var(--ok)';
   }
 }
 
@@ -785,7 +915,7 @@ function refreshBlinkerText(side) {
   if (!statEl) return;
   var on = side === 'left' ? hlLeftSignal : hlRightSignal;
   statEl.textContent = on ? t('on') : t('off');
-  statEl.style.color = on ? '#fbbc04' : '#9aa0a6';
+  statEl.style.color = on ? 'var(--warn)' : 'var(--muted)';
 }
 
 // Фары/габариты: состояния синхронизируются и в карточке, и в мини-статус-баре
@@ -1489,7 +1619,7 @@ function btMsg(text, color) {
   // имя устройства приходит из эфира (его задаёт кто угодно рядом) — только textContent
   btDevices.textContent = '';
   var d = document.createElement('div');
-  d.style.cssText = 'font-size:.75rem;padding:4px;color:' + (color || '#5f6368');
+  d.style.cssText = 'font-size:.75rem;padding:4px;color:' + (color || 'var(--text-2)');
   d.textContent = text;
   btDevices.appendChild(d);
   btDeviceList.style.display = '';
@@ -1522,7 +1652,7 @@ function renderBtDevices(devs) {
         .then(function(r) { return r.json(); })
         .then(function(d) {
           if (d.ok) { toast(t('toast_connected'), 'success'); btn.textContent = t('bt_state_connected'); }
-          else { toast(d.message || d.error || t('toast_conn_failed'), 'error'); btn.textContent = label0; btn.disabled = false; }
+          else { toast(srvMsg(d) || t('toast_conn_failed'), 'error'); btn.textContent = label0; btn.disabled = false; }
         })
         .catch(function() { toast(t('toast_conn_error'), 'error'); btn.textContent = label0; btn.disabled = false; });
     });
@@ -1545,9 +1675,9 @@ btScanBtn.addEventListener('click', function() {
       btScanning.style.display = 'none';
       btScanBtn.disabled = false;
       if (d.ok === false) {
-        var hint = d.error || t('toast_scan_failed');
+        var hint = srvMsg(d.error) || t('toast_scan_failed');
         if (d.diagnose && d.diagnose.rfkill_blocked) hint += t('toast_scan_rfkill');
-        btMsg(hint, '#ea4335');
+        btMsg(hint, 'var(--danger)');
       } else if (d.devices && d.devices.length > 0) {
         renderBtDevices(d.devices);
       } else {
@@ -1557,21 +1687,21 @@ btScanBtn.addEventListener('click', function() {
     .catch(function() {
       btScanning.style.display = 'none';
       btScanBtn.disabled = false;
-      btMsg(t('toast_scan_failed'), '#ea4335');
+      btMsg(t('toast_scan_failed'), 'var(--danger)');
     });
 });
 
 btAutoBtn.addEventListener('click', function() {
   fetch('/api/bt/auto_connect', { method: 'POST', headers: authHeaders() }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.ok) toast(t('toast_auto_connect_ok'), 'success');
-    else toast(d.error || d.message || t('toast_auto_connect_fail'), 'error');
+    else toast(srvMsg(d.error || d.message) || t('toast_auto_connect_fail'), 'error');
   }).catch(function() { toast(t('toast_auto_connect_error'), 'error'); });
 });
 
 btDisconnectBtn.addEventListener('click', function() {
   fetch('/api/bt/disconnect', { method: 'POST', headers: authHeaders() }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.ok) toast(t('toast_disconnected'), 'success');
-    else toast(d.error || t('toast_disconnect_failed'), 'error');
+    else toast(srvMsg(d.error) || t('toast_disconnect_failed'), 'error');
   }).catch(function() { toast(t('toast_disconnect_error'), 'error'); });
 });
 
@@ -1618,7 +1748,7 @@ function appendConsoleLine(text, ts) {
     }
     if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
     var countEl = document.getElementById('console-line-count');
-    if (countEl) countEl.textContent = t('console_lines_fmt', {n: output.children.length});
+    if (countEl) countEl.textContent = tn('console_lines', output.children.length);
   }
   updateLogCounters();
 }
@@ -1646,8 +1776,8 @@ function applyLogSort() {
   var levelOrder = { error: 0, warn: 1, info: 2, debug: 3 };
   if (logSortMode === 'level') {
     lines.sort(function(a, b) {
-      var la = levelOrder[a.dataset.level] || 2;
-      var lb = levelOrder[b.dataset.level] || 2;
+      var la = levelOrder.hasOwnProperty(a.dataset.level) ? levelOrder[a.dataset.level] : 2;
+      var lb = levelOrder.hasOwnProperty(b.dataset.level) ? levelOrder[b.dataset.level] : 2;
       return la - lb;
     });
     lines.forEach(function(line) { output.appendChild(line); });
@@ -1678,7 +1808,7 @@ document.getElementById('console-clear-btn').addEventListener('click', function(
   logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
   updateLogCounters();
   var countEl = document.getElementById('console-line-count');
-  if (countEl) countEl.textContent = t('console_lines_fmt', {n: 0});
+  if (countEl) countEl.textContent = tn('console_lines', 0);
   sendCommand('clear_log', {});
 });
 
@@ -1697,7 +1827,7 @@ function renderMissionList(list) {
     var o = document.createElement('option');
     o.value = m.name;
     o.dataset.builtin = m.builtin ? '1' : '0';
-    o.textContent = t('mission_steps_fmt', {s: m.name, n: m.steps, sec: m.sec}) + (m.builtin ? '' : ' *');
+    o.textContent = tn('mission_steps', m.steps, {s: missionLabel(m.name), sec: m.sec}) + (m.builtin ? '' : ' *');
     missionSel.appendChild(o);
   });
   if (prev) missionSel.value = prev;
@@ -1725,11 +1855,11 @@ function renderMissionStatus(s) {
   if (el) {
     var txt = t('mission_idle'), st = s.state || 'idle';
     if (missionState.recording) txt = t('mission_txt_recording_fmt', {n: s.rec_events || 0});
-    else if (missionState.active) txt = t('mission_txt_running_fmt', {s: s.name || '', done: s.done || 0, n: s.total || 0});
-    else if (st === 'done') txt = t('mission_txt_done_fmt', {s: s.name || ''});
+    else if (missionState.active) txt = t('mission_txt_running_fmt', {s: missionLabel(s.name || ''), done: s.done || 0, n: s.total || 0});
+    else if (st === 'done') txt = t('mission_txt_done_fmt', {s: missionLabel(s.name || '')});
     else if (st === 'stopped') txt = t('mission_txt_stopped');
     else if (st === 'obstacle') txt = t('mission_txt_obstacle');
-    else if (st === 'error') txt = t('mission_txt_error_fmt', {s: s.error || '?'});
+    else if (st === 'error') txt = t('mission_txt_error_fmt', {s: s.error ? srvMsg(s.error) : '?'});
     el.textContent = txt;
     el.dataset.state = missionState.active ? 'running'
       : (missionState.recording ? 'recording' : st);
@@ -1807,7 +1937,7 @@ function waitForRestart(expectVersion) {
 }
 
 function updateResult(r) {
-  if (!r || !r.ok) { updMsg(t('upd_failed', {s: (r && r.error) || '?'}), 'error'); return; }
+  if (!r || !r.ok) { updMsg(t('upd_failed', {s: (r && r.error) ? srvMsg(r.error) : '?'}), 'error'); return; }
   var note = (r.config_changed && r.config_changed.length)
     ? t('upd_config_note', {s: r.config_changed.slice(0, 6).join(', ')}) : '';
   if (r.restarting) { updMsg(t('upd_updated_fmt', {a: r.from, b: r.to}) + note, 'running'); waitForRestart(r.to); }
@@ -1894,7 +2024,7 @@ document.querySelectorAll('.tab-btn').forEach(function(b) {
 });
 // высота липкой статус-панели нужна CSS (липкое видео на телефоне)
 (function() {
-  var sb = document.getElementById('status-bar');
+  var sb = document.getElementById('sticky-top') || document.getElementById('status-bar');
   function setH() { document.documentElement.style.setProperty('--sb-h', sb.offsetHeight + 'px'); }
   setH();
   if (window.ResizeObserver) new ResizeObserver(setH).observe(sb);

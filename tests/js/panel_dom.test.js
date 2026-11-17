@@ -189,7 +189,7 @@ test('миссии: старт отправляет выбранное имя; �
   doc.getElementById('mission-start').click();
   assert.deepStrictEqual(lastCmd(ws, 'mission').params, { action: 'start', name: 'square' });
   ws.msg({ type: 'status', delta: true, data: { mission: { active: true, name: 'square', done: 2, total: 8, state: 'running' } } });
-  assert.strictEqual(doc.getElementById('mission-status').textContent, 'Running square: 2/8');
+  assert.strictEqual(doc.getElementById('mission-status').textContent, 'Running Square: 2/8');  // встроенная миссия показывается локализованным именем
   assert.ok(doc.getElementById('mission-start').disabled);
   assert.ok(!doc.getElementById('mission-stop').disabled);
   doc.getElementById('mission-stop').click();
@@ -266,7 +266,9 @@ test('i18n: словари RU/EN покрывают все data-i18n ключи 
     assert.ok(ru.includes(k), 'нет RU-ключа: ' + k);
     assert.ok(en.includes(k), 'нет EN-ключа: ' + k);
   }
-  assert.deepStrictEqual([...ru].sort(), [...en].sort(), 'наборы ключей RU и EN различаются');
+  // у русского есть лишняя форма склонения «_few» (2-4 строки/шага) — в английском её нет
+  const ruCore = ru.filter((k) => !/_few$/.test(k));
+  assert.deepStrictEqual([...ruCore].sort(), [...en].sort(), 'наборы ключей RU и EN различаются');
   for (const k of ru) {
     assert.notStrictEqual(w.eval(`I18N.ru[${JSON.stringify(k)}]`), '', 'пустой RU-ключ: ' + k);
   }
@@ -314,20 +316,147 @@ test('аварийный стоп: кнопка в Autonomous и в шапке �
   assert.strictEqual(ws.sent.filter((m) => m.cmd === 'estop').length, 2);
 });
 
-test('окна mpu6050/ds4/missions/cv/autonomous всегда активны (без «Module not found»)', { skip: !JSDOM }, () => {
+const HW_ALL_OK = { motors: true, servos: true, leds: true, buzzer: true, switches: true,
+  ultrasonic: true, mpu6050: true, oled: true, camera: true, autonomous: true, crane: true,
+  ds4: false, ds4_found: true, missions: true, cv: true, voice: true };
+const MODULE_CARDS = [
+  ['card-mpu', 'mpu-missing-tag'], ['card-ds4', 'ds4-missing-tag'], ['card-missions', 'missions-missing-tag'],
+  ['card-cv', 'cv-missing-tag'], ['card-autonomous', 'auto-missing-tag'],
+];
+
+test('«Module not found»: окна mpu6050/ds4/missions/cv/autonomous блокируются, если модуля нет', { skip: !JSDOM }, () => {
   const { ws, doc } = boot();
-  ws.msg({ type: 'status', delta: false, data: { hw: {
-    motors: false, servos: false, leds: false, buzzer: false, switches: false,
-    ultrasonic: false, mpu6050: false, oled: false, camera: false,
-    autonomous: false, crane: false, ds4: false, voice: false } } });
-  // даже при полностью мёртвом «железе» эти карточки не блокируются
-  for (const id of ['card-cv', 'card-autonomous', 'card-ds4', 'card-missions']) {
-    const card = doc.getElementById(id);
-    assert.ok(card, 'нет карточки ' + id);
-    assert.ok(!card.classList.contains('hw-missing'), id + ' заблокирован');
+  ws.msg({ type: 'status', delta: false, data: { hw: Object.assign({}, HW_ALL_OK,
+    { mpu6050: false, ds4_found: false, missions: false, cv: false, autonomous: false }) } });
+  for (const [card, tag] of MODULE_CARDS) {
+    assert.ok(doc.getElementById(card), 'нет карточки ' + card);
+    assert.ok(doc.getElementById(card).classList.contains('hw-missing'), card + ' должен быть заблокирован');
+    assert.notStrictEqual(doc.getElementById(tag).style.display, 'none', 'тег не показан: ' + tag);
+    assert.strictEqual(doc.getElementById(tag).textContent, 'Module not found');
   }
-  assert.strictEqual(doc.querySelector('#card-autonomous .hw-missing-tag'), null,
-    'в Autonomous не должно быть тега «Module not found»');
+});
+
+test('«Module not found»: когда модули есть, карточки доступны (DS4 не подключён ≠ модуль не найден)', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  // ds4:false (геймпад не подключён), но ds4_found:true — кнопки Bluetooth должны оставаться доступными
+  ws.msg({ type: 'status', delta: false, data: { hw: HW_ALL_OK } });
+  for (const [card, tag] of MODULE_CARDS) {
+    assert.ok(!doc.getElementById(card).classList.contains('hw-missing'), card + ' заблокирован зря');
+    assert.strictEqual(doc.getElementById(tag).style.display, 'none');
+  }
+});
+
+test('«Module not found»: старый сервер без новых флагов не блокирует карточки', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  const old = Object.assign({}, HW_ALL_OK);
+  delete old.ds4_found; delete old.missions; delete old.cv;
+  ws.msg({ type: 'status', delta: false, data: { hw: old } });
+  for (const [card] of MODULE_CARDS) {
+    assert.ok(!doc.getElementById(card).classList.contains('hw-missing'), card + ' заблокирован без флага');
+  }
+});
+
+test('«Module not found»: карточка снова разблокируется, когда модуль появился', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  ws.msg({ type: 'status', delta: false, data: { hw: Object.assign({}, HW_ALL_OK, { cv: false }) } });
+  assert.ok(doc.getElementById('card-cv').classList.contains('hw-missing'));
+  ws.msg({ type: 'status', delta: false, data: { hw: HW_ALL_OK } });
+  assert.ok(!doc.getElementById('card-cv').classList.contains('hw-missing'));
+});
+
+test('ответ сервера module_not_found показывается переведённым тостом (RU и EN)', { skip: !JSDOM }, () => {
+  const { w, ws, doc } = boot();
+  const resp = { type: 'response', data: { ok: false, cmd: 'cv_mode', code: 'module_not_found', module: 'cv', error: 'Camera not available' } };
+  ws.msg(resp);
+  assert.match(doc.querySelector('.toast-container').lastChild.textContent, /Module not found: Computer Vision/);
+  w.eval('setLang("ru")');
+  ws.msg(resp);
+  assert.match(doc.querySelector('.toast-container').lastChild.textContent, /Модуль не найден: Компьютерное зрение/);
+});
+
+test('сообщения сервера (английские) переводятся на язык интерфейса', { skip: !JSDOM }, () => {
+  const { w } = boot();
+  w.eval('setLang("ru")');
+  assert.strictEqual(w.eval('srvMsg("Camera not available")'), 'Камера недоступна');
+  assert.strictEqual(w.eval('srvMsg("Unknown mode: foo")'), 'Неизвестный режим: foo');
+  assert.strictEqual(w.eval('srvMsg("Connected to DUALSHOCK 4")'), 'Подключено: DUALSHOCK 4');
+  assert.match(w.eval('srvMsg("No Bluetooth adapter found. Check rfkill.")'), /Bluetooth-адаптер не найден/);
+  assert.strictEqual(w.eval('srvMsg("что-то своё")'), 'что-то своё', 'неизвестное сообщение остаётся как есть');
+  w.eval('setLang("en")');
+  assert.strictEqual(w.eval('srvMsg("Camera not available")'), 'Camera not available');
+});
+
+test('склонение: 1 строка / 2 строки / 5 строк / 11 строк / 21 строка (RU) и line/lines (EN)', { skip: !JSDOM }, () => {
+  const { w } = boot();
+  w.eval('setLang("ru")');
+  const ru = (n) => w.eval(`tn("console_lines", ${n})`);
+  assert.deepStrictEqual([0, 1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 111].map(ru),
+    ['0 строк', '1 строка', '2 строки', '4 строки', '5 строк', '11 строк', '12 строк', '14 строк', '21 строка', '22 строки', '25 строк', '111 строк']);
+  assert.strictEqual(w.eval('tn("mission_steps", 3, {s: "Квадрат", sec: 9})'), 'Квадрат (3 шага, ~9 с)');
+  assert.strictEqual(w.eval('tn("mission_steps", 8, {s: "Квадрат", sec: 12})'), 'Квадрат (8 шагов, ~12 с)');
+  w.eval('setLang("en")');
+  assert.strictEqual(w.eval('tn("console_lines", 1)'), '1 line');
+  assert.strictEqual(w.eval('tn("console_lines", 2)'), '2 lines');
+});
+
+test('перевод: HSV-подписи, цвета LED, aria-label и фильтры логов меняются вместе с языком', { skip: !JSDOM }, () => {
+  const { w, doc } = boot();
+  const prev = (id) => doc.getElementById(id).previousElementSibling.textContent;
+  w.eval('setLang("en")');
+  assert.strictEqual(prev('hand-h-low'), 'H low');
+  assert.strictEqual(doc.querySelector('.color-preset[data-hex="#ff0000"]').title, 'Red');
+  assert.strictEqual(doc.getElementById('upd-file').getAttribute('aria-label'), 'Update archive');
+  assert.strictEqual(doc.querySelector('.log-filter-warn').title, 'Warnings');
+  w.eval('setLang("ru")');
+  assert.strictEqual(prev('hand-h-low'), 'H низ');
+  assert.strictEqual(prev('hand-v-high'), 'V верх');
+  assert.strictEqual(doc.querySelector('.color-preset[data-hex="#ff0000"]').title, 'Красный');
+  assert.strictEqual(doc.getElementById('upd-file').getAttribute('aria-label'), 'Архив обновления');
+  assert.strictEqual(doc.getElementById('log-sort-select').title, 'Порядок сортировки');
+  assert.strictEqual(doc.querySelector('.tab-btn[data-tab="console"] span').textContent, 'Консоль');
+  assert.strictEqual(doc.querySelector('.tab-btn svg') !== null, true, 'иконка вкладки пропала при переводе');
+});
+
+test('заглушка видео переведена и не требует inline onerror (CSP)', { skip: !JSDOM }, () => {
+  const { w, doc } = boot();
+  assert.ok(!doc.getElementById('camera-feed').hasAttribute('onerror'), 'inline onerror блокируется CSP');
+  w.eval('setLang("ru")');
+  assert.match(decodeURIComponent(w.eval('feedPlaceholder("no_camera_feed")')), /Нет изображения с камеры/);
+  assert.match(decodeURIComponent(w.eval('feedOff()')), /Видео на паузе/);
+  w.eval('setLang("en")');
+  assert.match(decodeURIComponent(w.eval('feedOff()')), /Video paused/);
+});
+
+test('тема: кнопка переключает светлую/тёмную, подпись кнопки переводится', { skip: !JSDOM }, () => {
+  const { w, doc } = boot();
+  const btn = doc.getElementById('theme-btn');
+  assert.ok(btn, 'нет кнопки темы');
+  const html = doc.documentElement;
+  assert.strictEqual(html.getAttribute('data-theme') || 'light', 'light');
+  btn.click();
+  assert.strictEqual(html.getAttribute('data-theme'), 'dark');
+  assert.match(btn.title, /light/i);
+  w.eval('setLang("ru")');
+  assert.match(btn.title, /светлую/i);
+  btn.click();
+  assert.strictEqual(html.getAttribute('data-theme'), 'light');
+});
+
+test('theme.js: по умолчанию системная тема, ручной выбор запоминается', { skip: !JSDOM }, () => {
+  const dom = new JSDOM('<!DOCTYPE html><html><head><meta name="theme-color" content="#fff"></head><body></body></html>',
+    { url: 'http://pi.local/', runScripts: 'outside-only' });
+  const w = dom.window;
+  w.eval(fs.readFileSync(path.join(STATIC, 'theme.js'), 'utf8'));
+  const el = w.document.documentElement;
+  assert.strictEqual(w.PicarTheme.get(), 'light');
+  assert.strictEqual(el.getAttribute('data-theme'), 'light');
+  assert.strictEqual(w.PicarTheme.toggle(), 'dark');
+  assert.strictEqual(w.localStorage.getItem('picarpro_theme'), 'dark');
+  assert.notStrictEqual(w.document.querySelector('meta[name=theme-color]').getAttribute('content'), '#fff');
+  assert.strictEqual(w.PicarTheme.set('bogus'), 'dark', 'мусорное значение игнорируется');
+  // «обновили страницу»: тема читается из localStorage
+  w.eval(fs.readFileSync(path.join(STATIC, 'theme.js'), 'utf8'));
+  assert.strictEqual(el.getAttribute('data-theme'), 'dark');
 });
 
 test('полноэкранный режим: камера переносится в оверлей, джойстики работают, выход возвращает', { skip: !JSDOM }, () => {

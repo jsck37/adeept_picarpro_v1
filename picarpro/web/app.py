@@ -130,6 +130,12 @@ def create_app(state):
     def js_core():
         return _static('panel-core.js', 'application/javascript; charset=utf-8')
 
+    @app.route('/theme.js')
+    def js_theme():
+        # v1.6.9: светлая/тёмная тема. Отдельный файл в <head>, чтобы тема
+        # применялась ДО отрисовки (CSP запрещает inline-скрипты).
+        return _static('theme.js', 'application/javascript; charset=utf-8')
+
     @app.route('/translate/<fname>')
     def translate_js(fname):
         # v1.6.8: словари интерфейса (ru — по умолчанию, en — дополнительный).

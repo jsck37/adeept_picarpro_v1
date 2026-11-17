@@ -48,6 +48,42 @@ class TestStatus:
         # голосовое управление отключено без бинарника sherpa — это норма
         assert 'voice' in hw and hw['voice'] is False
 
+    def test_module_found_flags(self, clean_state):
+        """v1.6.9: флаги проверки «Module not found» для окон DS4/Миссии/CV."""
+        hw = clean_state.get_status()['hw']
+        # DS4: «ds4» — геймпад ПОДКЛЮЧЁН (на фейках нет), «ds4_found» — модуль есть
+        assert hw['ds4'] is False
+        assert hw['ds4_found'] is True
+        assert hw['missions'] is True
+        assert 'cv' in hw
+
+    def test_ds4_found_false_without_module(self, clean_state):
+        clean_state.ds4 = None
+        hw = clean_state.get_status()['hw']
+        assert hw['ds4_found'] is False and hw['ds4'] is False
+
+    def test_missions_flag_follows_motors(self, clean_state):
+        clean_state.motors._initialized = False
+        assert clean_state.get_status()['hw']['missions'] is False
+
+    def test_cv_flag_lazy_camera(self, clean_state):
+        """Камера создаётся лениво: пока её нет, CV считается доступным
+        (иначе карточку нечем разблокировать), а после сбоя — нет."""
+        import picarpro.state as st
+        clean_state.camera = None
+        clean_state._camera_failed = False
+        old = st._CV2_FOUND
+        try:
+            st._CV2_FOUND = True
+            assert clean_state.cv_available() is True
+            clean_state._camera_failed = True
+            assert clean_state.cv_available() is False
+            clean_state._camera_failed = False
+            st._CV2_FOUND = False
+            assert clean_state.cv_available() is False
+        finally:
+            st._CV2_FOUND = old
+
 
 class TestCamera:
     def test_init_camera(self, clean_state):
