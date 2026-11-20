@@ -6,6 +6,7 @@ from picarpro.utils.system_info import SystemInfo
 from picarpro.network import get_ip
 from picarpro.control import ControlArbiter
 from config import (SERVO_STEERING, DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL_S,
+                    RADAR_SECTOR_DEG,
                     WEB_ACTIVE_TTL_S)
 
 
@@ -123,6 +124,17 @@ class SharedState:
                 pass
         logger.warning('[State] EMERGENCY STOP')
 
+    def refresh_waiting_led(self):
+        """Нет ни одного подключённого устройства -> нижняя подсветка мигает
+        синим (ожидание подключения); появилось -> прежний режим подсветки."""
+        leds = self.leds
+        if leds is None or not hasattr(leds, 'set_waiting'):
+            return
+        try:
+            leds.set_waiting(len(self.ws_clients) == 0)
+        except Exception as e:
+            logger.warning(f'[State] waiting LED failed: {e}')
+
     def on_last_client_gone(self):
         """Последний веб-клиент отключился (обрыв Wi-Fi, закрыли вкладку).
 
@@ -130,6 +142,7 @@ class SharedState:
         упора: UI шлёт «move» только при изменении, «keepalive» нет.
         Автономные режимы и геймпад (он сам шлёт события) не трогаем.
         """
+        self.refresh_waiting_led()
         if self.ws_clients or self.motors is None:
             return False
         if self.autonomy_active():
@@ -178,6 +191,7 @@ class SharedState:
         self.ultrasonic = self._init('ultrasonic', 'UltrasonicSensor')
         self.mpu6050 = self._init('mpu6050', 'MPU6050Controller')
         self.ds4 = self._init('ds4', 'DS4Controller')
+        self.refresh_waiting_led()      # старт без клиентов: ждём подключения
 
         # Мониторинг питания: тревога при низкой батарее — зуммер + мигание
         def _battery_alarm():
@@ -250,6 +264,8 @@ class SharedState:
                 logger.info(f'[State] {attr} recovered (auto-retry v1.4.0)')
         if recovered:
             self._recreate_dependents()
+            if 'leds' in recovered:
+                self.refresh_waiting_led()   # лента ожила: нет клиентов — мигаем синим
         return recovered
 
     def _hw_retry_loop(self):
@@ -353,6 +369,11 @@ class SharedState:
             'auto_active': self.autonomous.is_active() if self.autonomous else False,
             'auto_mode': self.autonomous._current_mode if self.autonomous else 'none',
             'radar_data': self.autonomous.get_radar_data() if self.autonomous else [],
+            # v1.6.10: состояние режима (лабиринт: решение, дистанции, угол) и
+            # сектор радара — UI рисует веер и подсказку направления
+            'auto_info': (self.autonomous.get_auto_info()
+                          if self.autonomous and self.autonomous.is_active() else {}),
+            'radar_sector': RADAR_SECTOR_DEG,
             'ultra_ok': ultra_ok,
             'steady_active': self.steady.active if self.steady else False,
             'speed': self.speed,

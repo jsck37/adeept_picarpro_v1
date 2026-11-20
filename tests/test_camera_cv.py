@@ -63,42 +63,122 @@ class TestLineDetection:
         cv_thread._process(frame)
         assert got and got[0][0] > 0
 
+    def test_gray_floor_without_line_is_not_a_line(self, cv_thread):
+        """Раньше порог Оцу делил шум пополам и выдавал ложную линию."""
+        rng = np.random.default_rng(3)
+        frame = np.clip(rng.normal(150, 8, (480, 640, 3)), 0, 255).astype(np.uint8)
+        cv_thread.cv_mode = 'findlineCV'
+        cv_thread._process(frame)
+        assert cv_thread.line_pos == [0, 0]
+
+    def test_shadow_gradient_black_line(self, cv_thread):
+        """Белый пол с градиентом освещённости + шум, линия 30 px."""
+        rng = np.random.default_rng(4)
+        xs = np.linspace(0.55, 1.0, 640)[None, :, None]
+        frame = (np.full((480, 640, 3), 235.0) * xs
+                 + rng.normal(0, 6, (480, 640, 3)))
+        frame[:, 400:430] = 20
+        frame = np.clip(frame, 0, 255).astype(np.uint8)
+        cv_thread.cv_mode = 'findlineCV'
+        cv_thread._process(frame)
+        p1, p2 = cv_thread.line_pos
+        assert abs(p1 - 415) <= 6 and abs(p2 - 415) <= 6, (p1, p2)
+
+    def test_dark_border_does_not_shift_line(self, cv_thread):
+        """Тёмный край листа слева + линия: берём ОДНУ линию, не среднее
+        между краем и линией (раньше позиция лежала «в пустоте»)."""
+        frame = white_frame()
+        frame[:, 0:25] = 30            # тёмная кромка
+        frame[:, 300:330] = 0          # линия
+        cv_thread.cv_mode = 'findlineCV'
+        cv_thread._process(frame)
+        p1, p2 = cv_thread.line_pos
+        assert abs(p1 - 315) <= 6 and abs(p2 - 315) <= 6, (p1, p2)
+
+    def test_slanted_line_gives_angle(self, cv_thread):
+        frame = white_frame()
+        for y in range(480):
+            x = int(200 + (440 - y) * 0.5 * -1 + 40)   # линия уходит вправо вверх
+            frame[y, max(0, x - 10):max(0, x + 10)] = 0
+        cv_thread.cv_mode = 'findlineCV'
+        cv_thread._process(frame)
+        p1, p2 = cv_thread.line_pos
+        assert p1 > 0 and p2 > 0 and p1 != p2
+        assert cv_thread.line_angle != 0
+
     def test_no_line_zero_pos(self, cv_thread):
         cv_thread.cv_mode = 'findlineCV'
         cv_thread._process(white_frame())
         assert cv_thread.line_pos == [0, 0]
 
 
-class TestHandDetection:
-    def test_skin_square_detected(self, cv_thread):
-        """RGB-квадрат цвета кожи на сером фоне -> hand_detected."""
-        frame = np.full((64, 64, 3), 120, dtype=np.uint8)
-        frame[16:48, 16:48] = (180, 150, 120)  # RGB телесный
-        cv_thread.set_hand_color(0, 30, 50, 25, 255, 255)
-        cv_thread.cv_mode = 'trackHand'
-        cv_thread._process(frame)
-        assert cv_thread.hand_detected is True
-        cx, cy = cv_thread.hand_pos
-        assert 20 <= cx <= 44
-        assert 20 <= cy <= 44
+class _StubPose:
+    """Подмена PoseDetector: без ONNX, результат задаёт тест."""
 
-    def test_no_hand_on_background(self, cv_thread):
-        frame = np.full((64, 64, 3), 120, dtype=np.uint8)
-        cv_thread.set_hand_color(0, 30, 50, 25, 255, 255)
+    def __init__(self, persons=None, hand=None, loaded=True):
+        self.loaded = loaded
+        self.persons = persons or []
+        self.hand = hand
+        self.last_infer_ms = 5.0
+        self._lock = __import__('threading').Lock()
+        self.loads = 0
+
+    def load(self):
+        self.loads += 1
+        return self.loaded
+
+    def should_infer(self):
+        return True
+
+    def infer(self, frame):
+        return self.persons
+
+    def draw(self, disp, persons, hand):
+        return disp
+
+
+class TestHandDetection:
+    """v1.6.10: режим Hand — YOLO-pose (запястья), а не цвет кожи (HSV)."""
+
+    def test_hand_found_from_pose(self, cv_thread):
+        hand = {'x': 200.0, 'y': 120.0, 'side': 'right', 'conf': 0.9,
+                'scale': 300.0, 'raised': True, 'person': 0}
+        cv_thread.pose = _StubPose(persons=[{'box': [0, 0, 100, 300], 'kps': []}],
+                                   hand=hand)
+        got = []
+        cv_thread.on_hand_found = lambda pos, area: got.append((pos, area))
+        cv_thread.cv_mode = 'trackHand'
+        cv_thread._process(np.full((480, 640, 3), 120, dtype=np.uint8))
+        assert cv_thread.hand_detected is True
+        assert cv_thread.hand_pos == [200, 120]
+        assert got == [([200, 120], 300)]
+
+    def test_no_hand_reports_zero_area(self, cv_thread):
+        cv_thread.pose = _StubPose(persons=[], hand=None)
+        got = []
+        cv_thread.on_hand_found = lambda pos, area: got.append((pos, area))
+        cv_thread.cv_mode = 'trackHand'
+        cv_thread._process(np.full((480, 640, 3), 120, dtype=np.uint8))
+        assert cv_thread.hand_detected is False
+        assert got == [([0, 0], 0)]          # area == 0 — «руки нет»
+
+    def test_skin_colored_object_is_not_a_hand(self, cv_thread):
+        """Раньше телесный квадрат (или лицо, дерево) считался рукой."""
+        cv_thread.pose = _StubPose(persons=[], hand=None)
+        frame = np.full((480, 640, 3), 120, dtype=np.uint8)
+        frame[100:300, 100:300] = (180, 150, 120)
         cv_thread.cv_mode = 'trackHand'
         cv_thread._process(frame)
         assert cv_thread.hand_detected is False
 
-    def test_hand_callback_false_keeps_detection(self, cv_thread):
-        """v1.6.5: колбэк слежения, вернувший False, не сбрасывает
-        hand_detected (отключение по «встряске» убрано)."""
-        cv_thread.on_hand_found = lambda pos, area: False
-        frame = np.full((64, 64, 3), 120, dtype=np.uint8)
-        frame[16:48, 16:48] = (180, 150, 120)  # RGB телесный
-        cv_thread.set_hand_color(0, 30, 50, 25, 255, 255)
+    def test_missing_model_shows_message_overlay(self, cv_thread):
+        cv_thread.pose = _StubPose(loaded=False)
+        cv_thread.overlay_wanted = True
         cv_thread.cv_mode = 'trackHand'
-        cv_thread._process(frame)
-        assert cv_thread.hand_detected is True
+        cv_thread._process(np.full((480, 640, 3), 120, dtype=np.uint8))
+        assert cv_thread.hand_detected is False
+        assert cv_thread.get_overlay() is not None
+        assert cv_thread.pose.loads >= 1
 
 
 class TestFindColor:

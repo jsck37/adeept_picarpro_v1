@@ -210,9 +210,9 @@ var statusPending = null;   // статус, накопленный пока в�
 var servoDefs = [
   { id: 0, nameKey: 'servo_0', min: 30, max: 150, init: 90 },
   { id: 1, nameKey: 'servo_1', min: 0,  max: 180, init: 90 },
-  { id: 2, nameKey: 'servo_2', min: 80, max: 170, init: 90 },
+  { id: 2, nameKey: 'servo_2', min: 60, max: 170, init: 90 },
   // Клешня: наклон — канал 5, захват — канал 6.
-  { id: 5, nameKey: 'servo_5', min: 0,   max: 180, init: 180 },
+  { id: 5, nameKey: 'servo_5', min: 100, max: 150, init: 135 },
   { id: 6, nameKey: 'servo_6', min: 100, max: 180, init: 100 },
 ];
 // Лимиты синхронизируются с сервера (config.py SERVO_LIMITS) — только чтение.
@@ -613,31 +613,54 @@ function fetchConsoleHistory() {
 }
 
 var firstStatus = true;
-// v1.6.2: радар как в оригинальном приложении Adeept — сектор скана с
-// точками препятствий; точки приходят в статусе (radar_data).
-// v1.6.5: «нет эха» сервер шлёт как RADAR_MAX_CM (свободно) — рисуем такие
-// точки тускло-зелёными, препятствия — красными; при недоступном HC-SR04
-// выводим сообщение вместо пустого экрана.
-var RADAR_MAX_CM = 200;   // ULTRASONIC_MAX_DISTANCE (м) * 100
-var RADAR_SECTOR_DEG = 60;   // сектор скана: ±60° (см. _radar_scan)
+// Радар (v1.6.10, переписан). Сервер шлёт точки {angle, distance, clear, age}
+// и сектор скана (radar_sector). Рисуем: веер, свободное пространство (заливка
+// по профилю дистанций), препятствия — красные (старые точки блёкнут),
+// «нет эха» — зелёные кольца на внешней дуге, луч текущего угла скана и, в
+// режиме «Лабиринт», стрелку выбранного направления + текст решения.
+var RADAR_MAX_CM = 200;       // ULTRASONIC_MAX_DISTANCE (м) * 100
+var RADAR_SECTOR_DEG = 75;    // уточняется из status.radar_sector
+var RADAR_AGE_FADE_S = 12;    // точки старше — бледнеют
 var currentAutoMode = 'none';
-function drawRadar(points, offline) {
+var lastAutoInfo = {};
+function drawRadar(points, offline, info) {
   var cv = document.getElementById('radar-canvas');
   if (!cv || !cv.getContext) return;
   var ctx = cv.getContext('2d');
   var W = cv.width, H = cv.height;
-  var cx = W / 2, cy = H - 20, R = H - 40;
+  var cx = W / 2, cy = H - 20, R = H - 44;
   var sector = RADAR_SECTOR_DEG * Math.PI / 180;
+  function pt(angleDeg, cm) {       // угол: влево > 0 -> на канве левее центра
+    var a = -angleDeg * Math.PI / 180;
+    var r = R * Math.min(cm, RADAR_MAX_CM) / RADAR_MAX_CM;
+    return [cx + Math.sin(a) * r, cy - Math.cos(a) * r];
+  }
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#0b1a10';
   ctx.fillRect(0, 0, W, H);
-  // дистанционные дуги 50/100/150/200 см
+  var pts = (points || []).filter(function(p) {
+    return p && p.distance !== null && p.distance !== undefined && p.distance > 0;
+  });
+  // свободное пространство: многоугольник «центр -> дальность по каждому углу»
+  if (pts.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    pts.forEach(function(p) { var q = pt(p.angle || 0, p.distance); ctx.lineTo(q[0], q[1]); });
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(80,200,120,0.12)';
+    ctx.fill();
+  }
+  // дуги дальности 50/100/150/200 см с подписями
   ctx.strokeStyle = 'rgba(80,200,120,0.35)';
+  ctx.fillStyle = 'rgba(160,230,180,0.55)';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'left';
   ctx.lineWidth = 1;
   [50, 100, 150, 200].forEach(function(cm) {
     ctx.beginPath();
     ctx.arc(cx, cy, R * cm / RADAR_MAX_CM, -Math.PI / 2 - sector, -Math.PI / 2 + sector);
     ctx.stroke();
+    ctx.fillText(cm, cx + 3, cy - R * cm / RADAR_MAX_CM + 9);
   });
   // границы сектора и центральный луч
   [-1, 0, 1].forEach(function(k) {
@@ -647,20 +670,55 @@ function drawRadar(points, offline) {
     ctx.strokeStyle = k === 0 ? 'rgba(80,200,120,0.5)' : 'rgba(80,200,120,0.35)';
     ctx.stroke();
   });
-  // точки, увиденные ультразвуком: препятствия — красные, «свободно» —
-  // тускло-зелёные у внешней дуги
-  (points || []).forEach(function(p) {
-    if (p.distance === null || p.distance === undefined || p.distance <= 0) return;
-    var d = Math.min(p.distance, RADAR_MAX_CM);
-    var a = (p.angle || 0) * Math.PI / 180;
-    var x = cx + Math.sin(a) * R * d / RADAR_MAX_CM;
-    var y = cy - Math.cos(a) * R * d / RADAR_MAX_CM;
-    var free = p.distance >= RADAR_MAX_CM - 2;
-    ctx.fillStyle = free ? 'rgba(80,200,120,0.45)' : '#ff5252';
-    ctx.beginPath();
-    ctx.arc(x, y, free ? 2 : 3.5, 0, Math.PI * 2);
-    ctx.fill();
+  // точки: препятствия — красные (чем старше, тем бледнее), «нет эха» — кольцо
+  pts.forEach(function(p) {
+    var q = pt(p.angle || 0, p.distance);
+    var fade = Math.max(0.25, 1 - (p.age || 0) / RADAR_AGE_FADE_S);
+    if (p.clear) {
+      ctx.strokeStyle = 'rgba(80,200,120,' + (0.7 * fade).toFixed(2) + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(q[0], q[1], 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = 'rgba(255,82,82,' + fade.toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(q[0], q[1], 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
+  info = info || {};
+  // луч текущего угла датчика (идёт скан)
+  if (info.radar_angle !== undefined && currentAutoMode !== 'none') {
+    var tip = pt(info.radar_angle, RADAR_MAX_CM);
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(tip[0], tip[1]);
+    ctx.stroke();
+  }
+  // лабиринт: куда решил ехать/поворачивать + текст состояния
+  if (currentAutoMode === 'mazeExit' && info.target_angle !== undefined && info.target_angle !== null
+      && (info.state === 'forward' || info.state === 'turn_primary' || info.state === 'turn_secondary')) {
+    var a0 = pt(info.target_angle, 20), a1 = pt(info.target_angle, 110);
+    ctx.strokeStyle = '#ffd54f';
+    ctx.fillStyle = '#ffd54f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(a0[0], a0[1]);
+    ctx.lineTo(a1[0], a1[1]);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(a1[0], a1[1], 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (currentAutoMode === 'mazeExit' && info.state) {
+    ctx.fillStyle = (info.state === 'exit' || info.state === 'finish_line') ? '#69f0ae' : '#ffd54f';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(t('maze_state_' + info.state), 6, 14);
+  }
   // корпус робота
   ctx.fillStyle = '#4caf50';
   ctx.fillRect(cx - 5, cy - 3, 10, 6);
@@ -676,8 +734,7 @@ function drawRadar(points, offline) {
 var CV_LABEL_KEYS = {
   findlineCV: 'cv_label_line', trackHand: 'cv_label_hand',
   findColor: 'cv_label_color', watchDog: 'cv_label_watchdog',
-  yoloDetect: 'cv_label_yolo', yoloSeg: 'cv_label_yolo_seg',
-  yoloSemantic: 'cv_label_yolo_sem',
+  yoloSeg: 'cv_label_yolo_seg',
 };
 function setCvBadge(mode) {
   var badge = document.getElementById('cv-badge');
@@ -723,10 +780,13 @@ function updateStatus(d) {
     spdEl.classList.remove('turbo');
   }
   if (d.auto_mode !== undefined) currentAutoMode = d.auto_mode;
+  if (d.radar_sector) RADAR_SECTOR_DEG = d.radar_sector;
+  if (d.auto_info !== undefined) lastAutoInfo = d.auto_info || {};
+  var radarMode = currentAutoMode === 'radarScan' || currentAutoMode === 'mazeExit';
   var radarBox = document.getElementById('radar-box');
-  if (radarBox) radarBox.style.display = currentAutoMode === 'radarScan' ? 'block' : 'none';
-  if (d.radar_data) drawRadar(d.radar_data, d.ultra_ok === false);
-  else if (currentAutoMode === 'radarScan') drawRadar([], d.ultra_ok === false);
+  if (radarBox) radarBox.style.display = radarMode ? 'block' : 'none';
+  if (d.radar_data) drawRadar(d.radar_data, d.ultra_ok === false, lastAutoInfo);
+  else if (radarMode) drawRadar([], d.ultra_ok === false, lastAutoInfo);
   if (d.hw) {
     updateHardwareUI(d.hw);
     if (firstStatus) { firstStatus = false; }
@@ -737,16 +797,19 @@ function updateStatus(d) {
   // синхронизация углов с сервера (когда поле не в фокусе)
   if (d.servo_angles && Array.isArray(d.servo_angles)) {
     d.servo_angles.forEach(function(ang, sid) {
+      var def = servoDefById(sid);
+      if (!def || ang === null || ang === undefined) return;
+      // v1.6.10: def.cur — единственный источник «текущего угла» и для
+      // степперов, и для джойстика/стрелок камеры, поэтому он обновляется
+      // всегда (раньше — только если на странице есть поле ввода), иначе
+      // после режима «Рука» шаги камеры начинались с устаревшего угла.
+      var changed = Math.abs((def.cur || 0) - ang) >= 1;
+      if (!changed) return;
+      def.cur = ang;
       var inp = document.querySelector('input.servo-angle-input[data-servo="' + sid + '"]');
-      if (inp && document.activeElement !== inp) {
-        var def = servoDefById(sid);
-        if (def && Math.abs((def.cur || 0) - ang) >= 1) {
-          def.cur = ang;
-          inp.value = ang;
-          var val = document.querySelector('label .val[data-servo-val="' + sid + '"]');
-          if (val) val.textContent = ang + '\u00B0';
-        }
-      }
+      if (inp && document.activeElement !== inp) inp.value = ang;
+      var val = document.querySelector('label .val[data-servo-val="' + sid + '"]');
+      if (val) val.textContent = ang + '\u00B0';
     });
   }
   // статус Push Mode (толчок препятствий клешнёй по HC-SR04)
@@ -1185,12 +1248,17 @@ var wheelsStick = makeStick(joystickContainer, joystickKnob, 24, onWheelsMove, o
 var camJoystickContainer = document.getElementById('cam-joystick-container');
 var camJoystickKnob = document.getElementById('cam-joystick-knob');
 var camJoystickLabel = document.getElementById('cam-joystick-label');
-var camPan = 90, camTilt = 90;
-
+// v1.6.10: текущие углы камеры берутся из servoDefs (def.cur синхронизируется с
+// сервером), а не из отдельных переменных — иначе шаги начинались с устаревших
+// значений, а лимиты ловились лишь у стрелок.
+function camCur(id) {
+  var def = servoDefById(id);
+  return def && def.cur !== undefined ? def.cur : 90;
+}
 function camClamp(id, v) {
   var def = servoDefById(id);
   var lo = def ? def.min : 0, hi = def ? def.max : 180;
-  return Math.max(lo, Math.min(hi, v));
+  return PanelCore.clampAngle(v, lo, hi);
 }
 
 var camLastSent = { pan: 0, tilt: 0 };
@@ -1199,31 +1267,52 @@ function setCamera(newPan, newTilt) {
   // троттлинг: touchmove на телефоне стреляет до 120 раз/с — спам
   // командами серво давал дрожание камеры и нагрев (не чаще 25 Гц)
   var now = Date.now();
-  if (newPan !== camPan && now - camLastSent.pan > 40) {
-    sendCommand('servo', { id: 1, angle: newPan });
-    camPan = newPan;
+  if (newPan !== camCur(1) && now - camLastSent.pan > 40) {
+    sendServoAngle(1, newPan);
     camLastSent.pan = now;
   }
-  if (newTilt !== camTilt && now - camLastSent.tilt > 40) {
-    sendCommand('servo', { id: 2, angle: newTilt });
-    camTilt = newTilt;
+  if (newTilt !== camCur(2) && now - camLastSent.tilt > 40) {
+    sendServoAngle(2, newTilt);
     camLastSent.tilt = now;
   }
 }
 
+// Джойстик камеры — ШАГОВЫЙ: пока рычаг отклонён, камера двигается на 5° за тик
+// (CAM_STEP_MS), в сторону отклонения, строго в пределах лимитов серво.
+var CAM_STEP_DEG = 5;
+var CAM_STEP_MS = 150;
+var CAM_STICK_DEADZONE = 0.35;
+var camStickVec = { x: 0, y: 0 };
+var camStepTimer = null;
+
+function camStepOnce() {
+  var d = PanelCore.stickToCamStep(camStickVec.x, camStickVec.y, CAM_STICK_DEADZONE, CAM_STEP_DEG);
+  if (!d[0] && !d[1]) return;
+  var pan = camClamp(1, camCur(1) + d[0]);
+  var tilt = camClamp(2, camCur(2) + d[1]);
+  setCamera(pan, tilt);
+  setCamLabels(t('joy_cam_pos_fmt', {p: pan, t: tilt}));
+}
+function camStepStop() {
+  if (camStepTimer) { clearInterval(camStepTimer); camStepTimer = null; }
+  camStickVec = { x: 0, y: 0 };
+}
+
 function onCamMove(dx, dy, r) {
-  // v1.6.1: драг в ту же сторону, что стрелки (см. PanelCore.stickToCam):
-  // вверх — камера поднимается, вправо — панорама вправо (pan уменьшается).
-  var tgt = PanelCore.stickToCam(dx, dy, r);
-  var newPan = camClamp(1, tgt.pan);
-  var newTilt = camClamp(2, tgt.tilt);
-  setCamera(newPan, newTilt);
-  var txt = (Math.abs(dx) < 5 && Math.abs(dy) < 5)
-    ? t('joy_cam_default')
-    : t('joy_cam_pos_fmt', {p: newPan, t: newTilt});
-  setCamLabels(txt);
+  camStickVec = r ? { x: dx / r, y: dy / r } : { x: 0, y: 0 };
+  var active = Math.abs(camStickVec.x) > CAM_STICK_DEADZONE || Math.abs(camStickVec.y) > CAM_STICK_DEADZONE;
+  if (!active) {
+    if (camStepTimer) { clearInterval(camStepTimer); camStepTimer = null; }
+    setCamLabels(t('joy_cam_default'));
+    return;
+  }
+  if (!camStepTimer) {            // первый шаг — сразу, дальше по таймеру
+    camStepOnce();
+    camStepTimer = setInterval(camStepOnce, CAM_STEP_MS);
+  }
 }
 function onCamEnd() {
+  camStepStop();
   setCamLabels(t('joy_cam_default'));
 }
 
@@ -1323,7 +1412,7 @@ document.addEventListener('keydown', function(e) {
   }
   var ck = PanelCore.camKeyDelta(e.key.length === 1 ? e.key.toLowerCase() : e.key);
   if (ck) {
-    setCamera(camClamp(1, camPan + ck[0]), camClamp(2, camTilt + ck[1]));
+    setCamera(camClamp(1, camCur(1) + ck[0]), camClamp(2, camCur(2) + ck[1]));
     e.preventDefault();
     return;
   }
@@ -1369,7 +1458,7 @@ function emergencyStop() {
 }
 
 // ---- Компьютерное зрение: режимы с оверлеем поверх камеры ---------------
-// (Color, CV Line, Hand, WatchDog, Yolo*). trackLineCV/trackHand/findColor/
+// (Color, CV Line, Hand, WatchDog, YOLO Mask). trackLineCV/trackHand/findColor/
 // watchDog стартуют как авто-режимы с камерой — сервер сам вешает оверлей.
 document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
   btn.addEventListener('click', function() {
@@ -1389,7 +1478,7 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
     } else if (mode === 'trackHand') {
       setCvBadge(mode);
       sendCommand('auto', { func: 'trackHand' });
-      if (handRow) handRow.style.display = '';
+      if (handRow) handRow.style.display = 'none';   // v1.6.10: рука — YOLO-pose, HSV не нужен
     } else if (mode === 'findColor') {
       setCvBadge(mode);
       sendCommand('auto', { func: 'findColor' });
@@ -1399,7 +1488,7 @@ document.querySelectorAll('.cv-btn[data-cv]').forEach(function(btn) {
       sendCommand('auto', { func: 'watchDog' });
       if (handRow) handRow.style.display = 'none';
     } else {
-      // чистые CV-режимы (YOLO*): только оверлей, робот стоит
+      // чистые CV-режимы (YOLO Mask): только оверлей, робот стоит
       setCvBadge(mode);
       sendCommand('auto', { func: 'stop' });
       sendCommand('cv_mode', { mode: mode });
@@ -1545,8 +1634,9 @@ document.querySelectorAll('#buzzer-group .gbtn').forEach(function(btn) {
 updateCraneArmUI();
 updateCraneGripUI();
 
-// ---- Автономные режимы (v1.6.8): Radar, Auto Drive, IR Line, Distance,
-// Grab, Maze U. Режимы с оверлеем камеры вынесены в «Компьютерное зрение».
+// ---- Автономные режимы (v1.6.10): Radar, Maze Exit, IR Line.
+// (Auto Drive / Distance / Grab / Maze U удалены.) Режимы с оверлеем камеры
+// вынесены в «Компьютерное зрение».
 // Кнопка «Stop» заменена на «АВАРИЙНЫЙ СТОП» (estop) — задание v1.6.8.
 document.querySelectorAll('#auto-group .gbtn').forEach(function(btn) {
   btn.addEventListener('click', function() {

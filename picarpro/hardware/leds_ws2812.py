@@ -75,6 +75,8 @@ class LEDController:
         self._show_lock = threading.Lock()  # вывод не терпит параллельных записей
         self._gen = 0                       # поколение анимации (смена режима)
         self._power_scale = 1.0             # режим экономии: множитель яркости
+        self._waiting = False               # нет клиентов: мигаем синим
+        self._saved = ('off', (255, 0, 0))  # что вернуть, когда клиент подключится
         self._running = True
         self._thread = None
         self._pixels = [(0, 0, 0)] * LED_COUNT
@@ -246,7 +248,35 @@ class LEDController:
         if self._mode != 'off':
             self._show()
 
+    def set_waiting(self, on):
+        """«Ожидание подключения» (v1.6.10): пока к роботу не подключено ни
+        одно устройство (счётчик «Устройства» = 0), нижняя подсветка мигает
+        СИНИМ. Прежний режим подсветки запоминается (и обновляется, если его
+        меняют в это время, например геймпадом) и восстанавливается при первом
+        подключении."""
+        if not self._initialized:
+            return
+        on = bool(on)
+        if on == self._waiting:
+            return
+        if on:
+            self._saved = (self._mode, self._color)
+            self._waiting = True
+            self._apply_mode('waiting', (0, 0, 255))
+        else:
+            self._waiting = False
+            mode, color = self._saved
+            self._apply_mode(mode, color)
+
     def set_mode(self, mode, color=(255, 0, 0)):
+        # Пока идёт «ожидание подключения», обычные режимы лишь запоминаются.
+        # Исключение — 'police' (тревога низкого заряда/аварии): она важнее.
+        if self._waiting and mode != 'police':
+            self._saved = (mode, color)
+            return
+        self._apply_mode(mode, color)
+
+    def _apply_mode(self, mode, color=(255, 0, 0)):
         self._color = color
         with self._show_lock:
             self._gen += 1          # все кадры старой анимации теперь «чужие»
@@ -283,6 +313,17 @@ class LEDController:
                     fn(gen)
             except Exception:
                 self._sleep(0.1)
+
+    def _anim_waiting(self, gen):
+        """Мигающий синий: 0,5 с вкл / 0,5 с выкл."""
+        r, g, b = self._color
+        while self._alive(gen, 'waiting'):
+            self.fill(r, g, b, gen)
+            self._sleep(0.5)
+            if not self._alive(gen, 'waiting'):
+                return
+            self.fill(0, 0, 0, gen)
+            self._sleep(0.5)
 
     def _anim_breath(self, gen):
         r, g, b = self._color

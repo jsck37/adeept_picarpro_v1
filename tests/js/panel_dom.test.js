@@ -284,28 +284,121 @@ test('servo-control: каналы 3 и 4 убраны, клешня (5,6) на �
   assert.ok(inputs.includes('6'), 'нет захвата клешни');
 });
 
-test('режимы: CV-режимы в окне CV, автономные — в Autonomous; Grab/Maze не «Unknown mode»', { skip: !JSDOM }, () => {
+test('режимы: в Autonomous — Radar/Maze Exit/IR Line, в CV — Mask без YOLO/YOLO Sem', { skip: !JSDOM }, () => {
   const { ws, doc } = boot();
   const autoBtns = [...doc.querySelectorAll('#auto-group .gbtn')].map((b) => b.dataset.auto);
-  // в Autonomous — только режимы без оверлея
-  assert.ok(autoBtns.includes('radarScan') && autoBtns.includes('automatic')
-    && autoBtns.includes('trackLine') && autoBtns.includes('keepDistance')
-    && autoBtns.includes('obstacleGrab') && autoBtns.includes('mazeU'));
-  assert.ok(!autoBtns.includes('findColor') && !autoBtns.includes('trackHand')
-    && !autoBtns.includes('watchDog') && !autoBtns.includes('trackLineCV'),
-    'CV-режимы должны быть в окне Computer Vision');
+  assert.deepStrictEqual([...autoBtns].sort(), ['mazeExit', 'radarScan', 'trackLine']);
+  for (const removed of ['automatic', 'keepDistance', 'obstacleGrab', 'mazeU']) {
+    assert.ok(!autoBtns.includes(removed), 'режим удалён: ' + removed);
+  }
   assert.ok(!autoBtns.includes('stop'), 'Stop заменён на отдельную аварийную кнопку');
-  // CV-режимы
+  // CV-режимы: YOLO (рамки) и YOLO Sem удалены, «YOLO Mask» (yoloSeg) остался
   const cvBtns = [...doc.querySelectorAll('.cv-btn[data-cv]')].map((b) => b.dataset.cv);
-  for (const m of ['none', 'findColor', 'findlineCV', 'trackHand', 'watchDog',
-                   'yoloDetect', 'yoloSeg', 'yoloSemantic']) {
+  for (const m of ['none', 'findColor', 'findlineCV', 'trackHand', 'watchDog', 'yoloSeg']) {
     assert.ok(cvBtns.includes(m), 'нет CV-режима ' + m);
   }
-  // клик по «Захват» уходит в auto (раньше сервер отвечал Unknown mode)
-  doc.querySelector('[data-auto="obstacleGrab"]').click();
-  assert.deepStrictEqual(lastCmd(ws, 'auto').params, { func: 'obstacleGrab' });
-  doc.querySelector('[data-auto="mazeU"]').click();
-  assert.deepStrictEqual(lastCmd(ws, 'auto').params, { func: 'mazeU' });
+  assert.ok(!cvBtns.includes('yoloDetect') && !cvBtns.includes('yoloSemantic'));
+  doc.querySelector('[data-auto="mazeExit"]').click();
+  assert.deepStrictEqual(lastCmd(ws, 'auto').params, { func: 'mazeExit' });
+  doc.querySelector('[data-cv="yoloSeg"]').click();
+  assert.deepStrictEqual(lastCmd(ws, 'cv_mode').params, { mode: 'yoloSeg' });
+});
+
+test('рука: HSV-ползунки не нужны (YOLO-pose), у «Цвет» — остаются', { skip: !JSDOM }, () => {
+  const { doc } = boot();
+  const row = doc.getElementById('hand-color-row');
+  doc.querySelector('[data-cv="findColor"]').click();
+  assert.notStrictEqual(row.style.display, 'none');
+  doc.querySelector('[data-cv="trackHand"]').click();
+  assert.strictEqual(row.style.display, 'none');
+});
+
+test('радар виден в режимах radarScan и mazeExit, скрыт в остальных', { skip: !JSDOM }, () => {
+  const { ws, doc } = boot();
+  const box = doc.getElementById('radar-box');
+  for (const [mode, shown] of [['radarScan', 'block'], ['mazeExit', 'block'],
+                               ['trackLine', 'none'], ['none', 'none']]) {
+    ws.msg({ type: 'status', delta: false, data: { auto_mode: mode, radar_data: [], radar_sector: 75 } });
+    assert.strictEqual(box.style.display, shown, mode);
+  }
+});
+
+test('карточка Missions находится в левой колонке', { skip: !JSDOM }, () => {
+  const { doc } = boot();
+  const left = doc.querySelector('.col-left');
+  const right = doc.querySelector('.col-right');
+  assert.ok(left.contains(doc.getElementById('card-missions')), 'Missions должна быть слева');
+  assert.ok(!right.contains(doc.getElementById('card-missions')));
+});
+
+test('лимиты: CAM TILT 60-170, CRANE TILT 100-150 (до прихода лимитов с сервера)', { skip: !JSDOM }, () => {
+  const { w } = boot();
+  const lim = (id) => JSON.parse(w.eval(`JSON.stringify((function(d){return {min:d.min,max:d.max}})(servoDefById(${id})))`));
+  assert.deepStrictEqual(lim(2), { min: 60, max: 170 });
+  assert.deepStrictEqual(lim(5), { min: 100, max: 150 });
+  // степпер не пропускает угол за лимит
+  w.eval('sendServoAngle(2, 10)');
+  assert.strictEqual(w.eval('servoDefById(2).cur'), 60);
+  w.eval('sendServoAngle(5, 200)');
+  assert.strictEqual(w.eval('servoDefById(5).cur'), 150);
+});
+
+const servoCmds = (ws, id) => ws.sent.filter((m) => m.cmd === 'servo' && m.params.id === id);
+
+test('джойстик камеры: шаг 5° за тик, а не мгновенный прыжок', { skip: !JSDOM }, () => {
+  const { w, ws } = boot();
+  w.eval('servoDefById(2).cur = 90; servoDefById(1).cur = 90; camStickVec = {x: 0, y: -1};');
+  w.eval('camStepOnce()');
+  assert.deepStrictEqual(servoCmds(ws, 2).map((m) => m.params.angle), [95]);   // вверх = +5
+  w.eval('camLastSent.tilt = 0; camStepOnce()');
+  assert.deepStrictEqual(servoCmds(ws, 2).map((m) => m.params.angle), [95, 100]);
+  // вправо = pan -5; по диагонали двигаются обе оси
+  w.eval('camStickVec = {x: 1, y: 1}; camLastSent.pan = 0; camLastSent.tilt = 0; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 1).slice(-1)[0].params.angle, 85);
+  assert.strictEqual(servoCmds(ws, 2).slice(-1)[0].params.angle, 95);          // 100 - 5
+});
+
+test('джойстик камеры: мёртвая зона не двигает камеру', { skip: !JSDOM }, () => {
+  const { w, ws } = boot();
+  w.eval('servoDefById(2).cur = 90; camStickVec = {x: 0.2, y: -0.3}; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 2).length + servoCmds(ws, 1).length, 0);
+});
+
+test('джойстик камеры: шаги упираются в лимиты (tilt 170, pan 0/180)', { skip: !JSDOM }, () => {
+  const { w, ws } = boot();
+  w.eval('servoDefById(2).cur = 168; camStickVec = {x: 0, y: -1}; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 2).slice(-1)[0].params.angle, 170);        // не 173
+  const n = servoCmds(ws, 2).length;
+  w.eval('camLastSent.tilt = 0; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 2).length, n, 'за лимитом команда не уходит');
+  w.eval('servoDefById(2).cur = 62; camStickVec = {x: 0, y: 1}; camLastSent.tilt = 0; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 2).slice(-1)[0].params.angle, 60);         // нижний лимит
+});
+
+test('джойстик камеры: учитывает лимиты, пришедшие с сервера', { skip: !JSDOM }, () => {
+  const { w, ws } = boot();
+  w.eval('applyServoLimits({"2": {min: 80, max: 120}})');
+  w.eval('servoDefById(2).cur = 118; camStickVec = {x: 0, y: -1}; camStepOnce()');
+  assert.strictEqual(servoCmds(ws, 2).slice(-1)[0].params.angle, 120);
+});
+
+test('угол камеры берётся с сервера: шаги стартуют от реального положения', { skip: !JSDOM }, () => {
+  const { w, ws } = boot();
+  const angles = [90, 90, 90, 90, 90, 135, 90];
+  angles[2] = 140;                                  // режим «Рука» увёл камеру на 140°
+  ws.msg({ type: 'status', delta: false, data: { servo_angles: angles } });
+  w.eval('camStickVec = {x: 0, y: 1}; camStepOnce()');                         // вниз = -5
+  assert.strictEqual(servoCmds(ws, 2).slice(-1)[0].params.angle, 135);
+});
+
+test('джойстик камеры: таймер шагов запускается при отклонении и снимается при отпускании', { skip: !JSDOM }, () => {
+  const { w } = boot();
+  w.eval('onCamMove(0, -20, 20)');                                             // вверх, вне мёртвой зоны
+  assert.strictEqual(w.eval('camStepTimer !== null'), true);
+  w.eval('onCamEnd()');
+  assert.strictEqual(w.eval('camStepTimer === null'), true);
+  w.eval('onCamMove(1, 1, 20)');                                               // в мёртвой зоне
+  assert.strictEqual(w.eval('camStepTimer === null'), true);
 });
 
 test('аварийный стоп: кнопка в Autonomous и в шапке отправляют estop', { skip: !JSDOM }, () => {

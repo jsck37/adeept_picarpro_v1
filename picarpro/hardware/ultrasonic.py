@@ -3,7 +3,8 @@ from picarpro.logger import logger
 from config import (ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
                     ULTRASONIC_MAX_DISTANCE, ULTRASONIC_ECHO_TIMEOUT_S,
                     ULTRASONIC_IDLE_INTERVAL_S, ULTRASONIC_ACTIVE_INTERVAL_S,
-                    ULTRASONIC_STALE_S)
+                    ULTRASONIC_STALE_S, ULTRASONIC_PING_SAMPLES,
+                    ULTRASONIC_PING_GAP_S, ULTRASONIC_USE_EDGE_EVENTS)
 
 try:
     import RPi.GPIO as GPIO
@@ -40,6 +41,8 @@ class UltrasonicSensor:
         self._demand_lock = threading.Lock()
         self._measure_lock = threading.Lock()   # один замер за раз
         self._wake = threading.Event()
+        self._hold = 0                          # >0: фоновый опрос приостановлен (радар)
+        self._hold_lock = threading.Lock()
         if not _HAS_GPIO:
             logger.warning('[Ultrasonic] RPi.GPIO not available')
             return
@@ -76,34 +79,38 @@ class UltrasonicSensor:
     def _measure(self):
         """Одно измерение дистанции (см) или None при отсутствии эха.
 
-        Ожидание эха — событийное (GPIO.wait_for_edge, нулевая загрузка CPU);
-        для сред без wait_for_edge (фейки в тестах) остаётся опрос.
+        v1.6.10: эхо ловится ОПРОСОМ пина по time.perf_counter() (до ~30 мс
+        занятого ожидания). GPIO.wait_for_edge на Raspberry Pi перенастраивает
+        детектор фронтов на каждый вызов и «съедает» миллисекунды — это давало
+        ошибку в несколько сантиметров и пропуски эха на радаре. Прежнее
+        поведение — ULTRASONIC_USE_EDGE_EVENTS = True.
         """
         GPIO.output(ULTRASONIC_TRIGGER, GPIO.HIGH)
         time.sleep(0.00001)
         GPIO.output(ULTRASONIC_TRIGGER, GPIO.LOW)
         wait_edge = getattr(GPIO, 'wait_for_edge', None)
-        if wait_edge is not None:
+        if ULTRASONIC_USE_EDGE_EVENTS and wait_edge is not None:
             timeout_ms = int(ULTRASONIC_ECHO_TIMEOUT_S * 1000)
             if wait_edge(ULTRASONIC_ECHO, GPIO.RISING,
                          timeout=timeout_ms) is None:
                 return None
-            t_start = time.time()
+            t_start = time.perf_counter()
             if wait_edge(ULTRASONIC_ECHO, GPIO.FALLING,
                          timeout=timeout_ms) is None:
                 return None
-            t_end = time.time()
+            t_end = time.perf_counter()
         else:
-            deadline = time.time() + 0.03
+            clock = time.perf_counter
+            deadline = clock() + 0.03
             while GPIO.input(ULTRASONIC_ECHO) == 0:
-                if time.time() > deadline:
+                if clock() > deadline:
                     return None
-            t_start = time.time()
-            deadline = time.time() + 0.03
+            t_start = clock()
+            deadline = t_start + 0.03
             while GPIO.input(ULTRASONIC_ECHO) == 1:
-                if time.time() > deadline:
+                if clock() > deadline:
                     return None
-            t_end = time.time()
+            t_end = clock()
         return round((t_end - t_start) * 17150.0, 1)
 
     def _store(self, d):
@@ -126,6 +133,8 @@ class UltrasonicSensor:
             self._wake.clear()
             if not self._running:
                 break
+            if self._hold:
+                continue                  # радар сам управляет пингами
             try:
                 with self._measure_lock:
                     self._store(self._measure())
@@ -150,6 +159,47 @@ class UltrasonicSensor:
                 break
             time.sleep(0.03)
         return result
+
+    def hold(self):
+        """Приостановить фоновый опрос (радар качает датчик по углам: чужие
+        пинги между его замерами дают перекрёстное эхо)."""
+        with self._hold_lock:
+            self._hold += 1
+
+    def unhold(self):
+        with self._hold_lock:
+            self._hold = max(0, self._hold - 1)
+        self._wake.set()
+
+    def measure_median(self, samples=None, gap=None):
+        """Медиана нескольких пингов -> (дистанция см | None, число валидных).
+
+        Для радара (v1.6.10): один пинг HC-SR04 «срывается» на косых и мягких
+        поверхностях, медиана из 3 это отсекает. «Нет эха» остаётся None
+        (неизвестно / дальше предела), а НЕ подменяется прошлым значением с
+        другого угла, как было. Кэш _distance (фронтальный) не трогаем —
+        радар измеряет под разными углами.
+        """
+        if not self._initialized:
+            return None, 0
+        n = max(1, int(samples or ULTRASONIC_PING_SAMPLES))
+        pause = ULTRASONIC_PING_GAP_S if gap is None else gap
+        max_cm = ULTRASONIC_MAX_DISTANCE * 100
+        vals = []
+        for k in range(n):
+            try:
+                with self._measure_lock:
+                    d = self._measure()
+            except Exception:
+                d = None
+            if d is not None and 0 < d <= max_cm:
+                vals.append(d)
+            if k < n - 1:
+                time.sleep(pause)
+        if not vals:
+            return None, 0
+        vals.sort()
+        return vals[len(vals) // 2], len(vals)
 
     # ---- чтение ----------------------------------------------------------
     def get_last_distance(self):

@@ -76,6 +76,7 @@ async def ws_handler(state, ws, path=None):
             return
 
     state.ws_clients.add(ws)
+    state.refresh_waiting_led()          # устройство подключилось: синее мигание выкл
     meta = {'id': f'ws{next(_conn_counter)}', 'visible': True,
             'last': None, 'full_ts': 0.0, 'sent_ts': 0.0}
     state.ws_meta[ws] = meta

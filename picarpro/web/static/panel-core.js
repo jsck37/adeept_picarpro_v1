@@ -79,6 +79,26 @@
     };
   }
 
+  // Камера с джойстика, ШАГОВЫЙ режим (v1.6.10). Раньше положение рычага
+  // напрямую задавало угол серво (абсолютно), и камера «прыгала» мгновенно,
+  // а рабочий диапазон ±30° не доходил до реальных лимитов. Теперь пока рычаг
+  // отклонён за мёртвую зону, камера двигается на step° за каждый тик
+  // (как стрелки клавиатуры и стик DS4). nx, ny — отклонение -1..1 (y вниз).
+  // Возвращает [dPan, dTilt]; направления — как у camKeyDelta:
+  // вправо = pan -step, вверх = tilt +step.
+  function stickToCamStep(nx, ny, deadzone, step) {
+    var dz = (deadzone === undefined) ? 0.35 : deadzone;
+    var st = (step === undefined) ? 5 : step;
+    var dPan = nx > dz ? -st : (nx < -dz ? st : 0);
+    var dTilt = ny < -dz ? st : (ny > dz ? -st : 0);
+    return [dPan, dTilt];
+  }
+
+  // Угол внутри лимитов серво (min/max приходят с сервера из SERVO_LIMITS).
+  function clampAngle(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
   // Набор зажатых логических кнопок -> команда движения.
   // Раньше отпускание ЛЮБОЙ клавиши посылало stop, даже если другая ещё
   // зажата, а W+D не давало диагональ.
@@ -119,6 +139,7 @@
     mergeStatus: mergeStatus, reconnectDelay: reconnectDelay,
     vectorToDir: vectorToDir, keyAction: keyAction, combineKeys: combineKeys,
     camKeyDelta: camKeyDelta, stickToCam: stickToCam,
+    stickToCamStep: stickToCamStep, clampAngle: clampAngle,
     makeClientId: makeClientId, driverState: driverState
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

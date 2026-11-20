@@ -116,3 +116,22 @@ test('makeClientId уникален и безопасен для заголов�
   assert.notStrictEqual(a, b);
   assert.match(a, /^[a-z0-9]{3,30}$/);
 });
+
+
+test('stickToCamStep: шаг 5° в сторону отклонения, мёртвая зона, диагональ', () => {
+  const f = C.stickToCamStep;
+  assert.deepStrictEqual(f(0, 0), [0, 0]);
+  assert.deepStrictEqual(f(0.3, -0.34), [0, 0]);          // внутри мёртвой зоны 0.35
+  assert.deepStrictEqual(f(1, 0), [-5, 0]);               // вправо: pan -5
+  assert.deepStrictEqual(f(-1, 0), [5, 0]);               // влево: pan +5
+  assert.deepStrictEqual(f(0, -1), [0, 5]);               // вверх: tilt +5
+  assert.deepStrictEqual(f(0, 1), [0, -5]);               // вниз: tilt -5
+  assert.deepStrictEqual(f(0.8, 0.8), [-5, -5]);          // диагональ — обе оси
+  assert.deepStrictEqual(f(1, 0, 0.35, 10), [-10, 0]);    // свой шаг
+});
+
+test('clampAngle: значение зажимается лимитами', () => {
+  assert.strictEqual(C.clampAngle(200, 60, 170), 170);
+  assert.strictEqual(C.clampAngle(10, 60, 170), 60);
+  assert.strictEqual(C.clampAngle(100, 100, 150), 100);
+});

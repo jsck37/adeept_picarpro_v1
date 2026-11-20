@@ -222,7 +222,7 @@ class TestAutonomousV150:
     def test_fast_mode_switch_runs_only_new_mode(self, clean_state):
         ctrl = clean_state.autonomous
         clean_state.ultrasonic._distance = 100.0
-        assert ctrl.start('keepDistance')[0]
+        assert ctrl.start('mazeExit')[0]
         time.sleep(0.15)
         assert ctrl.start('radarScan')[0]
         assert wait_for(lambda: ctrl._current_mode == 'radarScan', 1.0)
@@ -230,22 +230,6 @@ class TestAutonomousV150:
         ctrl.stop()
         assert wait_for(lambda: not ctrl.is_active(), 2.0)
         assert ctrl._ctx is None or not ctrl._ctx.alive
-
-    def test_keep_distance_proportional(self, clean_state, fake_gpio):
-        from config import MOTOR_A_EN
-        ctrl = clean_state.autonomous
-        reading = [30.0]                            # управляем «эхом» датчика
-        clean_state.ultrasonic._measure = lambda: reading[0]
-        ctrl.start('keepDistance')                  # цель 20 см, сейчас 30 -> вперёд
-        assert wait_for(
-            lambda: fake_gpio.pwm_for(MOTOR_A_EN).duty_cycle > 0, 2.0)
-        reading[0] = 20.0                           # на цели -> стоим
-        assert wait_for(
-            lambda: fake_gpio.pwm_for(MOTOR_A_EN).duty_cycle == 0, 3.0)
-        reading[0] = 10.0                           # слишком близко -> назад
-        assert wait_for(
-            lambda: fake_gpio.pwm_for(MOTOR_A_EN).duty_cycle > 0, 3.0)
-        ctrl.stop()
 
     def test_unknown_distance_means_stop(self, clean_state, fake_gpio):
         from config import MOTOR_A_EN
@@ -255,7 +239,7 @@ class TestAutonomousV150:
             raise OSError('sensor gone')
         clean_state.ultrasonic._measure = _broken
         clean_state.ultrasonic._distance = 0.0       # данных нет
-        ctrl.start('automatic')
+        ctrl.start('mazeExit')
         time.sleep(0.5)
         assert fake_gpio.pwm_for(MOTOR_A_EN).duty_cycle == 0   # слепыми не едем
         ctrl.stop()
@@ -265,62 +249,6 @@ class TestAutonomousV150:
         ctrl = clean_state.autonomous
         assert ctrl._spd(5) >= AUTO_MIN_SPEED
         assert ctrl._spd(0) == 0
-
-    def test_evade_turns_to_freer_side(self, monkeypatch):
-        """v1.6.2: развороты объезда — ДУГИ (Аккерман). Направление «осмотра»
-        видно по вывороту руля: осмотр вправо (30°), осмотр влево (150°),
-        довод до свободной стороны (влево — 150)."""
-        import picarpro.drive as dr
-        import picarpro.functions.autonomous as au
-        monkeypatch.setattr(au, 'AUTO_EVADE_BACKUP_S', 0.0)
-        monkeypatch.setattr(dr, 'AUTO_ARC_RATE_DPS', 100000.0)  # дуги мгновенны
-
-        class _RecServos:
-            def __init__(self):
-                self.calls = []
-
-            def set_angle(self, sid, angle):
-                self.calls.append((sid, angle))
-                return True
-
-        rec = _RecMotors()
-        rec_servo = _RecServos()
-        # справа 30 см, слева 150 см -> уходим влево
-        ctrl = au.AutonomousController(rec, rec_servo, _StubUltra([30.0, 150.0]))
-        ctx = au._RunCtx('automatic')
-        ctrl._evade(ctx, use_gyro=False)
-        steer = [a for sid, a in rec_servo.calls if sid == 0 and a != 90]
-        assert steer[0] == 30 and steer[1] == 150      # осмотр: вправо, влево
-        assert steer.count(150) >= 2                   # довод в свободную (лево)
-        # дуги — это движение вперёд, а не spin
-        assert any(c[0] == 'move' and c[2] == 'forward' for c in rec.calls)
-        assert not any(c[0] == 'spin' for c in rec.calls)
-        ctrl.shutdown()
-
-    def test_track_hand_shake_keeps_tracking(self, clean_state):
-        """v1.6.5: «встряхивание» руки больше не выключает режим — слежение
-        продолжается, наклон камеры реагирует на руку вверх/вниз."""
-        from tests.test_autonomous import _FakeCam
-        ctrl = clean_state.autonomous
-        fc = _FakeCam()
-        ctrl.set_camera(fc)
-        assert ctrl.start('trackHand')[0]
-        assert wait_for(lambda: fc.cv_thread.on_hand_found is not None, 2.0)
-        cb = fc.cv_thread.on_hand_found
-        for i in range(12):                        # рука «мотается» влево-вправо
-            x = 80 if i % 2 else 560
-            assert cb([x, 240], 5000) is False     # колбэк никогда не просит стоп
-            time.sleep(0.02)
-        assert ctrl.is_active()                    # режим НЕ выключился
-        # рука в верхней части кадра -> наклон уходит вниз от 90
-        for _ in range(12):
-            cb([320, 60], 5000)
-        tilt = clean_state.servos.get_angle(2)
-        assert tilt < 90
-        # рука в нижней части кадра -> наклон уходит вверх
-        for _ in range(12):
-            cb([320, 420], 5000)
-        assert clean_state.servos.get_angle(2) > tilt
 
     def test_rebind_keeps_single_thread(self, clean_state):
         ctrl = clean_state.autonomous
@@ -524,6 +452,8 @@ class TestLedsV150:
 
     def test_no_frames_after_off(self, clean_state):
         from tests.fakes.all_fakes import FakeSpiDev
+        clean_state.ws_clients.add(object())      # устройство подключено: без синего ожидания
+        clean_state.refresh_waiting_led()
         leds = clean_state.leds
         leds.set_mode('rainbow')
         time.sleep(0.2)
@@ -536,6 +466,8 @@ class TestLedsV150:
 
     def test_power_scale_dims_output(self, clean_state):
         from tests.fakes.all_fakes import FakeSpiDev
+        clean_state.ws_clients.add(object())
+        clean_state.refresh_waiting_led()
         leds = clean_state.leds
         leds.set_mode('solid', (255, 255, 255))
         spi = FakeSpiDev.instances[-1]
@@ -597,7 +529,7 @@ class TestClientGone:
     def test_autonomous_not_interrupted(self, clean_state):
         st = clean_state
         st.ultrasonic._distance = 100.0
-        st.autonomous.start('keepDistance')
+        st.autonomous.start('radarScan')
         time.sleep(0.3)
         assert st.on_last_client_gone() is False
         st.autonomous.stop()

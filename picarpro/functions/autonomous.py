@@ -1,3 +1,24 @@
+"""Автономные режимы (v1.6.10, переписаны).
+
+Режимы:
+  radarScan   — живой радар: HC-SR04 на панораме камеры качается по сектору,
+                точки по углам (медиана пингов, возраст, «нет эха»);
+  mazeExit    — поиск выхода из лабиринта по радару: остановка -> скан ->
+                правило левой/правой руки -> шаг/поворот; выход = простор в скане
+                или чёрная полоса под ИК-датчиками;
+  trackLine   — езда по линии на ИК-датчиках (3 шт.), память стороны ухода
+                линии, поиск дугой, предохранитель по ультразвуку;
+  trackLineCV — езда по линии камерой (чёрная на белом) + ИК как запасной канал;
+  trackHand   — камера следит за самой передней рукой (YOLO-pose), колёса стоят;
+  findColor   — езда за цветным объектом;
+  watchDog    — охрана: сирена при движении в кадре.
+
+Удалены как нерабочие/ненужные: automatic (Auto Drive), keepDistance
+(Distance), obstacleGrab (Grab), mazeU (Maze U).
+
+Датчики: ультразвук (с фильтром и предохранителем), ИК-датчики линии,
+гироскоп MPU6050 (повороты по углу, HeadingTracker), камера.
+"""
 import threading
 import time
 
@@ -5,28 +26,24 @@ from picarpro.logger import logger
 from picarpro.utils.filters import KalmanFilter1D, PID
 from picarpro.utils.heading import HeadingTracker
 from picarpro.drive import arc_turn
+from picarpro.functions.radar import Radar, MAX_RANGE_CM
 from config import (
     SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT,
     LINE_LEFT_PIN, LINE_MIDDLE_PIN, LINE_RIGHT_PIN, LINE_ACTIVE_LOW,
+    LINE_IR_SPEED, LINE_LOST_SEARCH_S, LINE_LOST_STOP_S, GUARD_PAN_TOL_DEG,
     CV_LINE_FOLLOW_SPEED, CV_LINE_FOLLOW_STEER_GAIN,
     CAMERA_RESOLUTION, CAM_FOV_DEG,
     CAM_PAN_TRACK_DIR, CAM_TILT_TRACK_DIR,
     FINDCOLOR_TOLERANCE, FINDCOLOR_SPEED, FINDCOLOR_STEER_RANGE,
-    ULTRASONIC_SCAN_SERVO, ULTRASONIC_MAX_DISTANCE,
-    AUTO_MIN_SPEED, AUTO_SPEED_SLEW_PER_S, AUTO_CRUISE_SPEED, AUTO_SLOW_SPEED,
-    AUTO_OBSTACLE_STOP_CM, AUTO_OBSTACLE_SLOW_CM, AUTO_EVADE_BACKUP_S,
-    AUTO_EVADE_SPIN_SPEED, AUTO_EVADE_SCAN_DEG, AUTO_EVADE_TURN_DEG,
-    AUTO_SEARCH_TIMEOUT_S,
-    KEEP_DISTANCE_TARGET_CM, KEEP_DISTANCE_TOLERANCE_CM,
-    KEEP_DISTANCE_MAX_SPEED, KEEP_DISTANCE_KP,
-    OBSTACLE_GRAB_STOP_CM, OBSTACLE_GRAB_SPEED, OBSTACLE_GRAB_STEER_TOL,
-    OBSTACLE_GRAB_SEARCH_TIMEOUT_S, OBSTACLE_GRAB_RELOCATE_TURN_DEG,
-    OBSTACLE_GRAB_RELOCATE_DRIVE_S, OBSTACLE_GRAB_RETURN_TURN_DEG,
-    OBSTACLE_GRAB_RETURN_DRIVE_S, OBSTACLE_GRAB_CLASSES,
-    MAZE_WALL_STOP_CM, MAZE_SPEED, MAZE_TURN_DIR, MAZE_TURNS,
-    MAZE_BACKUP_S, MAZE_EXIT_FREE_CM, MAZE_EXIT_FREE_S, MAZE_TIMEOUT_S,
-    CRANE_ARM_OPEN, CRANE_ARM_CLOSED, CRANE_GRIP_LOW, CRANE_GRIP_MID,
-    SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
+    AUTO_MIN_SPEED, AUTO_SPEED_SLEW_PER_S, AUTO_EVADE_SPIN_SPEED,
+    AUTO_OBSTACLE_STOP_CM, AUTO_OBSTACLE_SLOW_CM, AUTO_SEARCH_TIMEOUT_S,
+    HAND_TRACK_GAIN, HAND_TRACK_DEADZONE_DEG, HAND_TRACK_MAX_STEP_DEG,
+    HAND_TRACK_EMA, HAND_LOST_HOLD_S,
+    MAZE_HAND, MAZE_SPEED, MAZE_STEP_S, MAZE_STOP_CM, MAZE_OPEN_CM,
+    MAZE_FRONT_CLEAR_CM, MAZE_EXIT_CM, MAZE_EXIT_FRACTION, MAZE_EXIT_CONFIRM,
+    MAZE_BACKUP_S, MAZE_TIMEOUT_S, MAZE_FINISH_ON_LINE, MAZE_TURN_SNAP_DEG,
+    MAZE_SCAN_STEP_DEG, MAZE_FRONT_HALF_DEG, MAZE_SIDE_MIN_DEG,
+    MAZE_SIDE_MAX_DEG, MAZE_STEER_RANGE, RADAR_SECTOR_DEG,
 )
 
 try:
@@ -36,12 +53,12 @@ except ImportError:
     _HAS_GPIO = False
     GPIO = None
 
-MODES_WITH_ULTRA = ('radarScan', 'automatic', 'keepDistance',
-                    'obstacleGrab', 'mazeU')
+MODES_WITH_ULTRA = ('radarScan', 'mazeExit')
 MODES_WITH_CAMERA = ('trackLineCV', 'trackHand', 'findColor', 'watchDog')
+# ультразвук — необязательный предохранитель (стоп перед препятствием)
+MODES_ULTRA_GUARD = ('trackLine', 'trackLineCV', 'findColor')
 ALL_MODES = MODES_WITH_ULTRA + ('trackLine',) + MODES_WITH_CAMERA
 
-_MAX_RANGE_CM = ULTRASONIC_MAX_DISTANCE * 100
 _INNER_MIN = 0.3        # внутренний борт при дуге — не слабее 30 %
 
 
@@ -51,11 +68,14 @@ def _inner(amount):
     return max(_INNER_MIN, 1.0 - 0.9 * min(1.0, abs(amount)))
 
 
+def _steer_angle(offset):
+    """offset -1..1 (влево < 0) -> угол руля. Влево = больше 90 (как в UI)."""
+    return max(30, min(150, 90 - int(offset * 60)))
+
+
 class _RunCtx:
     """Один запуск режима. Свой Event остановки у каждого запуска: старый
-    цикл не «оживает», если новый режим запущен сразу после остановки
-    (раньше общий флаг _active снова становился True, и прежний режим
-    продолжал работать параллельно с новым названием)."""
+    цикл не «оживает», если новый режим запущен сразу после остановки."""
 
     def __init__(self, mode):
         self.mode = mode
@@ -71,28 +91,15 @@ class _RunCtx:
 
 
 class AutonomousController:
-    """Автономные режимы: порт Functions.py (v1/v2) в потоковой архитектуре
-    jsck37 + режимы findColor/watchDog.
-
-    v1.5.0 — маневренность и надёжность:
-    * автоматический режим: плавное замедление перед препятствием, отъезд
-      назад и осмотр РАЗВОРОТАМИ НА МЕСТЕ (точно по углу при наличии
-      гироскопа), выбор свободной стороны; тупик — разворот на ~150°;
-    * keepDistance: пропорциональный регулятор вместо «вперёд/назад/стоп»;
-    * плавный старт и нижняя граница скорости (моторы не трогаются с места
-      на скважности < ~25 %), крутизна дуги растёт с отклонением (раньше
-      была ИНВЕРТИРОВАНА: чем дальше линия/цель, тем слабее поворот);
-    * исправлены гонка при быстрой смене режима, повторный запуск trackHand
-      после «встряхивания», расчёт центра кадра по высоте в trackHand,
-      вечное панорамирование findColor;
-    * ультразвук включается на частый опрос только на время режима.
-    """
+    """Автономные режимы в потоковой архитектуре: один рабочий поток, один
+    активный режим, остановка — через Event у каждого запуска."""
 
     def __init__(self, motors, servos, ultrasonic, mpu6050=None):
         self.motors = motors
         self.servos = servos
         self.ultrasonic = ultrasonic
         self._heading = HeadingTracker(mpu6050)
+        self._radar = Radar(servos, ultrasonic)
         self._running = True
         self._active = False
         self._flag = threading.Event()
@@ -101,7 +108,7 @@ class AutonomousController:
         self._ctx = None
         self._current_mode = 'none'
         self._radar_data = []
-        self._radar_points = {}
+        self._info = {}                   # состояние режима для UI (get_auto_info)
         self._speed_now = 0.0
         self._speed_ts = time.monotonic()
         self._ir_left_pin = LINE_LEFT_PIN
@@ -145,6 +152,7 @@ class AutonomousController:
             self.servos = servos
             self.ultrasonic = ultrasonic
             self._heading = HeadingTracker(mpu6050)
+            self._radar = Radar(servos, ultrasonic)
 
     def _ultra_ok(self):
         return bool(self.ultrasonic and self.ultrasonic._initialized)
@@ -153,15 +161,12 @@ class AutonomousController:
     def _run(self):
         handlers = {
             'radarScan': self._radar_scan,
-            'automatic': self._automatic,
+            'mazeExit': self._maze_exit,
             'trackLine': self._track_line,
             'trackLineCV': self._track_line_cv,
-            'keepDistance': self._keep_distance,
             'trackHand': self._track_hand,
             'findColor': self._find_color,
             'watchDog': self._watch_dog,
-            'obstacleGrab': self._obstacle_grab,
-            'mazeU': self._maze_u,
         }
         while self._running:
             self._flag.wait()
@@ -174,7 +179,9 @@ class AutonomousController:
                 continue
             try:
                 self._set_steer(ctx, 90)       # руль мог быть «отпущен» в простое
-                uses_ultra = ctx.mode in MODES_WITH_ULTRA and self._ultra_ok()
+                uses_ultra = ((ctx.mode in MODES_WITH_ULTRA
+                               or ctx.mode in MODES_ULTRA_GUARD)
+                              and self._ultra_ok())
                 if uses_ultra:
                     self.ultrasonic.acquire()
                 try:
@@ -200,6 +207,7 @@ class AutonomousController:
                 self._active = False
                 self._current_mode = 'none'
                 self._speed_now = 0.0
+                self._info = {}
         logger.info(f'[Auto] finished: {ctx.mode}')
 
     def start(self, mode):
@@ -223,6 +231,7 @@ class AutonomousController:
             self._current_mode = mode
             self._active = True
             self._speed_now = 0.0
+            self._info = {'mode': mode, 'state': 'starting'}
             self._flag.set()
         logger.info(f'[Auto] started: {mode}')
         return True, f'Started: {mode}'
@@ -245,6 +254,12 @@ class AutonomousController:
     def get_radar_data(self):
         return self._radar_data
 
+    def get_auto_info(self):
+        """Состояние текущего режима для UI (лабиринт: шаг/решение/угол)."""
+        info = dict(self._info)
+        info['radar_angle'] = self._radar.angle
+        return info
+
     def get_motion_count(self):
         return self._motion_count
 
@@ -256,16 +271,13 @@ class AutonomousController:
             self._thread.join(timeout=2.0)
         logger.info('[Auto] shutdown')
 
+    def _set_info(self, **kw):
+        self._info.update(kw)
+
     # ---- датчики ----------------------------------------------------------------
     def _ir_line(self, pin):
-        """Семантика «линия обнаружена» для одного датчика (v1.6.2).
-
-        Раньше get_ir_values отдавал СЫРОЙ GPIO (1 над белым полом), а UI
-        трактовал 1 как LINE — виджет «IR Line Sensors» показывал LINE на
-        голом полу («инвертированы»). Теперь оба читателя (_read_ir и
-        get_ir_values) возвращают одинаковую семантику: True = линия.
-        Полярность модуля — LINE_ACTIVE_LOW в config.py.
-        """
+        """Семантика «линия обнаружена» для одного датчика: True = линия.
+        Полярность модуля — LINE_ACTIVE_LOW в config.py."""
         if not self._ir_available:
             return False
         try:
@@ -282,28 +294,32 @@ class AutonomousController:
                 self._ir_line(self._ir_right_pin))
 
     def get_ir_values(self):
-        """(left, middle, right) — True = датчик НАД ЛИНИЕЙ (v1.6.2).
-
-        Раньше возвращал сырые уровни GPIO, из-за чего UI и логика
-        следования трактовали датчики в противоположных конвенциях.
-        None* — модуль недоступен.
-        """
+        """(left, middle, right) — True = датчик НАД ЛИНИЕЙ; None* — модуля нет."""
         if not self._ir_available:
             return None, None, None
         return self._read_ir()
 
     def _safe_distance(self):
-        """Дистанция для принятия решений, см, или None (нет данных).
-
-        Фильтр Калмана гасит шум, но он инерционен (~1 с) — при быстром
-        приближении к стене он «не успевает». Поэтому «быстрая атака,
-        медленный спад»: берём МИНИМУМ из сырого и сглаженного значения.
-        """
-        raw = self.ultrasonic.get_distance_cm()
+        """Дистанция для решений, см, или None (нет данных). «Быстрая атака,
+        медленный спад»: минимум из сырого и сглаженного значения."""
+        raw = self.ultrasonic.get_distance_cm() if self.ultrasonic else None
         if raw is None:
             return None
         smooth = self._distance_filter.update(raw)
         return min(raw, smooth)
+
+    def _front_blocked(self, ctx, stop_cm=AUTO_OBSTACLE_STOP_CM):
+        """Предохранитель: впереди препятствие ближе stop_cm. Работает, только
+        если датчик смотрит вперёд (панорама камеры близка к центру: он стоит на ней)."""
+        if not self._ultra_ok() or not ctx.alive:
+            return False
+        try:
+            if abs(self.servos.get_angle(SERVO_CAM_PAN) - 90) > GUARD_PAN_TOL_DEG:
+                return False
+        except Exception:
+            return False
+        d = self._safe_distance()
+        return d is not None and d < stop_cm
 
     # ---- команды движения (всё идёт через _motor_lock и проверку ctx) -------------
     def _send(self, ctx, fn, *args):
@@ -343,6 +359,10 @@ class AutonomousController:
         return self._send(ctx, self.motors.move, self._spd(speed),
                           'forward', 'no', 0.5)
 
+    def _reverse(self, ctx, speed):
+        return self._send(ctx, self.motors.move, self._spd(speed),
+                          'backward', 'no', 0.5)
+
     def _arc(self, ctx, speed, side, amount):
         """Дуга вперёд: side 'left'|'right', amount 0..1 — крутизна."""
         inner = _inner(amount)
@@ -353,162 +373,271 @@ class AutonomousController:
     def _spin(self, ctx, speed, side):
         return self._send(ctx, self.motors.spin, self._spd(speed), side)
 
-    # ---- разворот на угол -----------------------------------------------------------
     def _turn(self, ctx, degrees, use_gyro):
-        """Развернуться на degrees (>0 вправо, <0 влево) — ДУГОЙ (v1.6.2).
-
-        Раньше — spin бортами в противоположные стороны: на Аккерман-
-        шасси машина не вращалась (передние колёса скребут), и объезд
-        препятствий/миссии «не могли повернуться». Теперь общий с
-        миссиями дуговый разворот (drive.arc_turn): руль до упора +
-        ход вперёд, угол закрывается по гироскопу или по времени."""
-        need = abs(degrees)
-        if need < 3 or not ctx.alive:
+        """Развернуться на degrees (>0 вправо, <0 влево) ДУГОЙ: шасси Аккерман,
+        на месте не вращается (drive.arc_turn: руль до упора + ход вперёд, угол
+        закрывается по гироскопу или по времени)."""
+        if abs(degrees) < 3 or not ctx.alive:
             return
         self._halt(ctx)
         heading = self._heading if use_gyro else None
         arc_turn(self.motors, self.servos, degrees,
                  alive=ctx.alive, wait=ctx.wait, heading=heading)
 
-    def _look(self):
-        d = self.ultrasonic.measure_now()
-        return _MAX_RANGE_CM if d is None else d
-
-    # ---- радар ------------------------------------------------------------------------
-    # v1.6.2: скан НЕ останавливается после одного прохода — качает датчик
-    # туда-сюда, пока режим не остановят, и обновляет точки по углам.
-    # Точки живут в _radar_points (угол -> дистанция), в статус уходит
-    # отсортированный список — веб-канва рисует живой радар с точками.
-    RADAR_STEP_DEG = 5
-    RADAR_PAUSE_S = 0.12
-    RADAR_SWEEP_PAUSE_S = 0.3
+    # =======================================================================
+    # РАДАР
+    # =======================================================================
+    def _publish_radar(self):
+        self._radar_data = self._radar.snapshot()
 
     def _radar_scan(self, ctx):
+        """Живой радар: проходы туда-сюда по сектору до остановки режима."""
         if not self._ultra_ok():
             logger.warning('[Radar] HC-SR04 не инициализирован — скан невозможен')
             return
-        self._radar_points = {}
-        up = True
+        r = self._radar
+        r.reset()
+        self._radar_data = []
+        r.hold()
+        ascending = True
         try:
             while ctx.alive:
-                rng = range(-60, 61, self.RADAR_STEP_DEG) if up \
-                    else range(60, -61, -self.RADAR_STEP_DEG)
-                up = not up
-                for angle_off in rng:
-                    if not ctx.alive:
-                        break
-                    self.servos.move_angle(ULTRASONIC_SCAN_SERVO, angle_off)
-                    if ctx.wait(self.RADAR_PAUSE_S):   # серво доехало, эхо успокоилось
-                        break
-                    d = self.ultrasonic.measure_now()
-                    if d is None:
-                        d = self.ultrasonic.get_last_distance()
-                    if not d or d <= 0:
-                        # v1.6.5: «нет эха / нет данных» = свободно до 2 м.
-                        # Раньше в точку уходил None/0 и веб-канва её
-                        # пропускала — радар выглядел пустым («объектов нет»),
-                        # хотя скан шёл. Теперь каждый угол даёт точку:
-                        # препятствие — реальная дистанция, свободно — 200 см.
-                        d = _MAX_RANGE_CM
-                    self._radar_points[angle_off] = d
-                    self._radar_data = [
-                        {'angle': a, 'distance': self._radar_points[a]}
-                        for a in sorted(self._radar_points)]
-                if ctx.alive:
-                    ctx.wait(self.RADAR_SWEEP_PAUSE_S)
+                r.sweep(ctx.wait, lambda: ctx.alive, ascending=ascending,
+                        on_point=lambda a: self._publish_radar())
+                ascending = not ascending
+                nearest = r.sector_min(-RADAR_SECTOR_DEG, RADAR_SECTOR_DEG,
+                                       include_clear=False)
+                self._set_info(state='scan', nearest_cm=nearest)
         finally:
-            self.servos.move_angle(ULTRASONIC_SCAN_SERVO, 0)
+            r.unhold()
+            r.home()
 
-    # ---- автоматический объезд препятствий ----------------------------------------------
-    def _automatic(self, ctx):
-        if not self._ultra_ok():
-            return
-        self._distance_filter.reset()
-        use_gyro = False
-        if self._heading.available:
-            self._heading.begin()
-            use_gyro = self._heading.calibrate(ctx.wait)
-            if not use_gyro:
-                logger.info('[Auto] gyro calibration failed — timed turns')
-        try:
-            while ctx.alive:
-                d = self._safe_distance()
-                if d is None:                   # нет данных датчика — безопасность
-                    self._halt(ctx)
-                    ctx.wait(0.2)
-                    continue
-                if d <= AUTO_OBSTACLE_STOP_CM:
-                    self._evade(ctx, use_gyro)
-                    continue
-                if d >= AUTO_OBSTACLE_SLOW_CM:
-                    target = AUTO_CRUISE_SPEED
-                else:   # плавное замедление между порогами
-                    k = (d - AUTO_OBSTACLE_STOP_CM) / float(
-                        AUTO_OBSTACLE_SLOW_CM - AUTO_OBSTACLE_STOP_CM)
-                    target = AUTO_SLOW_SPEED + k * (AUTO_CRUISE_SPEED
-                                                    - AUTO_SLOW_SPEED)
-                self._forward(ctx, target)
-                ctx.wait(0.1)
-        finally:
-            if self._heading.available:
-                self._heading.end()
+    # =======================================================================
+    # ЛАБИРИНТ (поиск выхода по радару)
+    # =======================================================================
+    def _maze_scan(self, ctx, ascending):
+        """Быстрый скан для решения. True — скан завершён."""
+        ok = self._radar.sweep(ctx.wait, lambda: ctx.alive, ascending=ascending,
+                               step=MAZE_SCAN_STEP_DEG,
+                               on_point=lambda a: self._publish_radar())
+        return ok
 
-    def _evade(self, ctx, use_gyro):
-        """Стоп -> назад -> осмотр разворотами -> поворот в свободную сторону.
+    def _maze_decide(self):
+        """Решение по карте радара -> (действие, угол). Углы радара: влево > 0.
 
-        Датчик жёстко стоит на корпусе, поэтому «смотрим» поворотом самого
-        робота (раньше качали рулевое серво, а датчик при этом оставался
-        смотреть прямо — левый и правый замеры совпадали).
+        Правило стены: сначала проём со стороны ведущей руки, затем прямо,
+        затем проём с другой стороны, иначе тупик. Возвращает также данные для UI.
         """
-        self._halt(ctx)
-        if ctx.wait(0.15):
-            return
-        self._send(ctx, self.motors.move, self._spd(AUTO_SLOW_SPEED),
-                   'backward', 'no', 0.5)
-        ctx.wait(AUTO_EVADE_BACKUP_S)
-        self._halt(ctx)
-        scan = AUTO_EVADE_SCAN_DEG
-        self._turn(ctx, +scan, use_gyro)
-        d_right = self._look()
-        self._turn(ctx, -2 * scan, use_gyro)    # теперь смотрим влево
-        d_left = self._look()
-        go_left = d_left >= d_right
-        if max(d_left, d_right) <= AUTO_OBSTACLE_STOP_CM * 1.5:
-            turn_to = 150.0                      # тупик — разворот почти назад
-        else:
-            turn_to = float(AUTO_EVADE_TURN_DEG)
-        # сейчас курс = -scan (влево от исходного); целевой = ∓turn_to
-        target = -turn_to if go_left else +turn_to
-        self._turn(ctx, target - (-scan), use_gyro)
-        self._distance_filter.reset()
-        logger.info(f'[Auto] evade: L={d_left:.0f} R={d_right:.0f} -> '
-                    f'{"left" if go_left else "right"} {turn_to:.0f}°')
+        r = self._radar
+        left_hand = (MAZE_HAND != 'right')
+        sgn = 1 if left_hand else -1                 # знак угла ведущей стороны
+        side_lo, side_hi = sorted((sgn * MAZE_SIDE_MIN_DEG, sgn * MAZE_SIDE_MAX_DEG))
+        opp_lo, opp_hi = sorted((-sgn * MAZE_SIDE_MIN_DEG, -sgn * MAZE_SIDE_MAX_DEG))
+        front = r.sector_min(-MAZE_FRONT_HALF_DEG, MAZE_FRONT_HALF_DEG)
+        primary = r.sector_min(side_lo, side_hi, include_clear=True)
+        secondary = r.sector_min(opp_lo, opp_hi, include_clear=True)
+        front_v = MAZE_STOP_CM if front is None else front
+        info = {'front_cm': front, 'primary_cm': primary, 'secondary_cm': secondary}
+        # дальняя точка сектора — куда поворачивать
+        def best_angle(lo, hi):
+            best, best_d = None, -1
+            for p in r.snapshot():
+                if lo - 1e-6 <= p['angle'] <= hi + 1e-6 and p['distance'] > best_d:
+                    best, best_d = p['angle'], p['distance']
+            return best
+        if primary is not None and primary >= MAZE_OPEN_CM:
+            return 'turn_primary', best_angle(side_lo, side_hi), info
+        if front_v >= MAZE_FRONT_CLEAR_CM:
+            return 'forward', best_angle(-30, 30), info
+        if secondary is not None and secondary >= MAZE_OPEN_CM:
+            return 'turn_secondary', best_angle(opp_lo, opp_hi), info
+        return 'dead_end', None, info
 
-    # ---- следование по линии (ИК-датчики) -------------------------------------------------
+    def _maze_step(self, ctx, steer_deg):
+        """Шаг вперёд MAZE_STEP_S с контролем препятствия фронтальным пингом.
+        Возвращает 'ok' | 'blocked' | 'line' | 'stopped'."""
+        r = self._radar
+        r.point_at(0, ctx.wait)           # датчик вперёд (+ пауза на доезд серво)
+        if not ctx.alive:
+            return 'stopped'
+        # руль доворачивает к свободному направлению (угол радара: влево > 0)
+        if steer_deg is not None and abs(steer_deg) <= MAZE_TURN_SNAP_DEG:
+            off = max(-1.0, min(1.0, steer_deg / float(MAZE_TURN_SNAP_DEG)))
+            self._set_steer(ctx, max(30, min(150, 90 + int(off * MAZE_STEER_RANGE))))
+        else:
+            self._set_steer(ctx, 90)
+        t_end = time.monotonic() + MAZE_STEP_S
+        result = 'ok'
+        while ctx.alive and time.monotonic() < t_end:
+            d = self.ultrasonic.measure_now(attempts=1)
+            if d is not None and d < MAZE_STOP_CM:
+                result = 'blocked'
+                break
+            if MAZE_FINISH_ON_LINE and self._ir_available:
+                l, m, rr = self._read_ir()
+                if l and m and rr:
+                    result = 'line'
+                    break
+            self._forward(ctx, MAZE_SPEED)
+            ctx.wait(0.05)
+        self._halt(ctx)
+        self._set_steer(ctx, 90)
+        return result if ctx.alive else 'stopped'
+
+    def _maze_exit(self, ctx):
+        if not self._ultra_ok():
+            logger.warning('[Maze] HC-SR04 не инициализирован — режим недоступен')
+            return
+        r = self._radar
+        r.reset()
+        self._radar_data = []
+        r.hold()
+        use_gyro = self._heading.available
+        if use_gyro:
+            self._heading.calibrate(ctx.wait)
+        left_hand = (MAZE_HAND != 'right')
+        t0 = time.monotonic()
+        ascending = True
+        exit_hits = 0
+        dead_ends = 0
+        steps = 0
+        try:
+            while ctx.alive and time.monotonic() - t0 < MAZE_TIMEOUT_S:
+                self._halt(ctx)
+                self._set_info(state='scan', steps=steps)
+                if not self._maze_scan(ctx, ascending):
+                    break
+                ascending = not ascending
+
+                # --- выход виден? (простор в большей части скана) ---
+                frac = r.clear_fraction(MAZE_EXIT_CM)
+                exit_hits = exit_hits + 1 if frac >= MAZE_EXIT_FRACTION else 0
+                self._set_info(open_fraction=round(frac, 2), exit_hits=exit_hits)
+                if exit_hits >= MAZE_EXIT_CONFIRM:
+                    logger.info('[Maze] выход найден (простор в скане)')
+                    self._set_info(state='exit')
+                    break
+
+                action, angle, info = self._maze_decide()
+                self._set_info(state=action, target_angle=angle, **info)
+                logger.info(f'[Maze] {action} angle={angle} {info}')
+
+                if action == 'dead_end':
+                    dead_ends += 1
+                    self._set_info(dead_ends=dead_ends)
+                    self._reverse(ctx, MAZE_SPEED)
+                    ctx.wait(MAZE_BACKUP_S)
+                    self._halt(ctx)
+                    # дугой вперёд на 90° дважды = разворот (вторая дуга — в ту же сторону)
+                    side = 90 if left_hand else -90
+                    self._turn(ctx, -side, use_gyro)
+                    self._turn(ctx, -side, use_gyro)
+                    continue
+
+                if action in ('turn_primary', 'turn_secondary'):
+                    # угол радара: влево > 0; _turn: вправо > 0
+                    ang = angle if angle is not None else (
+                        60 if (action == 'turn_primary') == left_hand else -60)
+                    # сначала подъехать, чтобы проём оказался рядом, затем довернуть
+                    res = self._maze_step(ctx, None)
+                    if res in ('stopped',):
+                        break
+                    if res == 'line':
+                        self._set_info(state='finish_line')
+                        logger.info('[Maze] финишная линия')
+                        break
+                    self._turn(ctx, -ang, use_gyro)
+                    steps += 1
+                    continue
+
+                # forward: идём к самому свободному направлению в ±30°
+                res = self._maze_step(ctx, angle)
+                steps += 1
+                if res == 'line':
+                    self._set_info(state='finish_line')
+                    logger.info('[Maze] финишная линия')
+                    break
+                if res == 'blocked':
+                    self._reverse(ctx, MAZE_SPEED)
+                    ctx.wait(MAZE_BACKUP_S * 0.6)
+                    self._halt(ctx)
+            else:
+                if ctx.alive:
+                    logger.warning('[Maze] таймаут — выход не найден')
+                    self._set_info(state='timeout')
+        finally:
+            self._halt(ctx)
+            r.unhold()
+            r.home()
+            self._set_steer(ctx, 90)
+
+    # =======================================================================
+    # ЛИНИЯ
+    # =======================================================================
     def _track_line(self, ctx):
+        """Езда по линии на 3 ИК-датчиках.
+
+        v1.6.10: помнит, в какую сторону ушла линия, при потере ищет её дугой
+        в эту сторону LINE_LOST_SEARCH_S секунд, затем стоит; не едет вслепую
+        (раньше «ползла вперёд» бесконечно); перед препятствием останавливается
+        (если есть ультразвук).
+        """
         if not self._ir_available:
             logger.warning('[Auto] IR sensors not available')
             return
-        speed = 35
+        speed = LINE_IR_SPEED
+        last_side = 0                       # -1 линия слева, +1 справа
+        lost_since = None
         while ctx.alive:
+            if self._front_blocked(ctx):
+                self._halt(ctx)
+                self._set_info(state='obstacle')
+                ctx.wait(0.1)
+                continue
             left, mid, right = self._read_ir()
-            if mid:
-                if left and not right:
-                    self._arc(ctx, speed, 'left', 0.5)
-                elif right and not left:
-                    self._arc(ctx, speed, 'right', 0.5)
-                else:
+            if left or mid or right:
+                lost_since = None
+                if mid and not left and not right:
+                    self._set_steer(ctx, 90)
                     self._forward(ctx, speed)
-            elif left and not right:
-                self._arc(ctx, speed - 10, 'left', 0.5)
-            elif right and not left:
-                self._arc(ctx, speed - 10, 'right', 0.5)
+                    self._set_info(state='follow')
+                elif left and not right:
+                    last_side = -1
+                    amount = 0.45 if mid else 0.85
+                    self._set_steer(ctx, _steer_angle(-amount))
+                    self._arc(ctx, speed - (0 if mid else 8), 'left', amount)
+                elif right and not left:
+                    last_side = 1
+                    amount = 0.45 if mid else 0.85
+                    self._set_steer(ctx, _steer_angle(amount))
+                    self._arc(ctx, speed - (0 if mid else 8), 'right', amount)
+                else:                        # все три (перекрёсток) — прямо, тихо
+                    self._set_steer(ctx, 90)
+                    self._forward(ctx, AUTO_MIN_SPEED)
             else:
-                self._forward(ctx, 15)          # линия потеряна — ползём
-            ctx.wait(0.05)
+                now = time.monotonic()
+                lost_since = lost_since or now
+                gone = now - lost_since
+                self._set_info(state='lost')
+                if gone < LINE_LOST_SEARCH_S and last_side:
+                    side = 'left' if last_side < 0 else 'right'
+                    self._set_steer(ctx, _steer_angle(last_side * 0.9))
+                    self._arc(ctx, AUTO_MIN_SPEED, side, 0.9)
+                elif gone < LINE_LOST_STOP_S:
+                    self._halt(ctx)
+                    self._set_steer(ctx, 90)
+                else:
+                    logger.info('[Auto] trackLine: линия потеряна — стоп')
+                    break
+            ctx.wait(0.04)
 
-    # ---- следование по линии (камера + ИК) --------------------------------------------------
     def _track_line_cv(self, ctx):
+        """Езда по линии камерой (чёрная на белом) + ИК как запасной канал.
+
+        Ошибка = взвешенная позиция линии по двум строкам кадра (ближняя 65 %,
+        дальняя 35 % — упреждение на поворот), ПИД, скорость падает на крутых
+        поворотах. Линия потеряна — помним сторону, ищем дугой, затем стоим.
+        """
         from picarpro.camera.camera_opencv import CV_LINE
         if not self._camera:
             return
@@ -531,18 +660,25 @@ class AutonomousController:
         cam.cv_thread.on_line_found = on_line
         try:
             while ctx.alive:
-                # ждём НОВЫЙ кадр, а не молотим одни и те же данные с частотой 33 Гц
+                # ждём НОВЫЙ кадр, а не молотим одни и те же данные
                 got = new_frame.wait(0.25)
                 new_frame.clear()
                 if not ctx.alive:
                     break
+                if self._front_blocked(ctx):
+                    self._halt(ctx)
+                    self._set_info(state='obstacle')
+                    continue
                 ir_l, ir_m, ir_r = self._read_ir()
                 ir_off = 0.0
                 if ir_ok and ir_l != ir_r:
                     ir_off = -1.0 if ir_l else 1.0
                 if got and state['found']:
-                    p1, p2 = state['pos']
-                    line_c = (p1 + p2) / 2.0 if (p1 > 0 and p2 > 0) else (p1 or p2)
+                    p1, p2 = state['pos']          # p1 — ближняя строка, p2 — дальняя
+                    if p1 > 0 and p2 > 0:
+                        line_c = 0.65 * p1 + 0.35 * p2
+                    else:
+                        line_c = p1 or p2
                     raw = (line_c - centre_x) / centre_x
                     lost = 0
                     smooth = 0.5 * raw + 0.5 * smooth
@@ -552,8 +688,8 @@ class AutonomousController:
                         fused = max(-1.0, min(1.0, fused + ir_off * 0.25))
                     self._set_steer(ctx, max(30, min(150,
                                     90 - int(fused * 60 * gain))))
-                    # чем круче поворот, тем медленнее едем
                     s = max(AUTO_MIN_SPEED, speed * (1.0 - 0.5 * abs(fused)))
+                    self._set_info(state='follow', offset=round(fused, 2))
                     if abs(fused) > 0.25:
                         self._arc(ctx, s, 'left' if fused < 0 else 'right',
                                   abs(fused))
@@ -562,11 +698,12 @@ class AutonomousController:
                 else:
                     lost += 1
                     pid.reset()
+                    self._set_info(state='lost')
                     if ir_ok and ir_l != ir_r:
                         side = 'left' if ir_l else 'right'
                         self._arc(ctx, AUTO_MIN_SPEED, side, 0.7)
                         self._set_steer(ctx, 120 if ir_l else 60)
-                    elif lost < 8:   # ~1 с: ещё помним, куда уходила линия
+                    elif lost < 8:      # ~1 с: ещё помним, куда уходила линия
                         self._set_steer(ctx, max(30, min(150,
                                         90 - int(last_offset * 60 * gain))))
                         side = 'left' if last_offset < 0 else 'right'
@@ -574,105 +711,111 @@ class AutonomousController:
                             self._arc(ctx, AUTO_MIN_SPEED, side, 0.6)
                         else:
                             self._forward(ctx, AUTO_MIN_SPEED)
-                    else:            # линии нет давно — не едем вслепую
+                    else:               # линии нет давно — не едем вслепую
                         self._halt(ctx)
                         self._set_steer(ctx, 90)
         finally:
             cam.cv_thread.on_line_found = None
             cam.set_cv_mode('none')
 
-    # ---- удержание дистанции (П-регулятор) ----------------------------------------------------
-    def _keep_distance(self, ctx):
-        if not self._ultra_ok():
-            return
-        self._distance_filter.reset()
-        moving = False
-        while ctx.alive:
-            d = self._safe_distance()
-            if d is None:
-                self._halt(ctx)
-                moving = False
-                ctx.wait(0.2)
-                continue
-            err = d - KEEP_DISTANCE_TARGET_CM       # >0 — далеко, едем вперёд
-            band = KEEP_DISTANCE_TOLERANCE_CM * (0.5 if moving else 1.0)
-            if abs(err) <= band:                    # гистерезис против дребезга
-                self._halt(ctx)
-                moving = False
-            else:
-                moving = True
-                v = min(KEEP_DISTANCE_MAX_SPEED, KEEP_DISTANCE_KP * abs(err))
-                if err > 0:
-                    self._forward(ctx, v)
-                else:
-                    self._send(ctx, self.motors.move, self._spd(v),
-                               'backward', 'no', 0.5)
-            ctx.wait(0.1)
-
-    # ---- слежение за рукой ------------------------------------------------------------------------
+    # =======================================================================
+    # РУКА (YOLO-pose): следим ТОЛЬКО камерой
+    # =======================================================================
     def _track_hand(self, ctx):
+        """Камера (панорама + наклон) держит в центре кадра самую переднюю
+        руку, найденную YOLO-pose. Колёса не двигаются.
+
+        Угол ошибки = смещение цели от центра в пикселях, пересчитанное в
+        градусы через FOV. Шаг = HAND_TRACK_GAIN * ошибка (P-регулятор с
+        мёртвой зоной и ограничением шага); цель сглаживается EMA; при потере
+        цели камера держит последнее положение HAND_LOST_HOLD_S секунд.
+        Направления: рука правее центра -> pan уменьшается; рука НИЖЕ центра ->
+        наклон уменьшается (как стрелки камеры в веб-панели: «вверх» = +).
+        Если у вашей камеры серво зеркальны — CAM_*_TRACK_DIR = -1 в config.py.
+        """
         from picarpro.camera.camera_opencv import CV_HAND
         if not self._camera:
             return
         cam = self._camera
         cam.set_cv_mode(CV_HAND)
-        # v1.6.5: ax/ay — аккумуляторы дробных шагов. Раньше int() на шаге
-        # съедал малые отклонения (при |sy| < ~0.29 кадра шаг был 0) и наклон
-        # камеры ВВЕРХ/ВНИЗ почти не двигался — выглядело как «следит только
-        # вправо/влево». Отключение по «встряске» убрано: режим идёт, пока
-        # владелец не остановит его сам.
-        s = {'pan': 90, 'tilt': 90, 'sx': 0.0, 'sy': 0.0, 'ax': 0.0, 'ay': 0.0}
-        self.servos.set_angle(SERVO_CAM_PAN, 90)
-        self.servos.set_angle(SERVO_CAM_TILT, 90)
+        w, h = CAMERA_RESOLUTION
+        half_fov_x = CAM_FOV_DEG / 2.0
+        half_fov_y = CAM_FOV_DEG * h / float(w) / 2.0
+        cx, cy = w / 2.0, h / 2.0
+        lo_p, hi_p = self._servo_range(SERVO_CAM_PAN)
+        lo_t, hi_t = self._servo_range(SERVO_CAM_TILT)
+        st = {'pan': 90.0, 'tilt': 90.0, 'ex': None, 'ey': None, 'seen': 0.0}
+        new_frame = threading.Event()
+        data = {'pos': [0, 0], 'found': False}
+
+        def on_hand(pos, scale):
+            data['pos'] = pos
+            data['found'] = scale > 0
+            new_frame.set()
+
         self._halt(ctx)
-        PAN_STEP, TILT_STEP, DEADZONE, A = 4, 3, 0.06, 0.5
-        PAN_DIR, TILT_DIR = CAM_PAN_TRACK_DIR, CAM_TILT_TRACK_DIR
-        cx = CAMERA_RESOLUTION[0] / 2.0
-        cy = CAMERA_RESOLUTION[1] / 2.0     # раньше брали ширину*0.75 — случайно верно для 4:3
-
-        def on_hand(pos, area):
-            if area == 0 or not ctx.alive:
-                return False
-            s['sx'] = A * ((pos[0] - cx) / cx) + (1 - A) * s['sx']
-            s['sy'] = A * ((pos[1] - cy) / cy) + (1 - A) * s['sy']
-            if abs(s['sx']) > DEADZONE:
-                # минус — направление панорамы как в v1.6.4 (рука правее
-                # центра => pan уменьшается); DIR-флаг меняет при зеркальном
-                # креплении серво
-                s['ax'] += -s['sx'] * PAN_STEP * (1 + abs(s['sx'])) * PAN_DIR
-                step = int(s['ax'])
-                if step:
-                    s['ax'] -= step
-                    s['pan'] = max(0, min(180, s['pan'] + step))
-            if abs(s['sy']) > DEADZONE:
-                s['ay'] += s['sy'] * TILT_STEP * (1 + abs(s['sy'])) * TILT_DIR
-                step = int(s['ay'])
-                if step:
-                    s['ay'] -= step
-                    s['tilt'] = max(0, min(180, s['tilt'] + step))
-            self.servos.set_angle(SERVO_CAM_PAN, s['pan'])
-            self.servos.set_angle(SERVO_CAM_TILT, s['tilt'])
-            return False
-
+        self.servos.set_angle(SERVO_CAM_PAN, 90)
+        self.servos.set_angle(SERVO_CAM_TILT, max(lo_t, min(hi_t, 90)))
+        st['tilt'] = float(max(lo_t, min(hi_t, 90)))
         cam.cv_thread.on_hand_found = on_hand
         try:
-            ctx.stop.wait()                  # ни одного пробуждения до остановки
+            while ctx.alive:
+                new_frame.wait(0.3)
+                new_frame.clear()
+                if not ctx.alive:
+                    break
+                now = time.monotonic()
+                if data['found']:
+                    st['seen'] = now
+                    x, y = data['pos']
+                    a = HAND_TRACK_EMA
+                    st['ex'] = x if st['ex'] is None else a * x + (1 - a) * st['ex']
+                    st['ey'] = y if st['ey'] is None else a * y + (1 - a) * st['ey']
+                    err_x = (st['ex'] - cx) / cx * half_fov_x     # ° вправо > 0
+                    err_y = (st['ey'] - cy) / cy * half_fov_y     # ° вниз > 0
+                    d_pan = d_tilt = 0.0
+                    if abs(err_x) > HAND_TRACK_DEADZONE_DEG:
+                        d_pan = -err_x * HAND_TRACK_GAIN * CAM_PAN_TRACK_DIR
+                    if abs(err_y) > HAND_TRACK_DEADZONE_DEG:
+                        d_tilt = -err_y * HAND_TRACK_GAIN * CAM_TILT_TRACK_DIR
+                    m = HAND_TRACK_MAX_STEP_DEG
+                    d_pan = max(-m, min(m, d_pan))
+                    d_tilt = max(-m, min(m, d_tilt))
+                    st['pan'] = max(lo_p, min(hi_p, st['pan'] + d_pan))
+                    st['tilt'] = max(lo_t, min(hi_t, st['tilt'] + d_tilt))
+                    self.servos.set_angle(SERVO_CAM_PAN, int(round(st['pan'])))
+                    self.servos.set_angle(SERVO_CAM_TILT, int(round(st['tilt'])))
+                    self._set_info(state='track', hand=[int(x), int(y)])
+                else:
+                    if st['seen'] and now - st['seen'] > HAND_LOST_HOLD_S:
+                        st['ex'] = st['ey'] = None      # цель потеряна: сброс сглаживания
+                    self._set_info(state='search', hand=None)
         finally:
             cam.cv_thread.on_hand_found = None
             cam.set_cv_mode('none')
             self._halt(ctx)
             for sid in (SERVO_STEERING, SERVO_CAM_PAN, SERVO_CAM_TILT):
-                self.servos.set_angle(sid, 90)
+                try:
+                    self.servos.set_angle(sid, 90)
+                except Exception:
+                    pass
 
-    # ---- слежение за цветом ------------------------------------------------------------------------
+    def _servo_range(self, sid):
+        """(min, max) серво из SERVO_LIMITS (если сервы нет — 0..180)."""
+        try:
+            lim = self.servos.get_limits(sid)
+            return int(lim['min']), int(lim['max'])
+        except Exception:
+            return 0, 180
+
+    # =======================================================================
+    # ЦВЕТ и ОХРАНА
+    # =======================================================================
     def _find_color(self, ctx):
-        """Следование за цветным объектом — порт findColor из v1/v2.
-
-        Улучшения: поворот на месте при большом угловом рассогласовании,
-        учёт текущего угла панорамы камеры (объект, найденный при повёрнутой
-        камере, виден в кадре не там, куда надо ехать), качание панорамы
-        «туда-обратно», завершение по AUTO_SEARCH_TIMEOUT_S.
-        """
+        """Следование за цветным объектом: поворот на месте при большом угловом
+        рассогласовании, учёт угла панорамы камеры, качание панорамы при потере,
+        предохранитель по ультразвуку (когда панорама у центра), завершение по
+        AUTO_SEARCH_TIMEOUT_S."""
         from picarpro.camera.camera_opencv import CV_FINDCOLOR
         cam = self._camera
         cam.set_cv_mode(CV_FINDCOLOR)
@@ -698,6 +841,9 @@ class AutonomousController:
                     break
                 if st['found']:
                     lost_since = None
+                    if self._front_blocked(ctx, AUTO_OBSTACLE_SLOW_CM * 0.5):
+                        self._halt(ctx)         # цель близко/препятствие — стоим
+                        continue
                     pan = self.servos.get_angle(SERVO_CAM_PAN)
                     px_off = (st['pos'][0] - cx_frame) / cx_frame
                     # угол до цели относительно КУЗОВА, вправо > 0
@@ -708,7 +854,7 @@ class AutonomousController:
                             SERVO_CAM_PAN, pan + max(-6, min(6, 90 - pan)))
                     steer = max(30, min(150, 90 - int(
                         norm * FINDCOLOR_STEER_RANGE * 2)))
-                    if abs(norm) > 0.6:         # цель далеко сбоку — крутимся на месте
+                    if abs(norm) > 0.6:         # цель далеко сбоку — крутимся
                         self._set_steer(ctx, steer)
                         self._spin(ctx, AUTO_EVADE_SPIN_SPEED,
                                    'left' if norm < 0 else 'right')
@@ -738,10 +884,8 @@ class AutonomousController:
             self._halt(ctx)
             self.servos.set_angle(SERVO_STEERING, 90)
 
-    # ---- охрана ----------------------------------------------------------------------------------------------
     def _watch_dog(self, ctx):
-        """Охрана — порт Camera_WatchDog из v1/v2: при движении в кадре
-        зуммер/сирена через назначенный callback."""
+        """Охрана: при движении в кадре — сирена через назначенный callback."""
         from picarpro.camera.camera_opencv import CV_WATCHDOG
         cam = self._camera
         self._motion_count = 0
@@ -762,203 +906,3 @@ class AutonomousController:
         finally:
             cam.cv_thread.on_motion = None
             cam.set_cv_mode('none')
-
-    # ---- захват и перенос препятствия (v1.6.7) --------------------------------
-    def _yolo_objects(self):
-        """Объекты YOLO-детектора камеры (уже отсортированы по площади),
-        отфильтрованные по OBSTACLE_GRAB_CLASSES. Пусто, если камера/YOLO
-        недоступны или ничего не найдено."""
-        cam = self._camera
-        if not cam:
-            return []
-        y = getattr(cam.cv_thread, 'yolo', None)
-        if not (y and y.loaded):
-            return []
-        if y._objects_lock is not None:
-            with y._objects_lock:
-                objs = list(y.objects)
-        else:
-            objs = list(y.objects)
-        if OBSTACLE_GRAB_CLASSES:
-            objs = [o for o in objs if o['label'] in OBSTACLE_GRAB_CLASSES]
-        return objs
-
-    def _crane_sequence(self, ctx, steps):
-        """Последовательность движений клешни: [(servo, angle, steps, delay)].
-        Любое исключение серво не роняет режим."""
-        try:
-            for sid, angle, n, delay in steps:
-                self.servos.smooth_move(sid, angle, steps=n, delay=delay)
-                if ctx.wait(0.1):
-                    return False
-        except Exception as e:
-            logger.warning(f'[Grab] crane error: {e}')
-            return False
-        return True
-
-    def _obstacle_grab(self, ctx):
-        """«Препятствие» (v1.6.7): подъезд к препятствию, захват клешнёй,
-        перенос в сторону и возврат. Цель — крупнейший YOLO-объект в кадре
-        (доворот по центру объекта); если камера/YOLO не дают объектов —
-        подъезд по ультразвуку «вслепую». Режим одноразовый: после переноса
-        завершается."""
-        if not (self._ultra_ok() and self.servos):
-            logger.warning('[Grab] нужны ультразвук и серво')
-            return
-        from picarpro.camera.camera_opencv import CV_YOLO
-        cam = self._camera
-        if cam:
-            cam.set_cv_mode(CV_YOLO)     # на видео видно, за чем едет робот
-        self._distance_filter.reset()
-        cx_frame = CAMERA_RESOLUTION[0] / 2.0
-        st = 'search'
-        try:
-            while ctx.alive:
-                if st == 'search':
-                    objs = self._yolo_objects()
-                    d = self._safe_distance()
-                    if objs and cam:
-                        err = (objs[0]['cx'] - cx_frame) / cx_frame
-                        if abs(err) > OBSTACLE_GRAB_STEER_TOL:
-                            self._set_steer(ctx, max(30, min(150,
-                                            90 - int(err * 60))))
-                            self._arc(ctx, OBSTACLE_GRAB_SPEED,
-                                      'left' if err < 0 else 'right',
-                                      min(1.0, abs(err)))
-                        else:
-                            self._set_steer(ctx, 90)
-                            self._forward(ctx, OBSTACLE_GRAB_SPEED)
-                    elif d is not None:
-                        # цели нет в кадре — едем вперёд, ультразвук подстрахует
-                        self._set_steer(ctx, 90)
-                        self._forward(ctx, OBSTACLE_GRAB_SPEED)
-                    else:
-                        self._halt(ctx)
-                    if d is not None and d <= OBSTACLE_GRAB_STOP_CM:
-                        self._halt(ctx)
-                        logger.info(f'[Grab] target at {d:.0f} см — захват')
-                        st = 'grab'
-                    if ctx.wait(0.12):
-                        break
-                elif st == 'grab':
-                    self._crane_sequence(ctx, [
-                        (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, 8, 0.03),
-                        (SERVO_CRANE_ARM, CRANE_ARM_CLOSED, 14, 0.05),
-                        (SERVO_CRANE_GRIP, CRANE_GRIP_MID, 8, 0.03),
-                    ])
-                    st = 'relocate'
-                elif st == 'relocate':
-                    logger.info('[Grab] relocating obstacle')
-                    self._turn(ctx, OBSTACLE_GRAB_RELOCATE_TURN_DEG,
-                               self._heading.available)
-                    for _ in range(int(OBSTACLE_GRAB_RELOCATE_DRIVE_S / 0.1)):
-                        if not self._forward(ctx, OBSTACLE_GRAB_SPEED) \
-                                or ctx.wait(0.1):
-                            break
-                    self._halt(ctx)
-                    self._crane_sequence(ctx, [
-                        (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, 8, 0.03),
-                        (SERVO_CRANE_ARM, CRANE_ARM_OPEN, 14, 0.05),
-                        (SERVO_CRANE_GRIP, CRANE_GRIP_MID, 8, 0.03),
-                    ])
-                    st = 'return'
-                elif st == 'return':
-                    logger.info('[Grab] returning')
-                    self._turn(ctx, OBSTACLE_GRAB_RETURN_TURN_DEG,
-                               self._heading.available)
-                    for _ in range(int(OBSTACLE_GRAB_RETURN_DRIVE_S / 0.1)):
-                        if not self._forward(ctx, OBSTACLE_GRAB_SPEED) \
-                                or ctx.wait(0.1):
-                            break
-                    self._halt(ctx)
-                    logger.info('[Grab] done — obstacle relocated')
-                    break
-        finally:
-            if cam:
-                try:
-                    cam.set_cv_mode('none')
-                except Exception:
-                    pass
-            self._halt(ctx)
-            if self.servos:
-                try:
-                    self.servos.set_angle(SERVO_CRANE_GRIP, CRANE_GRIP_MID)
-                    self.servos.set_angle(SERVO_CRANE_ARM, CRANE_ARM_OPEN)
-                except Exception:
-                    pass
-
-    # ---- U-образный лабиринт (v1.6.7) -----------------------------------------
-    def _maze_u(self, ctx):
-        """Проход лёгкого U-образного лабиринта по ультразвуку: коридор до
-        стены -> поворот на 90° -> второй коридор -> поворот на 90° ->
-        выходной коридор (суммарный разворот 180°). Направление поворотов —
-        MAZE_TURN_DIR, число поворотов — MAZE_TURNS. Камера (если есть)
-        включается только для наблюдения, на управление не влияет.
-        Выход: после всех поворотов впереди свободно MAZE_EXIT_FREE_S секунд
-        (или сработал предохранитель MAZE_TIMEOUT_S)."""
-        if not self._ultra_ok():
-            logger.warning('[Maze] HC-SR04 не инициализирован')
-            return
-        cam = self._camera
-        if cam:
-            try:
-                cam.set_cv_mode('none')
-            except Exception:
-                pass
-        self._distance_filter.reset()
-        use_gyro = False
-        if self._heading.available:
-            self._heading.begin()
-            use_gyro = self._heading.calibrate(ctx.wait)
-        turn_deg = 90.0 if MAZE_TURN_DIR == 'right' else -90.0
-        try:
-            turns_done = 0
-            free_since = None
-            deadline = time.monotonic() + MAZE_TIMEOUT_S
-            while ctx.alive and time.monotonic() < deadline:
-                d = self._safe_distance()
-                if d is None:                # нет данных — стоим (безопасность)
-                    self._halt(ctx)
-                    ctx.wait(0.2)
-                    continue
-                wall = d <= MAZE_WALL_STOP_CM
-                if turns_done < MAZE_TURNS and wall:
-                    self._halt(ctx)
-                    self._send(ctx, self.motors.move,
-                               self._spd(AUTO_SLOW_SPEED),
-                               'backward', 'no', 0.5)
-                    ctx.wait(MAZE_BACKUP_S)
-                    self._halt(ctx)
-                    self._turn(ctx, turn_deg, use_gyro)
-                    turns_done += 1
-                    self._distance_filter.reset()
-                    free_since = None
-                    logger.info(f'[Maze] turn {turns_done}/{MAZE_TURNS} '
-                                f'({MAZE_TURN_DIR})')
-                elif turns_done >= MAZE_TURNS:
-                    if wall:
-                        # стен больше, чем ожидалось — поворачиваем дальше
-                        # (страховка на случай «не-U» конфигурации)
-                        self._turn(ctx, turn_deg, use_gyro)
-                        turns_done += 1
-                        self._distance_filter.reset()
-                        free_since = None
-                        continue
-                    if d >= MAZE_EXIT_FREE_CM:
-                        free_since = free_since or time.monotonic()
-                        if time.monotonic() - free_since >= MAZE_EXIT_FREE_S:
-                            logger.info('[Maze] exit reached')
-                            break
-                    else:
-                        free_since = None
-                    self._forward(ctx, MAZE_SPEED)
-                else:
-                    self._forward(ctx, MAZE_SPEED)
-                ctx.wait(0.1)
-            if ctx.alive and time.monotonic() >= deadline:
-                logger.warning('[Maze] timeout — stopping')
-        finally:
-            if self._heading.available:
-                self._heading.end()
-            self._halt(ctx)
-            self._set_steer(ctx, 90)

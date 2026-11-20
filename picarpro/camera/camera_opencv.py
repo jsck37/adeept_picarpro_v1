@@ -8,13 +8,15 @@ import time
 
 from picarpro.logger import logger
 from picarpro.camera.yolo_detector import YoloDetector
+from picarpro.camera.pose_detector import PoseDetector
 from picarpro.camera import vision
 from config import (
     CAMERA_RESOLUTION, CAMERA_FPS, CAMERA_JPEG_QUALITY,
     CAMERA_IDLE_INTERVAL_S, CAMERA_SLEEP_AFTER_S, CV_PROC_SCALE,
     CAMERA_STREAM_FPS, CAMERA_HW_MJPEG,
     CAMERA_FLIP_HORIZONTAL, CAMERA_FLIP_VERTICAL,
-    CV_LINE_POS_1, CV_LINE_POS_2,
+    CV_LINE_POS_1, CV_LINE_POS_2, CV_LINE_ROW_PAD, CV_LINE_MIN_CONTRAST,
+    CV_LINE_DARK_ON_LIGHT, CV_LINE_MIN_WIDTH_PX, CV_LINE_MAX_WIDTH_FRAC,
     FINDCOLOR_AREA_MIN, WATCHDOG_THRESHOLD, WATCHDOG_MIN_AREA,
     WATCHDOG_COOLDOWN_S,
     CAMERA_IDLE_BACKOFF_CPU_PCT, CAMERA_IDLE_BACKOFF_MAX,
@@ -47,15 +49,13 @@ CAMERA_DIAG_INTERVAL_S = 60.0   # диагностика неудач иници
 
 CV_NONE = 'none'
 CV_LINE = 'findlineCV'
-CV_HAND = 'trackHand'
+CV_HAND = 'trackHand'          # v1.6.10: рука через YOLO-pose (было: цвет кожи HSV)
 CV_FINDCOLOR = 'findColor'
 CV_WATCHDOG = 'watchDog'
-CV_YOLO = 'yoloDetect'        # YOLO: рамки объектов (ONNX, cv2.dnn)
-CV_YOLO_SEG = 'yoloSeg'       # YOLO-СЕГМЕНТАЦИЯ: маски найденных объектов
-CV_YOLO_SEM = 'yoloSemantic'  # YOLO-СЕМАНТИКА: карта классов + площади в кадре
+# v1.6.10: из режимов YOLO остался только «YOLO Mask» (маски объектов);
+# yoloDetect (рамки) и yoloSemantic (карта классов) удалены.
+CV_YOLO_SEG = 'yoloSeg'
 
-HAND_AREA_MIN = 800          # px² на полном кадре
-LINE_BAND_PAD = 6            # запас строк вокруг опорных линий CV_LINE_POS_*
 
 DEFAULT_HAND_LOW = np.array([0, 30, 50], dtype=np.uint8) if _HAS_CV2 else None
 DEFAULT_HAND_HIGH = np.array([25, 255, 255], dtype=np.uint8) if _HAS_CV2 else None
@@ -102,6 +102,9 @@ class CVThread(threading.Thread):
         self.hand_detected = False
         self.hand_area = 0
         self.on_hand_found = None
+        self.pose = PoseDetector()
+        self._pose_err_drawn = False
+        self._line_prev = [None, None]      # прошлые позиции линии (непрерывность)
         self._hand_lock = threading.Lock()
         self._hand_low = DEFAULT_HAND_LOW
         self._hand_high = DEFAULT_HAND_HIGH
@@ -156,6 +159,8 @@ class CVThread(threading.Thread):
         self._set_overlay(None)
         self._prev_gray = None
         self._yolo_err_drawn = False
+        self._pose_err_drawn = False
+        self._line_prev = [None, None]
 
     def stop(self):
         self._running = False
@@ -192,9 +197,7 @@ class CVThread(threading.Thread):
             CV_HAND: self._find_hand,
             CV_FINDCOLOR: self._find_color,
             CV_WATCHDOG: self._watch_dog,
-            CV_YOLO: self._yolo_detect,
             CV_YOLO_SEG: self._yolo_detect,
-            CV_YOLO_SEM: self._yolo_detect,
         }.get(self.cv_mode)
         if handler:
             handler(frame)
@@ -209,51 +212,59 @@ class CVThread(threading.Thread):
 
     # ---- линия ------------------------------------------------------------
     def _find_line(self, frame):
+        """Чёрная линия на белом полу (v1.6.10). Для двух опорных строк
+        CV_LINE_POS_* строится профиль яркости (усреднение по соседним
+        строкам), линия есть только при достаточном контрасте, из тёмных
+        отрезков выбирается один — ближайший к прошлой позиции. line_pos = [x1, x2]
+        (0 — линия на строке не найдена), line_angle — наклон между строками."""
         h, w = frame.shape[:2]
         y1 = min(CV_LINE_POS_1, h - 1)
         y2 = min(CV_LINE_POS_2, h - 1)
-        top = max(0, min(y1, y2) - LINE_BAND_PAD)
-        bot = min(h, max(y1, y2) + LINE_BAND_PAD + 1)
-        # Otsu только по полосе вокруг опорных строк: в десятки раз меньше
-        # пикселей, и порог подстраивается под освещённость именно там,
-        # где ищется линия
-        band = cv2.cvtColor(frame[top:bot], cv2.COLOR_RGB2GRAY)
-        band = cv2.GaussianBlur(band, (5, 5), 0)
-        _, binary = cv2.threshold(
-            band, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-        idx1 = np.nonzero(binary[y1 - top] > 0)[0]
-        idx2 = np.nonzero(binary[y2 - top] > 0)[0]
-        pos1 = int(np.mean(idx1)) if len(idx1) > 0 else 0
-        pos2 = int(np.mean(idx2)) if len(idx2) > 0 else 0
+        top = max(0, min(y1, y2) - CV_LINE_ROW_PAD - 1)
+        bot = min(h, max(y1, y2) + CV_LINE_ROW_PAD + 2)
+        # серый только для нужной полосы (не для всего кадра)
+        gray = cv2.cvtColor(frame[top:bot], cv2.COLOR_RGB2GRAY)
+        found = []
+        for k, y in enumerate((y1, y2)):
+            prof = vision.row_profile(gray, y - top, CV_LINE_ROW_PAD)
+            hit = vision.find_line_in_profile(
+                prof, self._line_prev[k],
+                min_contrast=CV_LINE_MIN_CONTRAST,
+                min_w=CV_LINE_MIN_WIDTH_PX,
+                max_w_frac=CV_LINE_MAX_WIDTH_FRAC,
+                dark_on_light=CV_LINE_DARK_ON_LIGHT)
+            self._line_prev[k] = hit[0] if hit else None
+            found.append(hit)
+        pos1 = max(1, int(round(found[0][0]))) if found[0] else 0
+        pos2 = max(1, int(round(found[1][0]))) if found[1] else 0
         self.line_pos = [pos1, pos2]
         self.line_angle = (
-            math.degrees(math.atan2(pos2 - pos1, CV_LINE_POS_1 - CV_LINE_POS_2))
-            if pos1 > 0 and pos2 > 0 else 0)
+            math.degrees(math.atan2(pos2 - pos1, y1 - y2))
+            if pos1 > 0 and pos2 > 0 and y1 != y2 else 0)
         if self.overlay_wanted:
-            self._draw_line_overlay(binary, top, w, h, pos1, pos2)
+            self._draw_line_overlay(frame, top, bot, found, y1, y2, pos1, pos2)
         if self.on_line_found:
             self.on_line_found(self.line_pos, self.line_angle)
 
-    def _draw_line_overlay(self, band_bin, top, w, h, pos1, pos2):
-        disp = np.zeros((h, w, 3), dtype=np.uint8)
-        disp[top:top + band_bin.shape[0]] = cv2.cvtColor(
-            band_bin, cv2.COLOR_GRAY2BGR)
-        cv2.line(disp, (0, CV_LINE_POS_1), (w, CV_LINE_POS_1), (0, 255, 0), 1)
-        cv2.line(disp, (0, CV_LINE_POS_2), (w, CV_LINE_POS_2), (0, 255, 0), 1)
+    def _draw_line_overlay(self, frame, top, bot, found, y1, y2, pos1, pos2):
+        """Оверлей — НАСТОЯЩАЯ картинка камеры (раньше был чёрный экран с
+        бинарной полосой, по которому нельзя понять, что видит робот)."""
+        h, w = frame.shape[:2]
+        disp = self._to_bgr(frame)
+        cv2.rectangle(disp, (0, top), (w - 1, bot - 1), (0, 160, 0), 1)
+        for y, hit, pos in ((y1, found[0], pos1), (y2, found[1], pos2)):
+            cv2.line(disp, (0, y), (w, y), (0, 255, 0), 1)
+            if hit:
+                half = max(2, int(hit[1] / 2))
+                cv2.rectangle(disp, (pos - half, y - CV_LINE_ROW_PAD),
+                              (pos + half, y + CV_LINE_ROW_PAD), (0, 255, 255), -1)
+                cv2.circle(disp, (pos, y), 6, (0, 0, 255), -1)
         if pos1 > 0 and pos2 > 0:
-            cv2.line(disp, (pos2, CV_LINE_POS_2), (pos1, CV_LINE_POS_1),
-                     (0, 0, 255), 2)
-            mx = (pos1 + pos2) // 2
-            my = (CV_LINE_POS_1 + CV_LINE_POS_2) // 2
-            cv2.circle(disp, (mx, my), 6, (0, 0, 255), -1)
-        if pos1 > 0:
-            cv2.circle(disp, (pos1, CV_LINE_POS_1), 5, (0, 255, 0), -1)
-        if pos2 > 0:
-            cv2.circle(disp, (pos2, CV_LINE_POS_2), 5, (0, 255, 0), -1)
+            cv2.line(disp, (pos2, y2), (pos1, y1), (0, 0, 255), 3)
+        cx = w // 2
+        cv2.line(disp, (cx, top), (cx, bot), (255, 255, 0), 1)        # центр кадра
         tracking = pos1 > 0 or pos2 > 0
-        cv2.putText(disp, 'TRACKING' if tracking else 'SEARCHING', (10, 25),
+        cv2.putText(disp, 'LINE' if tracking else 'NO LINE', (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                     (0, 255, 0) if tracking else (0, 0, 255), 2)
         self._set_overlay(disp)
@@ -276,26 +287,35 @@ class CVThread(threading.Thread):
                 self._scaled_contour(c, inv) if inv != 1.0 else c)
 
     def _find_hand(self, frame):
-        def morph(mask):
-            k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-            k_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_large, iterations=2)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_small, iterations=2)
-            mask = cv2.GaussianBlur(mask, (5, 5), 0)
-            return cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
-
-        blob = self._blob(frame, HAND_AREA_MIN, morph)
-        self.hand_detected = blob is not None
-        if blob:
-            cx, cy, area, c = blob
-            self.hand_pos = [cx, cy]
-            self.hand_area = area
+        """Рука через YOLO-pose (v1.6.10): запястья людей в кадре, из них —
+        самая передняя (ближайшая) рука. Инференс не на каждом кадре; между
+        ними используется последний результат. Колбэк: on_hand_found(pos, scale),
+        scale = 0 — руки нет."""
+        pose = self.pose
+        if not pose.loaded and not pose.load():
+            if self.overlay_wanted and not self._pose_err_drawn:
+                bgr = self._to_bgr(frame)
+                cv2.putText(bgr, 'POSE MODEL NOT FOUND', (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                self._set_overlay(bgr)
+                self._pose_err_drawn = True
+            return
+        if pose.should_infer() or not pose.last_infer_ms:
+            persons = pose.infer(frame)
+        else:
+            with pose._lock:
+                persons = list(pose.persons)
+        with pose._lock:
+            hand = dict(pose.hand) if pose.hand else None
+        self.hand_detected = hand is not None
+        if hand:
+            self.hand_pos = [int(hand['x']), int(hand['y'])]
+            self.hand_area = int(hand['scale'])
         if self.overlay_wanted:
-            self._draw_target_overlay(frame, blob, 'LOCK', cross=True)
+            self._set_overlay(pose.draw(self._to_bgr(frame), persons, hand))
         if self.on_hand_found:
-            if self.hand_detected:
-                if self.on_hand_found(self.hand_pos, self.hand_area):
-                    self.hand_detected = False    # «встряхивание» — выходим
+            if hand:
+                self.on_hand_found(self.hand_pos, self.hand_area)
             else:
                 self.on_hand_found([0, 0], 0)
 
@@ -393,15 +413,8 @@ class CVThread(threading.Thread):
             objs = self.yolo.infer(frame)
         if self.overlay_wanted:
             bgr = self._to_bgr(frame)
-            # один и тот же seg-инференс, три представления (v1.6.7):
-            # yoloDetect — только рамки; yoloSeg — маски объектов;
-            # yoloSemantic — карта классов (заливка + легенда площадей)
-            if self.cv_mode == CV_YOLO_SEM:
-                self.yolo.draw_semantic(bgr, objs)
-            elif self.cv_mode == CV_YOLO_SEG:
-                self.yolo.draw(bgr, objs, masks=True)
-            else:
-                self.yolo.draw(bgr, objs, masks=False)
+            # «YOLO Mask»: рамки + полупрозрачные маски объектов
+            self.yolo.draw(bgr, objs, masks=True)
             cv2.putText(bgr, f'YOLO-{self.yolo.task} {len(objs)} obj '
                              f'({self.yolo.last_infer_ms:.0f} ms)',
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -981,8 +994,10 @@ class Camera:
             self.stream_close()
 
     def set_cv_mode(self, mode):
-        if mode in (CV_YOLO, CV_YOLO_SEG, CV_YOLO_SEM):
+        if mode == CV_YOLO_SEG:
             self.cv_thread.yolo.load()   # ленивая загрузка ONNX при включении
+        elif mode == CV_HAND:
+            self.cv_thread.pose.load()   # YOLO-pose для режима «Рука"
         self.cv_thread.cv_mode = mode
         if mode == CV_NONE:
             self.cv_thread.clear_overlay()
@@ -990,6 +1005,9 @@ class Camera:
 
     def get_yolo_status(self):
         return self.cv_thread.yolo.get_status()
+
+    def get_pose_status(self):
+        return self.cv_thread.pose.get_status()
 
     def set_hand_color(self, h_low, s_low, v_low, h_high, s_high, v_high):
         self.cv_thread.set_hand_color(h_low, s_low, v_low, h_high, s_high, v_high)

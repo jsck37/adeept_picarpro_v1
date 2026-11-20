@@ -59,11 +59,8 @@ def _stub_cv2():
 
 def _make_detector(monkeypatch, task='seg', seg_path=None):
     import picarpro.camera.yolo_detector as yd
-    monkeypatch.setattr(yd, 'YOLO_TASK', task)
     monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', seg_path or '/nonexistent')
     monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', seg_path or '/nonexistent')
-    monkeypatch.setattr(yd, 'YOLO_MODEL_PATH', '/nonexistent')
-    monkeypatch.setattr(yd, 'YOLO_MODEL_BUNDLED', '/nonexistent')
     monkeypatch.setattr(yd, 'cv2', _stub_cv2())
     return yd, yd.YoloDetector()
 
@@ -159,30 +156,35 @@ class TestSegParse:
 
 
 class TestLoad:
-    def test_seg_missing_falls_back_to_detect(self, monkeypatch, tmp_path):
-        yd, det = _make_detector(monkeypatch, task='seg')
-        assert det._model_path() == (None, None)
-        fake = tmp_path / 'yolov5n.onnx'
-        fake.write_bytes(b'x')
-        monkeypatch.setattr(yd, 'YOLO_MODEL_BUNDLED', str(fake))
-        assert det._model_path() == ('detect', str(fake))
+    """v1.6.10: модель одна — сегментационная (YOLO Mask); детекционный
+    запасной вариант yolov5n.onnx удалён вместе с режимами YOLO / YOLO Sem."""
 
-    def test_seg_path_preferred_for_seg_task(self, monkeypatch, tmp_path):
+    def test_missing_model(self, monkeypatch, tmp_path):
+        yd, det = _make_detector(monkeypatch, task='seg')
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(tmp_path / 'a.onnx'))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(tmp_path / 'b.onnx'))
+        assert det._model_path() == (None, None)
+
+    def test_bundled_seg_model_used(self, monkeypatch, tmp_path):
         yd, det = _make_detector(monkeypatch, task='seg')
         seg = tmp_path / 'yolov5n-seg.onnx'
         seg.write_bytes(b'x')
-        det_seg = tmp_path / 'yolov5n.onnx'
-        det_seg.write_bytes(b'x')
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(tmp_path / 'none.onnx'))
         monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(seg))
-        monkeypatch.setattr(yd, 'YOLO_MODEL_BUNDLED', str(det_seg))
         assert det._model_path() == ('seg', str(seg))
 
-    def test_detect_task_ignores_seg_model(self, monkeypatch, tmp_path):
-        yd, det = _make_detector(monkeypatch, task='detect')
-        seg = tmp_path / 'yolov5n-seg.onnx'
-        seg.write_bytes(b'x')
-        det_m = tmp_path / 'yolov5n.onnx'
-        det_m.write_bytes(b'x')
-        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(seg))
-        monkeypatch.setattr(yd, 'YOLO_MODEL_BUNDLED', str(det_m))
-        assert det._model_path() == ('detect', str(det_m))
+    def test_installed_model_preferred_over_bundled(self, monkeypatch, tmp_path):
+        yd, det = _make_detector(monkeypatch, task='seg')
+        a = tmp_path / 'installed.onnx'
+        b = tmp_path / 'bundled.onnx'
+        a.write_bytes(b'x')
+        b.write_bytes(b'x')
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(a))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(b))
+        assert det._model_path() == ('seg', str(a))
+
+    def test_no_detect_only_model_in_repo(self):
+        import os
+        import config
+        assert not os.path.exists(os.path.join(config.BASE_DIR, 'models', 'yolov5n.onnx'))
+        assert os.path.isfile(config.YOLO_SEG_MODEL_BUNDLED)

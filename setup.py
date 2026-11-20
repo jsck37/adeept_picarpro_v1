@@ -556,9 +556,10 @@ WantedBy=multi-user.target
 
 
 def stage_8_yolo_model():
-    """Модели YOLO (детекции/сегментации) для режима yoloDetect. Нестрашно,
-    если их нет: остальное работает без них. Пропустить: PICARPRO_SKIP_YOLO=1."""
-    print(f"\n  {BLU}[8/8]{RST} YOLO models (detect / segment)...")
+    """Модели нейросетей: сегментация YOLO («YOLO Mask») и YOLO-pose (режим
+    «Рука»). Копируются из архива прошивки; нестрашно, если их нет: остальное
+    работает без них. Пропустить: PICARPRO_SKIP_YOLO=1."""
+    print(f"\n  {BLU}[8/8]{RST} Neural models (YOLO mask / YOLO pose)...")
     if os.environ.get("PICARPRO_SKIP_YOLO") == "1":
         print("  skipped (PICARPRO_SKIP_YOLO=1)")
         return
@@ -585,7 +586,7 @@ def stage_8_yolo_model():
     # Если модель уже на месте (обновление поверх) — не перезаписываем.
     bundled_dir = os.path.join(thisPath, "models")
     copied = 0
-    for fn in ("yolov5n.onnx", "yolov5n-seg.onnx"):
+    for fn in ("yolov5n-seg.onnx", "yolo11n-pose.onnx"):
         src = os.path.join(bundled_dir, fn)
         dst = os.path.join(models_dir, fn)
         if os.path.isfile(src) and not os.path.isfile(dst):
@@ -605,19 +606,19 @@ def stage_8_yolo_model():
         if download_file(YOLO_MODEL_URL, YOLO_MODEL_PATH,
                          sha256=YOLO_MODEL_SHA256 or None, progress=_pb):
             print(f"\n  {GRN}[+]{RST} model saved: {YOLO_MODEL_PATH}")
+    pose_ok = os.path.exists(os.path.join(models_dir, "yolo11n-pose.onnx"))
     if os.path.exists(YOLO_MODEL_PATH):
         if not os.path.exists(YOLO_CLASSES_FILE):
             write_classes(YOLO_CLASSES_FILE)       # COCO-80, как у стандартных моделей
             print(f"  {GRN}[+]{RST} classes.txt created (COCO-80)")
         _fix_owner(YOLO_MODEL_PATH)
-        seg_ok = os.path.exists(YOLO_SEG_MODEL_PATH)
-        print(f"  {GRN}[+]{RST} YOLO ready: {YOLO_MODEL_PATH}"
-              + (" (seg: ok)" if seg_ok else " (seg: no model -> masks off)"))
+        print(f"  {GRN}[+]{RST} YOLO Mask ready: {YOLO_MODEL_PATH}"
+              + (" | pose: ok" if pose_ok else " | pose: no model -> Hand mode off"))
         return
     print(f"  {YLW}[!]{RST} YOLO model not found: {YOLO_MODEL_PATH}")
-    print("      Failed to download YOLO_MODEL_URL (no internet connection/connection lost).")
     print("      On PC: pip install ultralytics && python3 tools/fetch_yolo.py --scp <user>@<robot IP>")
-    print("      Or put .onnx + classes.txt in /home/pi/models and rerun setup.py.")
+    print("      Or put yolov5n-seg.onnx (+ classes.txt) in /home/pi/models and rerun setup.py.")
+    print("      Details: docs/YOLO_GUIDE.md. Hand mode (YOLO-pose): docs/POSE_GUIDE.md.")
 
 
 def main():

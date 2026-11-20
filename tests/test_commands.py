@@ -137,11 +137,13 @@ class TestCrane:
         from config import SERVO_CRANE_GRIP
         r = call(state, 'crane', {'action': 'grip_angle', 'angle': 60})
         assert r['ok'] is True
-        # v1.6.1: у наклона (канал 4) полный диапазон 0..180 — 60 проходит
-        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 60
-        # выше максимума — зажимается в 180
+        # v1.6.10: наклон клешни ограничен 100..150 — 60 зажимается до 100
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 100
+        r = call(state, 'crane', {'action': 'grip_angle', 'angle': 125})
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 125
+        # выше максимума — зажимается в 150
         call(state, 'crane', {'action': 'grip_angle', 'angle': 190})
-        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 180
+        assert state.servos.get_angle(SERVO_CRANE_GRIP) == 150
 
 
 class TestSwitchesHeadlightBlinker:
@@ -184,19 +186,27 @@ class TestAutoModes:
         r = call(state, 'auto', {'func': 'watchDog'})
         assert r['ok'] is True
 
-    def test_keepdistance_needs_ultra(self, state):
-        # ultra инициализирован на фейке -> должен стартовать
-        r = call(state, 'auto', {'func': 'keepDistance'})
-        assert r['ok'] is True
+    def test_maze_exit_valid(self, state):
+        # v1.6.10: новый режим «Выход из лабиринта» (радар) в белом списке
+        r = call(state, 'auto', {'func': 'mazeExit'})
+        assert r['ok'] is True, r
         call(state, 'auto', {'func': 'stop'})
 
-    def test_obstacle_grab_and_maze_valid(self, state):
-        # v1.6.8: obstacleGrab/mazeU были в autonomous.ALL_MODES и кнопках UI,
-        # но не в белом списке команды auto — «Unknown mode»
-        for func in ('obstacleGrab', 'mazeU'):
-            r = call(state, 'auto', {'func': func})
-            assert r['ok'] is True, f'{func}: {r}'
-        call(state, 'auto', {'func': 'stop'})
+    @pytest.mark.parametrize('func', ['automatic', 'keepDistance',
+                                      'obstacleGrab', 'mazeU'])
+    def test_removed_modes_unknown(self, state, func):
+        """v1.6.10: Auto Drive / Distance / Grab / Maze U удалены."""
+        r = call(state, 'auto', {'func': func})
+        assert r['ok'] is False
+        assert 'Unknown mode' in r['error']
+
+    @pytest.mark.parametrize('mode', ['yoloDetect', 'yoloSemantic'])
+    def test_removed_cv_modes_ignored(self, state, mode):
+        """v1.6.10: YOLO (рамки) и YOLO Sem удалены; остался yoloSeg."""
+        r = call(state, 'cv_mode', {'mode': mode})
+        assert r['ok'] is False
+        r = call(state, 'cv_mode', {'mode': 'yoloSeg'})
+        assert r['ok'] is True
 
 
 class TestSteady:

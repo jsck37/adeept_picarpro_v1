@@ -98,7 +98,7 @@ class TestCommandsMultiDevice:
     def test_estop_stops_motors_and_autonomy(self, clean_state):
         from picarpro.commands import process
         clean_state.ultrasonic._distance = 100.0
-        clean_state.autonomous.start('keepDistance')
+        clean_state.autonomous.start('radarScan')
         time.sleep(0.2)
         process(clean_state, {'cmd': 'speed', 'params': {'value': 30}}, 'phone')
         r = process(clean_state, {'cmd': 'estop', 'params': {}}, 'pc')   # не водитель — можно
@@ -112,7 +112,7 @@ class TestCommandsMultiDevice:
     def test_manual_move_interrupts_autonomous(self, clean_state):
         from picarpro.commands import process
         clean_state.ultrasonic._distance = 100.0
-        clean_state.autonomous.start('keepDistance')
+        clean_state.autonomous.start('radarScan')
         time.sleep(0.2)
         r = process(clean_state, {'cmd': 'move', 'params': {'dir': 'forward'}})
         assert r['ok'] and r.get('interrupted_auto') is True

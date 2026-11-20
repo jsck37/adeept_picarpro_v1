@@ -51,9 +51,9 @@ class TestServoLimitsViaCommands:
             int(k): dict(v) for k, v in SERVO_LIMITS.items()}
 
     def test_angle_clamped_by_config_limits(self, state):
-        # tilt: 80..170, grip: 100..180 — углы в стоп больше не проходят
+        # tilt: 60..170 (v1.6.10), наклон клешни 100..150
         call(state, 'servo', {'id': 2, 'angle': 10})
-        assert state.servos.get_angle(2) == 80
+        assert state.servos.get_angle(2) == 60
         call(state, 'servo', {'id': 2, 'angle': 200})
         assert state.servos.get_angle(2) == 170
         from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM

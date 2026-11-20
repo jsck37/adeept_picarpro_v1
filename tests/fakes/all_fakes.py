@@ -797,6 +797,19 @@ class FakeCV2:
         return img
 
     @staticmethod
+    def rectangle(img, p1, p2, color, thickness=1):
+        x1, y1 = max(0, int(p1[0])), max(0, int(p1[1]))
+        x2, y2 = min(img.shape[1], int(p2[0]) + 1), min(img.shape[0], int(p2[1]) + 1)
+        if thickness < 0:
+            img[y1:y2, x1:x2] = color
+        elif x2 > x1 and y2 > y1:
+            img[y1, x1:x2] = color
+            img[y2 - 1, x1:x2] = color
+            img[y1:y2, x1] = color
+            img[y1:y2, x2 - 1] = color
+        return img
+
+    @staticmethod
     def circle(img, center, radius, color, thickness=1):
         cx, cy = int(center[0]), int(center[1])
         if thickness < 0:

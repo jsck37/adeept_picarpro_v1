@@ -75,3 +75,56 @@ class TestLoop:
         sensor.shutdown()
         time.sleep(0.05)
         assert not sensor._thread.is_alive()
+
+
+class TestRadarMeasure:
+    """v1.6.10: замер для радара — медиана пингов, «нет эха» не подменяется."""
+
+    def _seq(self, sensor, values):
+        it = iter(values)
+        sensor._measure = lambda: next(it)
+
+    def test_median_of_three(self, sensor):
+        self._seq(sensor, [40.0, 300.0 / 10, 41.0])        # 40, 30, 41 -> 40
+        d, n = sensor.measure_median(samples=3, gap=0)
+        assert d == 40.0 and n == 3
+
+    def test_single_outlier_rejected(self, sensor):
+        self._seq(sensor, [50.0, 12.0, 51.0])              # «срыв» 12 см
+        d, n = sensor.measure_median(samples=3, gap=0)
+        assert d == 50.0
+
+    def test_misses_ignored_when_enough_hits(self, sensor):
+        self._seq(sensor, [None, 80.0, 82.0])
+        d, n = sensor.measure_median(samples=3, gap=0)
+        assert n == 2 and d in (80.0, 82.0)
+
+    def test_no_echo_returns_none_not_stale_value(self, sensor):
+        sensor._distance = 99.0                            # «старое» значение с другого угла
+        self._seq(sensor, [None, None, None])
+        d, n = sensor.measure_median(samples=3, gap=0)
+        assert d is None and n == 0
+
+    def test_does_not_overwrite_front_distance_cache(self, sensor):
+        sensor._distance = 123.0
+        self._seq(sensor, [20.0, 20.0, 20.0])
+        sensor.measure_median(samples=3, gap=0)
+        assert sensor._distance == 123.0
+
+    def test_out_of_range_values_dropped(self, sensor):
+        self._seq(sensor, [9999.0, 0.0, 60.0])
+        d, n = sensor.measure_median(samples=3, gap=0)
+        assert d == 60.0 and n == 1
+
+    def test_hold_pauses_background_polling(self, sensor):
+        calls = []
+        sensor._measure = lambda: calls.append(1) or 30.0
+        sensor.hold()
+        sensor.acquire()
+        time.sleep(0.35)
+        n_held = len(calls)
+        assert n_held == 0, 'фоновый опрос должен молчать во время скана радара'
+        sensor.unhold()
+        time.sleep(0.35)
+        assert len(calls) > 0
+        sensor.release()

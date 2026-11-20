@@ -106,11 +106,9 @@
             <button class="cv-btn active" data-cv="none" data-i18n="cv_off">Выкл</button>
             <button class="cv-btn" data-cv="findColor" data-i18n="cv_color">Цвет</button>
             <button class="cv-btn" data-cv="findlineCV" data-i18n="cv_line">CV Линия</button>
-            <button class="cv-btn" data-cv="trackHand" data-i18n="cv_hand">Рука</button>
+            <button class="cv-btn" data-cv="trackHand" data-i18n="cv_hand" data-i18n-title="cv_hand_title" title="Рука: камера следит за самой передней рукой (YOLO-pose)">Рука</button>
             <button class="cv-btn" data-cv="watchDog" data-i18n="cv_watchdog" data-i18n-title="cv_watchdog_title" title="Охрана: тревога при движении в кадре">Охрана</button>
-            <button class="cv-btn" data-cv="yoloDetect" data-i18n="cv_yolo" data-i18n-title="cv_yolo_title" title="YOLO: рамки объектов (ONNX, cv2.dnn)">YOLO</button>
             <button class="cv-btn" data-cv="yoloSeg" data-i18n="cv_yolo_seg" data-i18n-title="cv_yolo_seg_title" title="YOLO-сегментация: маски найденных объектов">YOLO Маска</button>
-            <button class="cv-btn" data-cv="yoloSemantic" data-i18n="cv_yolo_sem" data-i18n-title="cv_yolo_sem_title" title="YOLO-семантика: карта классов и их доля в кадре">YOLO Сем</button>
           </div>
           <div id="hand-color-row" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
             <div style="font-size:.75rem;color:var(--text-2);font-weight:600;margin-bottom:4px" data-i18n="hand_preset_title">Цвет руки (пресет)</div>
@@ -150,11 +148,8 @@
             <div class="auto-hint" data-i18n="auto_hint">Робот движется сам (без оверлея на камере):</div>
             <div class="btn-group" id="auto-group">
               <button class="gbtn" data-auto="radarScan" data-i18n="auto_radar" data-i18n-title="auto_radar_title" title="Скан-радар панорамой ультразвука">Радар</button>
-              <button class="gbtn" data-auto="automatic" data-i18n="auto_drive" data-i18n-title="auto_drive_title" title="Автономная езда с объездом препятствий">Автоездка</button>
+              <button class="gbtn" data-auto="mazeExit" data-i18n="auto_maze_exit" data-i18n-title="auto_maze_exit_title" title="Поиск выхода из лабиринта по радару (правило стены)">Лабиринт</button>
               <button class="gbtn" data-auto="trackLine" data-i18n="auto_ir_line" data-i18n-title="auto_ir_line_title" title="Следование по линии (ИК-датчики)">ИК Линия</button>
-              <button class="gbtn" data-auto="keepDistance" data-i18n="auto_distance" data-i18n-title="auto_distance_title" title="Удержание дистанции до цели">Дистанция</button>
-              <button class="gbtn" data-auto="obstacleGrab" data-i18n="auto_grab" data-i18n-title="auto_grab_title" title="Препятствие: подъезд по ультразвуку, поиск YOLO, захват клешнёй и перенос">Захват</button>
-              <button class="gbtn" data-auto="mazeU" data-i18n="auto_maze" data-i18n-title="auto_maze_title" title="U-лабиринт: проход по ультразвуку (камера — для наблюдения)">Лабиринт U</button>
             </div>
             <button class="auto-estop-btn" id="auto-estop" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/></svg>
@@ -186,7 +181,56 @@
         </div>
       </div>
 
-      <div class="card" id="card-ds4">
+            <div class="card" id="card-missions">
+        <div class="card-title collapsible-header open" data-target="missions-body">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M12 19h4.5a3.5 3.5 0 000-7h-9a3.5 3.5 0 010-7H12"/></svg>
+            <span data-i18n="card_missions">Миссии</span><span class="hw-missing-tag" id="missions-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="collapsible-body open" id="missions-body">
+          <div class="ms-body">
+            <div class="ms-picker">
+              <span class="ms-picker-label" data-i18n="mission_label">Миссия</span>
+              <div class="ms-select-wrap">
+                <select id="mission-select" data-i18n-aria="mission_label" aria-label="Mission"></select>
+                <svg class="ms-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </div>
+            <div class="ms-actions">
+              <button class="ms-btn ms-btn-start" id="mission-start" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+                <span data-i18n="mission_start">Старт</span>
+              </button>
+              <button class="ms-btn ms-btn-stop" id="mission-stop" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                <span data-i18n="mission_stop">Стоп</span>
+              </button>
+            </div>
+            <div class="ms-tools">
+              <button class="ms-chip ms-chip-rec" id="mission-rec" type="button" data-i18n="mission_rec">Записать маршрут</button>
+              <button class="ms-chip" id="mission-home" type="button" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+                <span data-i18n="mission_home">Домой</span>
+              </button>
+              <button class="ms-chip ms-chip-danger" id="mission-del" type="button" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                <span data-i18n="mission_del">Удалить</span>
+              </button>
+            </div>
+            <div class="mission-status" id="mission-status" data-state="idle" data-i18n="mission_idle">Ожидание</div>
+            <div class="ms-hint">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span data-i18n="mission_hint">«Домой» повторяет записанный маршрут счётом пройденного пути (примерно; одометрии нет).</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      
+
+<div class="card" id="card-ds4">
         <div class="card-title collapsible-header open" data-target="ds4-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><line x1="11" y1="10" x2="13" y2="10"/><line x1="6" y1="3" x2="8" y2="6"/><line x1="18" y1="3" x2="16" y2="6"/></svg>
@@ -463,54 +507,7 @@
         </div>
       </div>
 
-      <div class="card" id="card-missions">
-        <div class="card-title collapsible-header open" data-target="missions-body">
-          <div style="display:flex;align-items:center;gap:8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M12 19h4.5a3.5 3.5 0 000-7h-9a3.5 3.5 0 010-7H12"/></svg>
-            <span data-i18n="card_missions">Миссии</span><span class="hw-missing-tag" id="missions-missing-tag" style="display:none" data-i18n="module_not_found">Модуль не найден</span>
-          </div>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="collapsible-body open" id="missions-body">
-          <div class="ms-body">
-            <div class="ms-picker">
-              <span class="ms-picker-label" data-i18n="mission_label">Миссия</span>
-              <div class="ms-select-wrap">
-                <select id="mission-select" data-i18n-aria="mission_label" aria-label="Mission"></select>
-                <svg class="ms-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              </div>
-            </div>
-            <div class="ms-actions">
-              <button class="ms-btn ms-btn-start" id="mission-start" type="button">
-                <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
-                <span data-i18n="mission_start">Старт</span>
-              </button>
-              <button class="ms-btn ms-btn-stop" id="mission-stop" type="button">
-                <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                <span data-i18n="mission_stop">Стоп</span>
-              </button>
-            </div>
-            <div class="ms-tools">
-              <button class="ms-chip ms-chip-rec" id="mission-rec" type="button" data-i18n="mission_rec">Записать маршрут</button>
-              <button class="ms-chip" id="mission-home" type="button" disabled>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
-                <span data-i18n="mission_home">Домой</span>
-              </button>
-              <button class="ms-chip ms-chip-danger" id="mission-del" type="button" style="display:none">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                <span data-i18n="mission_del">Удалить</span>
-              </button>
-            </div>
-            <div class="mission-status" id="mission-status" data-state="idle" data-i18n="mission_idle">Ожидание</div>
-            <div class="ms-hint">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              <span data-i18n="mission_hint">«Домой» повторяет записанный маршрут счётом пройденного пути (примерно; одометрии нет).</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="card-buzzer">
+<div class="card" id="card-buzzer">
         <div class="card-title collapsible-header open" data-target="buzzer-body">
           <div style="display:flex;align-items:center;gap:8px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>

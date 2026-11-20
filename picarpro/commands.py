@@ -10,7 +10,7 @@
 from picarpro.drive import drive
 from picarpro.control import READ_ONLY_CMDS
 from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
-                                           CV_YOLO, CV_YOLO_SEG, CV_YOLO_SEM)
+                                           CV_YOLO_SEG)
 from config import (
     SERVO_COUNT, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
@@ -250,9 +250,10 @@ def process(state, data, client=None):
         r = {'ok': True, 'web_active': state.web_active}
 
     elif cmd == 'cv_mode':
+        # v1.6.10: yoloDetect («YOLO») и yoloSemantic («YOLO Sem») удалены,
+        # остался только yoloSeg («YOLO Mask»)
         mode_map = {'none': CV_NONE, 'findlineCV': CV_LINE,
-                    'trackHand': CV_HAND, 'yoloDetect': CV_YOLO,
-                    'yoloSeg': CV_YOLO_SEG, 'yoloSemantic': CV_YOLO_SEM}
+                    'trackHand': CV_HAND, 'yoloSeg': CV_YOLO_SEG}
         m = mode_map.get(str(p.get('mode', 'none')))
         if m is not None:
             state.init_camera()
@@ -308,12 +309,10 @@ def process(state, data, client=None):
 
     elif cmd == 'auto':
         func = str(p.get('func', 'stop'))
-        # obstacleGrab/mazeU добавлены: были в autonomous.ALL_MODES и кнопках
-        # UI, но не в этом белом списке — кнопки «Grab»/«Maze U» отвечали
-        # «Unknown mode» (v1.6.8)
-        valid = ('radarScan', 'automatic', 'trackLine', 'trackLineCV',
-                 'trackHand', 'findColor', 'watchDog', 'keepDistance',
-                 'obstacleGrab', 'mazeU', 'stop')
+        # v1.6.10: automatic / keepDistance / obstacleGrab / mazeU удалены;
+        # mazeExit — поиск выхода из лабиринта по радару
+        valid = ('radarScan', 'mazeExit', 'trackLine', 'trackLineCV',
+                 'trackHand', 'findColor', 'watchDog', 'stop')
         if func not in valid:
             r['error'] = f'Unknown mode: {func}'
         elif not state.autonomous:
