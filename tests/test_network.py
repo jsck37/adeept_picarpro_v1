@@ -59,6 +59,34 @@ class TestRedirect:
         assert isinstance(result, bool)
 
 
+class TestAPIP:
+    """IP точки доступа для captive portal (редирект на http://10.42.0.1:5000)."""
+
+    def test_cached_and_reset(self, monkeypatch):
+        calls = []
+
+        def fake_detect():
+            calls.append(1)
+            return '10.42.0.1'
+
+        monkeypatch.setattr('picarpro.network._detect_ap_ip', fake_detect)
+        from picarpro.network import get_ap_ip, reset_ip_cache
+        reset_ip_cache()
+        get_ap_ip()
+        get_ap_ip()
+        assert len(calls) == 1
+        reset_ip_cache()
+        get_ap_ip()
+        assert len(calls) == 2
+
+    def test_none_when_no_interfaces(self, monkeypatch):
+        """Без поднятых интерфейсов — None (редирект упадёт на Host запроса)."""
+        from picarpro.network import get_ap_ip, reset_ip_cache
+        reset_ip_cache()
+        monkeypatch.setattr('picarpro.network._detect_ap_ip', lambda: None)
+        assert get_ap_ip() is None
+
+
 class TestSystemInfo:
     def test_get_all_keys(self, monkeypatch):
         from picarpro.utils.system_info import SystemInfo

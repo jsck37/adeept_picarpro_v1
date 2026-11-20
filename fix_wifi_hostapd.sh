@@ -1,10 +1,12 @@
 #!/bin/bash
 # =============================================================================
-# PiCarPro Wi-Fi rewrite (v1.3.5): hostapd + dnsmasq + SSH at system level.
+# PiCarPro Wi-Fi rewrite (v1.3.6): hostapd + dnsmasq + SSH + captive portal.
 #
 # NetworkManager AP больше не используется: wlan0 навсегда изымается из-под
 # управления NM и отдаётся hostapd. Точка доступа работает всегда при загрузке,
-# SSH включён на уровне системы. Идемпотентен — можно запускать повторно.
+# SSH включён на уровне системы. При подключении к AP телефон/ПК сам открывает
+# локальный веб-интерфейс (captive portal: DNS всех доменов -> Pi, проверки
+# связности ОС редиректятся на http://<HOTSPOT_IP>:5000). Идемпотентен.
 #
 # Использование:  sudo bash fix_wifi_hostapd.sh
 # Настройки:      /etc/picarpro/hotspot.conf
@@ -215,9 +217,12 @@ rsn_pairwise=CCMP
 wpa_passphrase=$HOTSPOT_PASS
 EOF
 
-# 8. Конфиг dnsmasq: DHCP/DNS. Имена picar / picar.lan -> Pi; домены
-#    «проверок интернета» тоже указывают на Pi, где порт 80 отвечает им
-#    ожидаемым образом (иначе Android считает сеть неработающей и уходит с неё).
+# 8. Конфиг dnsmasq: DHCP/DNS. Wildcard-запись address=/#/ направляет ЛЮБОЙ
+#    домен на Pi (интернета у клиентов AP всё равно нет, ничего не ломаем).
+#    Системные «проверки связности» (Android/Apple/Windows/Firefox) получают
+#    вместо «Success» редирект на веб-интерфейс — ОС распознаёт captive portal
+#    и сама открывает его окно с UI робота сразу после подключения к AP.
+#    Имя picar / picar.lan тоже указывает на Pi (http://picar:5000).
 cat > "$RUN_DIR/picarpro-dnsmasq.conf" << EOF
 interface=$DEV
 bind-interfaces
@@ -231,13 +236,7 @@ dhcp-authoritative
 log-dhcp
 address=/picar/$HOTSPOT_IP
 address=/picar.lan/$HOTSPOT_IP
-address=/connectivitycheck.gstatic.com/$HOTSPOT_IP
-address=/connectivitycheck.android.com/$HOTSPOT_IP
-address=/clients3.google.com/$HOTSPOT_IP
-address=/captive.apple.com/$HOTSPOT_IP
-address=/www.msftconnecttest.com/$HOTSPOT_IP
-address=/dns.msftncsi.com/$HOTSPOT_IP
-address=/detectportal.firefox.com/$HOTSPOT_IP
+address=/#/$HOTSPOT_IP
 EOF
 
 log "$DEV готов: SSID '$HOTSPOT_SSID' канал $HOTSPOT_CHANNEL ($BAND) IP $HOTSPOT_IP"
@@ -299,6 +298,7 @@ log "Wi-Fi переписан на hostapd + dnsmasq, SSH включён"
 log "  SSID     : $HOTSPOT_SSID   канал: $HOTSPOT_CHANNEL"
 log "  IP Pi    : $HOTSPOT_IP"
 log "  Веб UI   : http://$HOTSPOT_IP:5000"
+log "  Портал   : открывается сам при подключении к AP (редирект :80 -> :5000)"
 log "  SSH      : ssh <пользователь>@$HOTSPOT_IP"
 log "  Настройки: $CONF"
 log "  После правки конфига:"

@@ -46,8 +46,8 @@
 # Обновление системы
 sudo apt update -y && sudo apt upgrade -y
 
-# Установка Git
-sudo apt install git -y
+# Установка Git и pip
+sudo apt install git pip -y
 
 # Клонирование репозитория
 git clone https://github.com/jsck37/adeept_picarpro_v1

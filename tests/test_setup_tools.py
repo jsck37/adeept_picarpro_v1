@@ -217,38 +217,69 @@ class TestHotspotScript:
         assert 'ht_capab=[SHORT-GI-20]' in ap
         dm = (run_dir / 'picarpro-dnsmasq.conf').read_text()
         assert 'address=/picar.lan/10.42.0.1' in dm
-        assert 'address=/connectivitycheck.gstatic.com/10.42.0.1' in dm
+        assert 'address=/#/10.42.0.1' in dm     # wildcard: все домены -> Pi
 
 
 class TestProbes:
-    def test_android_gets_204(self):
-        from picarpro.network import probe_response
-        assert probe_response('/generate_204') == (204, 'text/plain', b'')
-        assert probe_response('/generate_204?x=1')[0] == 204
+    """Проверки связности ОС получают редирект на портал — ОС сама открывает UI."""
 
-    def test_apple_and_windows(self):
-        from picarpro.network import probe_response
-        assert b'Success' in probe_response('/hotspot-detect.html')[2]
-        assert probe_response('/connecttest.txt')[2] == b'Microsoft Connect Test'
-        assert probe_response('/ncsi.txt')[2] == b'Microsoft NCSI'
+    @staticmethod
+    def _get(port, path, host='10.42.0.1', method='GET'):
+        import http.client
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
+        try:
+            conn.request(method, path, headers={'Host': host})
+            resp = conn.getresponse()
+            return resp.status, resp.getheader('Location'), resp.read()
+        finally:
+            conn.close()
 
-    def test_regular_paths_not_intercepted(self):
-        from picarpro.network import probe_response
-        assert probe_response('/') is None
-        assert probe_response('/app.js') is None
-
-    def test_server_answers_204_not_302(self):
+    @staticmethod
+    def _free_port():
         import socket
-        import urllib.request
+        s = socket.socket()
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    def test_probe_paths_recognised(self):
+        from picarpro.network import is_probe
+        assert is_probe('/generate_204') and is_probe('/generate_204?x=1')
+        assert is_probe('/hotspot-detect.html') and is_probe('/ncsi.txt')
+        assert is_probe('/redirect') and is_probe('/success.txt')
+        assert not is_probe('/') and not is_probe('/app.js')
+
+    def test_portal_location_prefers_ap_ip(self, monkeypatch):
+        from picarpro.network import portal_location
+        monkeypatch.setattr('picarpro.network.get_ap_ip', lambda: '10.42.0.1')
+        assert portal_location('/', 'connectivitycheck.gstatic.com', 5000) \
+            == 'http://10.42.0.1:5000/'
+        # интерфейсов нет — падаем на Host запроса (без порта)
+        monkeypatch.setattr('picarpro.network.get_ap_ip', lambda: None)
+        assert portal_location('/', '10.42.0.1:80', 5000) == 'http://10.42.0.1:5000/'
+
+    def test_server_redirects_probe_to_portal(self, monkeypatch):
         from picarpro.network import start_redirect_server
-        s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+        monkeypatch.setattr('picarpro.network.get_ap_ip', lambda: '10.42.0.1')
+        port = self._free_port()
         assert start_redirect_server(port=port, target_port=5000)
-        r = urllib.request.urlopen(f'http://127.0.0.1:{port}/generate_204', timeout=3)
-        assert r.status == 204
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, *a, **k):
-                return None
-        opener = urllib.request.build_opener(NoRedirect)
-        with pytest.raises(urllib.error.HTTPError) as e:
-            opener.open(f'http://127.0.0.1:{port}/', timeout=3)
-        assert e.value.code == 302
+        status, location, _ = self._get(port, '/generate_204?x=1')
+        assert (status, location) == (302, 'http://10.42.0.1:5000/')
+
+    def test_server_keeps_path_and_falls_back_to_host(self, monkeypatch):
+        from picarpro.network import start_redirect_server
+        monkeypatch.setattr('picarpro.network.get_ap_ip', lambda: None)
+        port = self._free_port()
+        assert start_redirect_server(port=port, target_port=5000)
+        status, location, _ = self._get(port, '/main.html', host='10.42.0.1:80')
+        assert (status, location) == (302, 'http://10.42.0.1:5000/main.html')
+
+    def test_head_returns_headers_without_body(self, monkeypatch):
+        from picarpro.network import start_redirect_server
+        monkeypatch.setattr('picarpro.network.get_ap_ip', lambda: '10.42.0.1')
+        port = self._free_port()
+        assert start_redirect_server(port=port, target_port=5000)
+        status, location, body = self._get(port, '/hotspot-detect.html',
+                                           method='HEAD')
+        assert (status, location, body) == (302, 'http://10.42.0.1:5000/', b'')
