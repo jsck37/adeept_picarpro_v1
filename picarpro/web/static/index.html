@@ -156,13 +156,13 @@
               <span data-i18n="auto_estop">АВАРИЙНЫЙ СТОП</span>
             </button>
             <div style="margin-top:6px;font-size:.72rem;color:var(--text-3)" data-i18n="push_note">
-              Push Mode (толчок клешнёй по HC-SR04, без камеры) — кнопка ниже.
+              Push Mode
             </div>
             <div id="radar-box" style="display:none;margin-top:8px">
               <canvas id="radar-canvas" width="280" height="190"
                       style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
               <div style="margin-top:4px;font-size:.7rem;color:var(--text-3);line-height:1.45" data-i18n="radar_note">
-                Радар: сканирует панорамой камеры (SERVO_CAM_PAN) — колёса стоят на месте. Серво настраивается в config.py (ULTRASONIC_SCAN_SERVO).
+                Радар
               </div>
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
@@ -228,7 +228,7 @@
         </div>
       </div>
 
-      
+
 
 <div class="card" id="card-ds4">
         <div class="card-title collapsible-header open" data-target="ds4-body">
@@ -263,7 +263,7 @@
               <div class="ds4-col">
                 <div style="font-size:.68rem;color:var(--text-2);line-height:1.6">
                   <div><b>L-stick</b> <span data-i18n="ds4_help1">езда</span> &nbsp; <b>R-stick</b> <span data-i18n="ds4_help2">камера (5&deg;/шаг)</span></div>
-                  <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100% (без авто-вперёд)</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
+                  <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100%</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
                   <div><b>R1</b> <span data-i18n="ds4_help5">гудок</span> &nbsp; <b>Dpad&#9650;</b> <span data-i18n="ds4_help6">фары</span></div>
                   <div><b>Dpad&#9660;</b> <span data-i18n="ds4_help7">радуга</span> &nbsp; <b>Dpad&#9664;/&#9654;</b> <span data-i18n="ds4_help8">поворотники</span></div>
                   <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/середина)</span></div>
@@ -356,12 +356,12 @@
               <div class="btn-group" id="crane-arm-group">
                 <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle" data-i18n="crane_grab_release">Захватить / Отпустить</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Середина (135&deg;)</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Середина</span></div>
               <div class="btn-group" id="crane-grip-group">
                 <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низ</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Середина</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Середина<button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-high" data-action="grip_low" data-i18n="grip_low">Вверх</button>
               </div>
-              <div style="margin-top:8px;font-size:.7rem;color:var(--text-3);line-height:1.45" data-i18n="crane_note">Каналы клешни: канал 5 — наклон (SERVO_CRANE_GRIP), канал 6 — захват (SERVO_CRANE_ARM). Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
             </div>
           </div>
 
@@ -441,12 +441,9 @@
         </div>
         <div class="collapsible-body open" id="hl-body">
           <div id="hl-controls">
-            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_main_title">Основная фара (robot-hat)</div>
+            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_main_title"> Свет </div>
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main" data-i18n="hl_main">Фара</button>
-            </div>
-            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_side_title">Габариты (боковые огни, L1)</div>
-            <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-side" type="button" data-i18n="hl_side">Габариты</button>
             </div>
             <div class="signal-section">
@@ -639,7 +636,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><line x1="4" y1="4" x2="20" y2="20"/></svg>
     </button>
   </div>
-  <!-- v1.6.14: подсказка, если блокировка горизонтали не поддерживается
+    <!-- v1.6.14: подсказка, если блокировка горизонтали не поддерживается
        (iOS Safari): полный экран есть, а ориентацию держим руками -->
   <div class="drive-rotate-hint" id="drive-rotate-hint" data-i18n="drv_rotate_hint">Поверните телефон горизонтально</div>
   <div class="drive-stage" id="drive-stage">

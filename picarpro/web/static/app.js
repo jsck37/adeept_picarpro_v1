@@ -1038,6 +1038,7 @@ function toggleCraneArm() {
 function updateCraneGripUI() {
   var lowBtn = document.getElementById('crane-grip-low');
   var midBtn = document.getElementById('crane-grip-mid');
+  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
   if (!lowBtn) return;
   lowBtn.classList.remove('active');
@@ -1618,7 +1619,7 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     var action = btn.dataset.action;
     if (action === 'grip_low') craneGripPosition = 'low';
     else if (action === 'grip_mid') craneGripPosition = 'mid';
-    // v1.6.4: grip_high удалён — осталось low/mid
+    else if (action === 'grip_high') craneGripPosition = 'high';
     sendCommand('crane', { action: action });
     updateCraneGripUI();
   });
