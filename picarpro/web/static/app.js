@@ -1038,7 +1038,6 @@ function toggleCraneArm() {
 function updateCraneGripUI() {
   var lowBtn = document.getElementById('crane-grip-low');
   var midBtn = document.getElementById('crane-grip-mid');
-  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
   if (!lowBtn) return;
   lowBtn.classList.remove('active');
@@ -1348,7 +1347,22 @@ function enterDriveMode() {
     else if (el.webkitRequestFullscreen) p = el.webkitRequestFullscreen();
     if (p && p.catch) p.catch(function() {});
   } catch (e) {}
+  // v1.6.14: полноэкранный режим управления — в ГОРИзонтальной ориентации
+  lockLandscape();
+  try { localStorage.setItem('autoDrive', '1'); } catch (e) {}
   updateVideoFeed();
+}
+// v1.6.14: блокировка горизонтальной ориентации (лучшее усилие).
+// Работает в Chrome/Android ТОЛЬКО в настоящем fullscreen — поэтому
+// вызывается после requestFullscreen; на iOS API нет — показывается
+// CSS-подсказка «поверните телефон» (см. #drive-rotate-hint в style.css).
+function lockLandscape() {
+  try {
+    if (window.screen && screen.orientation && screen.orientation.lock) {
+      var r = screen.orientation.lock('landscape');
+      if (r && r.catch) r.catch(function() {});
+    }
+  } catch (e) {}
 }
 function exitDriveMode() {
   var body = document.getElementById(CAMERA_BODY);
@@ -1358,6 +1372,10 @@ function exitDriveMode() {
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
     else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
   } catch (e) {}
+  try { screen.orientation.unlock(); } catch (e) {}
+  // выход вручную = пользователь не хочет авто-полный экран при следующем
+  // открытии страницы (в т.ч. после авто-редиректа captive portal)
+  try { localStorage.setItem('autoDrive', '0'); } catch (e) {}
   onWheelsEnd();
   onCamEnd();
   updateVideoFeed();
@@ -1374,6 +1392,49 @@ if (fsEnterBtn) {
 }
 var driveExitBtn = document.getElementById('drive-exit');
 if (driveExitBtn) driveExitBtn.addEventListener('click', exitDriveMode);
+
+// v1.6.14: авто-вход в полноэкранный режим управления при открытии страницы
+// с телефона/планшета — в том числе по авто-редиректу captive portal
+// (подключился к Wi-Fi робота -> открылось управление сразу во весь экран).
+// Настоящий fullscreen браузеры разрешают только по жесту пользователя:
+// оверлей управления открывается сразу (на весь вьюпорт, с подсказкой
+// повернуть телефон), а ПЕРВЫЙ ТАП в любой джойстик/кнопку доводит до
+// настоящего fullscreen с блокировкой горизонтальной ориентации —
+// см. armFsOnFirstTap ниже.
+(function () {
+  var coarse = false;
+  try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
+  if (!coarse || !driveOverlay) return;
+  var want = '1';
+  try { want = localStorage.getItem('autoDrive'); } catch (e) {}
+  if (want === '0') return;                    // сам вышел — не навязываем
+  if (document.body.classList.contains('drive-mode')) return;
+  enterDriveMode();
+})();
+// первый жест в оверлее: полный экран + горизонталь (если ещё не в нём)
+(function () {
+  var stage = document.getElementById('drive-overlay');
+  if (!stage) return;
+  function armFs() {
+    var inFs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!inFs) {
+      var el = document.documentElement;
+      try {
+        var p = null;
+        if (el.requestFullscreen) p = el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) p = el.webkitRequestFullscreen();
+        if (p && p.catch) p.catch(function() { lockLandscape(); });
+        else lockLandscape();
+      } catch (e) { lockLandscape(); }
+    } else {
+      lockLandscape();
+    }
+    stage.removeEventListener('pointerdown', armFs);
+    stage.removeEventListener('touchstart', armFs);
+  }
+  stage.addEventListener('pointerdown', armFs, {passive: true});
+  stage.addEventListener('touchstart', armFs, {passive: true});
+})();
 
 // Джойстики полноэкранного режима — те же обработчики, другие контейнеры
 var fsWheelsStick = makeStick(
@@ -1557,7 +1618,7 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     var action = btn.dataset.action;
     if (action === 'grip_low') craneGripPosition = 'low';
     else if (action === 'grip_mid') craneGripPosition = 'mid';
-    else if (action === 'grip_high') craneGripPosition = 'high';
+    // v1.6.4: grip_high удалён — осталось low/mid
     sendCommand('crane', { action: action });
     updateCraneGripUI();
   });

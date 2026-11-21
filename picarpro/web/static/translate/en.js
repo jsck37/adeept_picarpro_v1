@@ -26,6 +26,7 @@
     take_control: 'Take control',
     estop_btn: 'STOP',
     estop_btn_title: 'Emergency stop (Esc)',
+    drv_rotate_hint: 'Rotate the phone to landscape — easier to drive',
     banner_text: 'Another device is driving. You can watch, but your commands are ignored (STOP always works).',
     // ---- camera ----
     card_camera: 'Camera',

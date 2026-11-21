@@ -483,6 +483,12 @@ body.drive-mode{overflow:hidden}
 body.drive-mode .app-shell{display:none!important}
 .drive-top{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;z-index:20;pointer-events:none}
 .drive-top .estop-btn,.drive-top .drive-exit-btn{pointer-events:auto}
+/* v1.6.14: подсказка «поверните телефон», когда блокировка горизонтали
+   не сработала (iOS Safari: fullscreen есть, orientation.lock — нет) */
+.drive-rotate-hint{display:none;position:absolute;top:56px;left:50%;transform:translateX(-50%);z-index:20;align-items:center;gap:8px;padding:8px 14px;border-radius:10px;background:rgba(0,0,0,.72);color:#ffd75e;font-size:.85rem;font-weight:600;pointer-events:none;white-space:nowrap}
+@media (orientation: portrait){
+  body.drive-mode #drive-rotate-hint{display:flex}
+}
 .drive-exit-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;backdrop-filter:blur(6px)}
 .drive-exit-btn svg{width:18px;height:18px}
 .drive-estop{min-height:40px}

@@ -162,8 +162,9 @@ class TestLimits:
         assert servos.get_limits() == {
             int(k): dict(v) for k, v in SERVO_LIMITS.items()}
         from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
-        # v1.6.10 (задание владельца): CAM TILT 60..170, CRANE TILT 100..150
-        assert servos.get_limits(2) == {'min': 60, 'max': 170}
+        # v1.6.14 (задание владельца): CAM TILT БЕЗ лимита (0..180);
+        # CRANE TILT 100..150 не тронут
+        assert servos.get_limits(2) == {'min': 0, 'max': 180}
         assert servos.get_limits(SERVO_CRANE_GRIP) == {'min': 100, 'max': 150}
         assert servos.get_limits(SERVO_CRANE_ARM) == {'min': 100, 'max': 180}
         assert servos.get_limits(5) == {'min': 100, 'max': 150}   # наклон клешни
@@ -173,13 +174,14 @@ class TestLimits:
         assert not hasattr(servos, 'set_limits')
 
     def test_clamped_to_config_limits(self, servos):
-        # tilt камеры: 60..170; наклон клешни (канал 5): 100..150;
+        # tilt камеры: 0..180 (v1.6.14 — лимит снят, 10 и 200 сжимаются к
+        # границам хода серво); наклон клешни (канал 5): 100..150;
         # захват (канал 6): 100..180 (v1.6.10)
         from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
         assert servos.set_angle(2, 10) is True
-        assert servos.get_angle(2) == 60
+        assert servos.get_angle(2) == 10
         assert servos.set_angle(2, 200) is True
-        assert servos.get_angle(2) == 170
+        assert servos.get_angle(2) == 180
         assert servos.set_angle(SERVO_CRANE_GRIP, -5) is True
         assert servos.get_angle(SERVO_CRANE_GRIP) == 100        # нижний лимит наклона клешни
         assert servos.set_angle(SERVO_CRANE_GRIP, 200) is True
