@@ -446,6 +446,11 @@ body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-ri
 .upd-install-btn{flex:0 0 auto;padding:9px 16px;font-size:.82rem}
 .upd-backup-wrap{flex:1;min-width:150px}
 .upd-backup-wrap select{font-weight:500}
+/* v1.6.13: результат проверки обновлений на GitHub */
+.upd-gh-info{flex:1;min-width:150px;display:flex;align-items:center;padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text-2);font-size:.8rem;overflow:hidden}
+.upd-gh-info[data-state="running"]{border-color:var(--accent);color:var(--accent)}
+.upd-gh-info[data-state="done"]{border-color:var(--ok-strong);color:var(--ok-strong)}
+.upd-gh-info[data-state="error"]{border-color:var(--danger-strong);color:var(--danger-strong)}
 .upd-status{align-self:stretch}
 .upd-status[data-state="running"]{background:var(--accent-soft);color:var(--accent)}
 .upd-status[data-state="done"]{background:var(--ok-soft);color:var(--ok-strong)}

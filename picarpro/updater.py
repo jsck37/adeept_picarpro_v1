@@ -25,19 +25,28 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
 
 from picarpro.logger import logger
 from config import (BASE_DIR, UPDATE_MAX_BYTES, UPDATE_KEEP_BACKUPS,
-                    UPDATE_HEALTHY_AFTER_S, UPDATE_SERVICE_NAME)
+                    UPDATE_HEALTHY_AFTER_S, UPDATE_SERVICE_NAME,
+                    UPDATE_GITHUB_REPO, UPDATE_GITHUB_BRANCH,
+                    UPDATE_GITHUB_TIMEOUT_S)
 
 ROOT = str(BASE_DIR)
-REPLACE_DIRS = ('picarpro', 'tools', 'tests', 'docs')
+# models — нейросети (yolov5n-seg / yolo11n-pose .onnx + classes.txt): без
+# него веб-обновление не доставляло модели на робота, и режимы YOLO Mask /
+# Hand после OTA-обновления падали с «model not found» (v1.6.12). Своя
+# модель в /home/pi/models приоритетнее и заменой не затрагивается.
+REPLACE_DIRS = ('picarpro', 'tools', 'tests', 'docs', 'models')
 TOP_SUFFIXES = ('.py', '.sh', '.md', '.txt', '.ini')
 REQUIRED = ('boot.py', 'config.py', 'picarpro/__init__.py', 'picarpro/state.py')
 MAX_UNPACKED = 200 * 1024 * 1024
 MAX_FILES = 5000
 BACKUP_RE = re.compile(r'^backup_[0-9A-Za-z._-]+\.tar\.gz$')
+_UA = {'User-Agent': 'picarpro-updater'}   # GitHub API требует User-Agent
 
 
 class UpdateError(Exception):
@@ -361,3 +370,230 @@ def info(root=None):
         pass
     return {'version': current_version(P['root']), 'backups': list_backups(P['root']),
             'pending': pending, 'max_mb': UPDATE_MAX_BYTES // (1024 * 1024)}
+
+
+# ---- проверка обновлений на GitHub (v1.6.13) --------------------------------
+# Робот в AP-режиме интернета не имеет, но при подключении к домашней сети
+# (клиентом) или по кабелю интернет появляется — тогда кнопка «Проверить»
+# в меню «Обновление» сравнивает локальную версию с версией репозитория
+# jsck37/adeept_picarpro_v1 и может скачать архив прямо с GitHub.
+
+def parse_repo(url):
+    """'https://github.com/owner/repo' -> ('owner', 'repo') или None."""
+    m = re.match(r'^https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/'
+                 r'([A-Za-z0-9_.-]+?)(?:\.git)?/?$', url or '')
+    return (m.group(1), m.group(2)) if m else None
+
+
+def version_tuple(ver):
+    """'1.6.13-mod2' -> (1, 6, 13, 'mod2') для сравнения версий."""
+    parts = []
+    for chunk in re.split(r'[.\-+_ ]', str(ver or '')):
+        if chunk.isdigit():
+            parts.append(int(chunk))
+        elif chunk:
+            parts.append(chunk.lower())
+    return tuple(parts)
+
+
+def version_newer(remote, current):
+    """True, если remote строго новее current (по числовым частям).
+
+    '1.6.13' > '1.6.12'; суффикс сборки ('1.6.13-mod1') новее базовой
+    версии той же нумерации; на равной общей части число старше строки
+    (semver-правило «релиз > пререлиз»)."""
+    rt, ct = version_tuple(remote), version_tuple(current)
+    if not rt or not ct:
+        return False
+    for a, b in zip(rt, ct):
+        if a == b:
+            continue
+        if isinstance(a, int) and isinstance(b, int):
+            return a > b
+        return isinstance(a, int)     # число новее буквенного суффикса
+    return len(rt) > len(ct)          # общая часть равна: длиннее = новее
+
+
+def _http_get(url, timeout=None, as_bytes=False):
+    """GET с таймаутом; возвращает str/bytes. Роняет UpdateError на отказ."""
+    req = urllib.request.Request(url, headers=_UA)
+    try:
+        with urllib.request.urlopen(
+                req, timeout=timeout or UPDATE_GITHUB_TIMEOUT_S) as r:
+            data = r.read()
+            return data if as_bytes else data.decode('utf-8', 'replace')
+    except urllib.error.HTTPError as e:
+        raise UpdateError(f'HTTP {e.code}: {url[:80]}')
+    except Exception as e:
+        raise UpdateError(f'{type(e).__name__}: {str(e)[:80]}')
+
+
+def internet_available():
+    """Есть ли доступ к github.com (быстрая проверка TCP, ~2 с)."""
+    import socket
+    try:
+        s = socket.create_connection(('github.com', 443), timeout=2.0)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _remote_version(owner, repo, branch):
+    """__version__ из picarpro/__init__.py ветки репозитория (raw).
+
+    Сначала HEAD (ветка ПО УМОЛЧАНИЮ: переименование 'mod' -> 'main' не
+    сломает проверку), затем явное имя ветки из конфига."""
+    url_head = (f'https://raw.githubusercontent.com/{owner}/{repo}/'
+                f'HEAD/picarpro/__init__.py')
+    try:
+        return _read_version_str(_http_get(url_head))
+    except UpdateError:
+        url = (f'https://raw.githubusercontent.com/{owner}/{repo}/'
+               f'{branch}/picarpro/__init__.py')
+        return _read_version_str(_http_get(url))
+
+
+def _read_version_str(text):
+    m = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", text or '')
+    return m.group(1) if m else '?'
+
+
+def _latest_release(owner, repo):
+    """Последний релиз (тег, имя, URL, архив-ресурс) или None."""
+    url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
+    try:
+        data = json.loads(_http_get(url))
+    except UpdateError:
+        return None          # 404 = релизов нет; сеть пропала — тоже ок
+    assets = []
+    for a in data.get('assets') or []:
+        name = a.get('name', '')
+        if name.endswith(('.tar.gz', '.tgz', '.zip')):
+            assets.append({'name': name, 'url': a.get('browser_download_url'),
+                           'size': a.get('size', 0)})
+    return {'tag': data.get('tag_name'), 'name': data.get('name'),
+            'url': data.get('html_url'), 'notes': (data.get('body') or '')[:500],
+            'assets': assets}
+
+
+def github_check(root=None):
+    """Проверить обновление на GitHub. Работает ТОЛЬКО при интернете.
+
+    Возвращает словарь для /api/update/check: интернет, версии, есть ли
+    обновление, релиз (если есть). Все сетевые ошибки — не исключение,
+    а {'ok': False, 'error': ...}: кнопка в UI показывает причину.
+    """
+    repo = parse_repo(UPDATE_GITHUB_REPO)
+    if repo is None:
+        return {'ok': False, 'error': 'UPDATE_GITHUB_REPO is not a GitHub URL'}
+    owner, name = repo
+    if not internet_available():
+        return {'ok': True, 'internet': False, 'repo': UPDATE_GITHUB_REPO,
+                'message': 'нет доступа к интернету — подключите робота '
+                           'к сети (клиентом Wi-Fi или кабелем)'}
+    try:
+        remote = _remote_version(owner, name, UPDATE_GITHUB_BRANCH)
+        release = _latest_release(owner, name)
+    except UpdateError as e:
+        return {'ok': False, 'internet': True, 'repo': UPDATE_GITHUB_REPO,
+                'error': f'GitHub недоступен: {e}'}
+    current = current_version(root)
+    update_available = version_newer(remote, current)
+    result = {'ok': True, 'internet': True, 'repo': UPDATE_GITHUB_REPO,
+              'branch': UPDATE_GITHUB_BRANCH, 'current': current,
+              'remote': remote, 'update_available': update_available,
+              'release': release}
+    if not update_available and remote not in ('?', None):
+        result['message'] = f'установлена последняя версия (v{current})'
+    elif remote == '?':
+        result['message'] = 'не удалось прочитать версию репозитория'
+    return result
+
+
+def github_download(dest_dir):
+    """Скачать архив обновления с GitHub (ресурс релиза или tarball ветки).
+
+    Возвращает путь к скачанному файлу. Ресурс релиза предпочтительнее —
+    это проверенный владельцем срез, а не «живая» ветка.
+    """
+    repo = parse_repo(UPDATE_GITHUB_REPO)
+    if repo is None:
+        raise UpdateError('UPDATE_GITHUB_REPO is not a GitHub URL')
+    owner, name = repo
+    url = None
+    release = _latest_release(owner, name)
+    if release:
+        for a in release.get('assets') or []:
+            if a.get('url') and a.get('name', '').endswith(
+                    ('.tar.gz', '.tgz', '.zip')):
+                url = a['url']
+                break
+    if url is None:
+        # tarball ветки (codeload отдаёт gz-поток без имени файла):
+        # сначала ветка по умолчанию (HEAD), затем явная из конфига
+        urls = (f'https://codeload.github.com/{owner}/{name}/tar.gz/HEAD',
+                f'https://codeload.github.com/{owner}/{name}/tar.gz/refs/'
+                f'heads/{UPDATE_GITHUB_BRANCH}')
+    else:
+        urls = (url,)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, 'github_update.tar.gz'
+                        if (url is None or url.endswith('.gz')) else 'github_update.zip')
+    last_err = None
+    for u in urls:
+        try:
+            _download_to(u, dest)
+            if os.path.getsize(dest) < 512:
+                raise UpdateError('архив пуст — проверьте репозиторий/релиз')
+            return dest
+        except UpdateError as e:
+            last_err = e
+    try:
+        os.remove(dest)
+    except OSError:
+        pass
+    raise last_err or UpdateError('download failed')
+
+
+def _download_to(url, dest):
+    """Скачать url в dest с лимитом UPDATE_MAX_BYTES (вспомогательная)."""
+    req = urllib.request.Request(url, headers=_UA)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(dest, 'wb') as f:
+            total = 0
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > UPDATE_MAX_BYTES:
+                    raise UpdateError(
+                        f'архив больше лимита {UPDATE_MAX_BYTES // (1024 * 1024)} '
+                        'МБ — скачайте и установите его вручную через панель')
+                f.write(chunk)
+    except UpdateError:
+        raise
+    except Exception as e:
+        raise UpdateError(f'скачивание не удалось: {type(e).__name__}: '
+                          f'{str(e)[:80]}')
+    if os.path.getsize(dest) < 512:
+        os.remove(dest)
+        raise UpdateError('архив пуст — проверьте репозиторий/релиз')
+    return dest
+
+
+def github_install(root=None):
+    """Скачать с GitHub и установить обновление (кнопка в меню)."""
+    P = _paths(root)
+    tmp = _ensure(P['tmp'])
+    archive = github_download(tmp)
+    try:
+        result = apply_update(archive, root)
+        result['source'] = 'github'
+        return result
+    finally:
+        try:
+            os.remove(archive)
+        except OSError:
+            pass

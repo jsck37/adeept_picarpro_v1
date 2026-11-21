@@ -41,9 +41,14 @@ class TestLineDetection:
         cv_thread.cv_mode = 'findlineCV'
         cv_thread.overlay_wanted = True      # оверлей рисуется только для зрителя
         cv_thread._process(frame)
-        overlay = cv_thread.get_overlay()
-        assert overlay is not None
-        assert overlay.shape == frame.shape
+        paint = cv_thread.get_overlay()
+        assert paint is not None
+        assert paint[0] == 'line'               # данные для отрисовки на свежем кадре
+        assert paint[1]['pos1'] > 0
+        # и их можно нарисовать на «живом» кадре стрима (v1.6.13)
+        disp = cv_thread.paint(np.full_like(frame, 60))
+        assert disp.shape == frame.shape
+        assert disp.max() > 60                  # метки действительно нарисованы
 
     def test_overlay_skipped_without_viewer(self, cv_thread):
         """Энергосбережение: без открытого видео оверлей не строится."""
@@ -130,7 +135,7 @@ class _StubPose:
     def should_infer(self):
         return True
 
-    def infer(self, frame):
+    def infer(self, frame, skin_bounds=None):
         return self.persons
 
     def draw(self, disp, persons, hand):

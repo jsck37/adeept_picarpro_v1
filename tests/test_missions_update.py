@@ -225,6 +225,12 @@ def _skeleton(root, version='1.0.0', marker_text='old'):
     (root / 'config.py').write_text(f"SPEED = {10 if marker_text == 'old' else 20}\nKEEP = 1\n")
     (root / 'tools').mkdir(exist_ok=True)
     (root / 'tools' / 'a.py').write_text("X = 1\n")
+    # models — каталог нейросетей: с v1.6.12 ставится веб-обновлением
+    # (REPLACE_DIRS); раньше .onnx не доезжал до робота и режимы YOLO
+    # падали с «model not found»
+    (root / 'models').mkdir(exist_ok=True)
+    (root / 'models' / 'yolov5n-seg.onnx').write_text(f'weights-{marker_text}\n')
+    (root / 'models' / 'classes.txt').write_text('person\n')
     return root
 
 
@@ -300,6 +306,9 @@ class TestApplyAndRollback:
         assert 'SPEED' in r['config_changed'] and 'KEEP' not in r['config_changed']
         assert "MARK = 'new'" in (root / 'picarpro' / 'state.py').read_text()
         assert (root / 'tools' / 'b.py').exists() and not (root / 'tools' / 'stale.py').exists()
+        # v1.6.12: models/ ставится веб-обновлением (раньше — «model not found»)
+        assert (root / 'models' / 'yolov5n-seg.onnx').read_text() == 'weights-new\n'
+        assert (root / 'models' / 'classes.txt').read_text() == 'person\n'
         assert (root / 'missions' / 'm.json').exists()                  # данные сохранены
         assert (root / 'config_local.py').read_text() == 'SPEED = 99\n'  # локальные настройки
         assert 'SPEED = 10' in (root / 'config_user_prev.py').read_text()
@@ -309,6 +318,8 @@ class TestApplyAndRollback:
         assert rb['to'] == '1.0.0'
         assert "MARK = 'old'" in (root / 'picarpro' / 'state.py').read_text()
         assert (root / 'tools' / 'stale.py').exists() and not (root / 'tools' / 'b.py').exists()
+        # откат возвращает и models/ целиком
+        assert (root / 'models' / 'yolov5n-seg.onnx').read_text() == 'weights-old\n'
         assert not (root / '.update_pending').exists()
 
     def test_zip_with_toplevel_dir(self, proj):

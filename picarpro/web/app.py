@@ -211,6 +211,31 @@ def create_app(state):
         result['restarting'] = updater.schedule_restart()
         return jsonify(result)
 
+    # v1.6.13: проверка обновлений на GitHub (кнопка «Проверить» в меню).
+    # Не требует «водителя»: это только чтение, робота не останавливает.
+    @app.route('/api/update/check', methods=['GET', 'POST'])
+    def api_update_check():
+        from picarpro import updater
+        return jsonify(updater.github_check())
+
+    @app.route('/api/update/github', methods=['POST'])
+    def api_update_github():
+        from picarpro import updater
+        denied = _update_guard()
+        if denied:
+            return denied
+        try:
+            state.emergency_stop()
+            result = updater.github_install()
+        except updater.UpdateError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+        except Exception as e:
+            logger.error(f'[Update] github install failed: {e}')
+            return jsonify({'ok': False,
+                            'error': 'update failed: ' + str(e)[:120]}), 500
+        result['restarting'] = updater.schedule_restart()
+        return jsonify(result)
+
     @app.route('/docs/index.json')
     def docs_index():
         return send_from_directory(DOCS_DIR, 'index.json',

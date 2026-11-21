@@ -259,6 +259,18 @@
     upd_rollback_failed: 'Rollback request failed.',
     upd_upload_lost: 'Upload failed (connection lost).',
     upd_not_driver: 'Another device is driving — press "Take control" first.',
+    // v1.6.13: GitHub update check
+    upd_step_gh: 'Check for updates (GitHub)',
+    upd_gh_idle: 'Not checked yet',
+    upd_gh_check: 'Check',
+    upd_gh_checking: 'Checking access to GitHub…',
+    upd_gh_no_internet: 'No internet access — connect the robot to a network (Wi-Fi client or cable) and try again.',
+    upd_gh_available: 'Version v{b} is available (installed v{a}).',
+    upd_gh_uptodate: 'The latest version is installed (v{a}).',
+    upd_gh_failed: 'Check failed: {s}',
+    upd_gh_install: 'Download from GitHub & install',
+    upd_gh_install_confirm: 'Download and install the latest version from {s}? The robot will stop and restart.',
+    upd_gh_downloading: 'Downloading archive from GitHub…',
     // ---- console ----
     console_title: 'Log Console',
     console_lines_fmt: '{n} lines',

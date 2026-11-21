@@ -1,10 +1,22 @@
 """v1.6.10: пока счётчик «Устройства» = 0, нижняя подсветка мигает СИНИМ
-(ожидание подключения); при подключении — прежний режим подсветки."""
+(ожидание подключения); при подключении — прежний режим подсветки.
+v1.6.13: «Устройства» считаются по точке доступа (iw/dnsmasq/arp), а не
+только по вкладкам веб-интерфейса — подключённый к Wi-Fi робота телефон
+(без открытого UI) тоже гасит подсветку ожидания."""
 import time
 
 import pytest
 
 from tests.test_v150 import wait_for
+
+
+@pytest.fixture(autouse=True)
+def _no_hotspot(monkeypatch):
+    """По умолчанию hotspot-счётчик «недоступен» (тесты идут не на роботе):
+    подсветка ведёт себя как раньше — по ws_clients. Тесты hotspot-поведения
+    (класс TestWaitingLedHotspot) подменяют счётчик явно."""
+    monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                        lambda *a, **k: (None, None))
 
 
 def _solid_blue(leds):
@@ -107,3 +119,55 @@ class TestWaitingLedWebsocket:
         # соединение закрылось, клиентов снова нет -> ждём подключения
         assert len(state.ws_clients) == 0
         assert state.leds._waiting is True and state.leds._mode == 'waiting'
+
+
+class TestWaitingLedHotspot:
+    """v1.6.13: подсветка ожидания реагирует на подключение к ТОЧКЕ ДОСТУПА,
+    а не только на открытые вкладки веб-интерфейса."""
+
+    def test_hotspot_device_goes_out_of_waiting(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (2, 'iw'))
+        assert len(clean_state.ws_clients) == 0
+        clean_state.refresh_waiting_led()
+        # телефон подключён к AP робота, но вкладок нет — ждать нечего
+        assert clean_state.leds._waiting is False
+
+    def test_empty_hotspot_keeps_waiting(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (0, 'dnsmasq'))
+        clean_state.refresh_waiting_led()
+        assert clean_state.leds._waiting is True and clean_state.leds._mode == 'waiting'
+
+    def test_hotspot_unavailable_falls_back_to_web(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (None, None))
+        clean_state.refresh_waiting_led()
+        assert clean_state.leds._waiting is True      # как раньше: вкладок нет
+        clean_state.ws_clients.add(object())
+        clean_state.refresh_waiting_led()
+        assert clean_state.leds._waiting is False
+
+    def test_ds4_counts_as_connected_device(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (0, 'arp'))
+        ds4 = clean_state.ds4
+        if ds4 is None:
+            pytest.skip('DS4 отсутствует в тестовом окружении')
+        monkeypatch.setattr(type(ds4), 'connected',
+                            property(lambda self: True))
+        clean_state.refresh_waiting_led()
+        assert clean_state.leds._waiting is False     # геймпад подключён
+
+    def test_status_reports_hotspot_clients(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (3, 'iw'))
+        st = clean_state.get_status()
+        assert st['hotspot_clients'] == 3
+
+    def test_status_reports_none_without_hotspot(self, clean_state, monkeypatch):
+        monkeypatch.setattr('picarpro.state.hotspot.count_clients',
+                            lambda *a, **k: (None, None))
+        st = clean_state.get_status()
+        assert st['hotspot_clients'] is None
+        assert st['clients'] == 0

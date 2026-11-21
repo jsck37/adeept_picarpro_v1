@@ -752,7 +752,13 @@ function updateStatus(d) {
   if (!d) return;
   if ('driver' in d) setDriver(d.driver);
   if (d.mission) renderMissionStatus(d.mission);
-  if (d.clients !== undefined) document.getElementById('sb-clients').textContent = d.clients;
+  // v1.6.13: «Устройства» — счётчик точки доступа (реально подключённые
+  // телефоны/ПК по iw/dnsmasq/arp); если hotspot не считается — вкладки UI
+  if (d.hotspot_clients !== undefined && d.hotspot_clients !== null) {
+    document.getElementById('sb-clients').textContent = d.hotspot_clients;
+  } else if (d.clients !== undefined) {
+    document.getElementById('sb-clients').textContent = d.clients;
+  }
   if (d.cpu_temp !== undefined) document.getElementById('sb-cpu-temp').textContent = d.cpu_temp + '\u00B0C';
   if (d.cpu_usage !== undefined) document.getElementById('sb-cpu-usage').textContent = d.cpu_usage + '%';
   if (d.ram_percent !== undefined || d.ram) {
@@ -2077,6 +2083,68 @@ document.getElementById('upd-rollback').addEventListener('click', function() {
     .then(updateResult)
     .catch(function() { updMsg(t('upd_rollback_failed'), 'error'); });
 });
+
+// ==================== Обновления с GitHub (v1.6.13) ====================
+// Шаг 1 меню: «Проверить» сравнивает локальную версию с версией в
+// репозитории jsck37/adeept_picarpro_v1; если есть новее — шаг предлагает
+// скачать архив прямо с GitHub и установить (интернет должен быть включён).
+function ghInfo(text, state) {
+  var el = document.getElementById('upd-gh-info');
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.state = state || '';
+}
+
+var updCheckBtn = document.getElementById('upd-check');
+if (updCheckBtn) {
+  updCheckBtn.addEventListener('click', function() {
+    ghInfo(t('upd_gh_checking'), 'running');
+    updCheckBtn.disabled = true;
+    fetch('/api/update/check', {headers: authHeaders(), cache: 'no-store'})
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        updCheckBtn.disabled = false;
+        var inst = document.getElementById('upd-gh-install');
+        if (!r || !r.ok) {
+          ghInfo(t('upd_gh_failed', {s: (r && r.error) ? srvMsg(r.error) : '?'}), 'error');
+          if (inst) inst.hidden = true;
+          return;
+        }
+        if (!r.internet) {
+          ghInfo(t('upd_gh_no_internet'), 'error');
+          if (inst) inst.hidden = true;
+          return;
+        }
+        window._ghRepoUrl = r.repo || 'GitHub';
+        if (r.update_available) {
+          ghInfo(t('upd_gh_available', {a: r.current, b: r.remote}), 'running');
+          if (inst) inst.hidden = false;
+        } else {
+          ghInfo(r.message || t('upd_gh_uptodate', {a: r.current}), 'done');
+          if (inst) inst.hidden = true;
+        }
+      })
+      .catch(function() {
+        updCheckBtn.disabled = false;
+        ghInfo(t('upd_gh_failed', {s: ''}), 'error');
+      });
+  });
+}
+
+var updGhInstallBtn = document.getElementById('upd-gh-install');
+if (updGhInstallBtn) {
+  updGhInstallBtn.addEventListener('click', function() {
+    if (window.confirm && !window.confirm(t('upd_gh_install_confirm', {s: window._ghRepoUrl || 'GitHub'}))) return;
+    updMsg(t('upd_gh_downloading'), 'running');
+    fetch('/api/update/github', {method: 'POST', headers: authHeaders()})
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (r && r.ok) { loadUpdateInfo(); }
+        updateResult(r);
+      })
+      .catch(function() { updMsg(t('upd_upload_lost'), 'error'); });
+  });
+}
 
 loadUpdateInfo();
 

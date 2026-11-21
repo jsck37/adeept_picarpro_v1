@@ -326,7 +326,7 @@ def stage_4_pip_packages(debian_ver):
     pip_flag = "--break-system-packages" if debian_ver >= 12 else ""
 
     print(f"  {DIM}[*]{RST} Updating pip...")
-    run_cmd(f"sudo -H pip install {pip_flag} --ignore-installed pip", critical=False)
+    run_cmd(f"sudo -H pip3 install {pip_flag} --ignore-installed pip", critical=False)
 
     pip_groups = [
         # v1.4.1: adafruit-circuitpython-* (Blinka) БОЛЬШЕ НЕ НУЖНЫ —
@@ -334,17 +334,17 @@ def stage_4_pip_packages(debian_ver):
         # падает при импорте без пакета adafruit_blinka_raspberry_pi_pwm
         # (ошибка «The platform library ... was not found»)
         ("OLED/LED",
-         f"sudo -H pip install {pip_flag} luma.oled rpi_ws281x"),
+         f"sudo -H pip3 install {pip_flag} luma.oled rpi_ws281x"),
         ("Web Server",
-         f"sudo -H pip install {pip_flag} flask flask_cors websockets loguru"),
+         f"sudo -H pip3 install {pip_flag} flask flask_cors websockets loguru"),
         ("Vision/Video",
-         f"sudo -H pip install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
+         f"sudo -H pip3 install {pip_flag} numpy psutil imutils pybase64 pillow pyzmq"),
         ("IMU Sensor",
-         f"sudo -H pip install {pip_flag} mpu6050-raspberrypi"),
+         f"sudo -H pip3 install {pip_flag} mpu6050-raspberrypi"),
         ("DS4 Controller",
-         f"sudo -H pip install {pip_flag} evdev"),
+         f"sudo -H pip3 install {pip_flag} evdev"),
         ("GPIO/SPI/I2C/Servo (RPi.GPIO, spidev, smbus2)",
-         f"sudo -H pip install {pip_flag} RPi.GPIO spidev smbus2"),
+         f"sudo -H pip3 install {pip_flag} RPi.GPIO spidev smbus2"),
     ]
 
     for group_name, cmd in pip_groups:
@@ -583,13 +583,42 @@ def stage_8_yolo_model():
     os.makedirs(models_dir, exist_ok=True)
 
     # v1.6.6: модели едут в архиве прошивки (models/) — интернет не нужен.
-    # Если модель уже на месте (обновление поверх) — не перезаписываем.
+    # Если модель уже на месте — не перезаписываем, КРОМЕ случая, когда на
+    # месте официальная модель ПРОШЛОЙ версии (v1.6.12: yolov5n-seg @640 ->
+    # @320): её SHA известен, файл заменяется новой комплектной. Дообученные
+    # (свой SHA) не трогаем.
     bundled_dir = os.path.join(thisPath, "models")
+    _OFFICIAL_PREV_SHA = {
+        "yolov5n-seg.onnx": (
+            "a7fac6c7aa489358a27011f81c38077683eeb5187a18e9b8d20e294d456bda36",
+        ),
+    }
+
+    def _sha256(path):
+        import hashlib
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
     copied = 0
     for fn in ("yolov5n-seg.onnx", "yolo11n-pose.onnx"):
         src = os.path.join(bundled_dir, fn)
         dst = os.path.join(models_dir, fn)
-        if os.path.isfile(src) and not os.path.isfile(dst):
+        if not os.path.isfile(src):
+            continue
+        replace = False
+        if not os.path.isfile(dst):
+            replace = True
+        else:
+            try:
+                if (_sha256(dst) != _sha256(src)
+                        and _sha256(dst) in _OFFICIAL_PREV_SHA.get(fn, ())):
+                    replace = True   # официальная модель прошлой версии
+            except Exception:
+                replace = False      # не смогли посчитать — не трогаем
+        if replace:
             try:
                 shutil.copy2(src, dst)
                 copied += 1

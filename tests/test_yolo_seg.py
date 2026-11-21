@@ -67,15 +67,16 @@ def _make_detector(monkeypatch, task='seg', seg_path=None):
 
 def _seg_output_v5():
     """(1, N, 117): два объекта v5-seg. coef[0]=3 и proto-канал 0 = +3 ->
-    маска у первого; coef[1]=3 при нулевом канале 1 -> маска пустая."""
-    out = np.zeros((1, 25200, 117), dtype=np.float32)
+    маска у первого; coef[1]=3 при нулевом канале 1 -> маска пустая.
+    Координаты — в пикселях сети 320 (YOLO_INPUT_SIZE с v1.6.12)."""
+    out = np.zeros((1, 6300, 117), dtype=np.float32)
     r = out[0, 1000]
-    r[0:4] = (320, 320, 100, 100)          # cx,cy,w,h в сети 640
+    r[0:4] = (160, 160, 100, 100)          # cx,cy,w,h в сети 320
     r[4] = 0.9
     r[5] = 0.8
     r[85] = 3.0                            # coef 0
     r = out[0, 2000]
-    r[0:4] = (100, 100, 80, 80)
+    r[0:4] = (80, 80, 80, 80)
     r[4] = 0.9
     r[5] = 0.8
     r[86] = 3.0                            # coef 1
@@ -83,7 +84,7 @@ def _seg_output_v5():
 
 
 def _proto():
-    p = np.zeros((1, 32, 160, 160), dtype=np.float32)
+    p = np.zeros((1, 32, 80, 80), dtype=np.float32)
     p[0, 0] = 3.0                          # канал 0 -> sigmoid ~0.95 везде
     return p
 
@@ -94,7 +95,7 @@ class TestSegParse:
         objs = det._parse_output(_seg_output_v5(), 640, 480, proto=_proto())
         assert len(objs) == 2
         top = objs[0]
-        assert top['mask_area'] == 100 * 75      # bbox 640->480 по оси y
+        assert top['mask_area'] == 200 * 150   # bbox 320->640x480 (scale 2/1.5)
         assert top['mask'].shape == (480, 640)
         assert top['mask'].dtype == np.dtype(bool)
         assert 0 < top['mask_pct'] <= 100
@@ -117,7 +118,7 @@ class TestSegParse:
         """Обычная v5-детекция (85 столбцов) — масок нет даже с proto."""
         yd, det = _make_detector(monkeypatch)
         out = np.zeros((1, 25200, 85), dtype=np.float32)
-        out[0, 500, 0:4] = (320, 320, 100, 100)
+        out[0, 500, 0:4] = (160, 160, 100, 100)
         out[0, 500, 4] = 0.9
         out[0, 500, 5] = 0.8
         objs = det._parse_output(out, 640, 480, proto=_proto())
@@ -127,12 +128,12 @@ class TestSegParse:
         """v8-seg: channels first, 116 столбцов (4+80+32), objectness нет."""
         yd, det = _make_detector(monkeypatch)
         out = np.zeros((1, 116, 25200), dtype=np.float32)
-        out[0, 0:4, 500] = (320, 320, 100, 100)
+        out[0, 0:4, 500] = (160, 160, 100, 100)
         out[0, 4, 500] = 0.9                   # класс 0
         out[0, 84, 500] = 3.0                  # coef 0
         objs = det._parse_output(out, 640, 480, proto=_proto())
         assert len(objs) == 1
-        assert objs[0]['mask_area'] == 100 * 75
+        assert objs[0]['mask_area'] == 200 * 150
         assert objs[0]['conf'] == pytest.approx(0.9)
 
     def test_status_strips_mask(self, monkeypatch):
@@ -182,6 +183,106 @@ class TestLoad:
         monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(a))
         monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(b))
         assert det._model_path() == ('seg', str(a))
+
+    def test_classes_fallback_bundled_file(self, monkeypatch, tmp_path):
+        """v1.6.12: /home/pi/models/classes.txt отсутствует — метки берутся
+        из комплектного models/classes.txt (ставится веб-обновлением)."""
+        import picarpro.camera.yolo_detector as yd
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', '/nonexistent')
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', '/nonexistent')
+        monkeypatch.setattr(yd, 'YOLO_CLASSES_FILE', str(tmp_path / 'none.txt'))
+        det = yd.YoloDetector()          # пути классов патчатся ДО создания
+        assert len(det._classes) == 80 and det._classes[0] == 'person'
+
+    def test_classes_fallback_empty_without_files(self, monkeypatch, tmp_path):
+        import picarpro.camera.yolo_detector as yd
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', '/nonexistent')
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', '/nonexistent')
+        monkeypatch.setattr(yd, 'YOLO_CLASSES_FILE', str(tmp_path / 'a.txt'))
+        monkeypatch.setattr(yd, 'YOLO_CLASSES_BUNDLED', str(tmp_path / 'b.txt'))
+        det = yd.YoloDetector()
+        assert det._classes == []
+
+    def test_load_falls_back_when_installed_wrong_input(self, monkeypatch,
+                                                        tmp_path):
+        """v1.6.12: модель в /home/pi/models с другим входом (например 640
+        от прошивки до v1.6.12) больше не ломает режим с 'Blob dimensions
+        do not match' — probe-прогон отбраковывает её, берётся комплектная."""
+        import picarpro.camera.yolo_detector as yd
+
+        class FakeNet:
+            def __init__(self, expects):
+                self.expects = expects
+                self.names = ['output0', 'output1']
+
+            def getUnconnectedOutLayersNames(self):
+                return list(self.names)
+
+            def setInput(self, blob):
+                self.shape = tuple(blob.shape)
+
+            def forward(self, names=None):
+                if self.shape[2] != self.expects:
+                    raise ValueError('Blob dimensions do not match')
+                return [np.zeros((1, 6300, 117), np.float32),
+                        np.zeros((1, 32, 80, 80), np.float32)]
+
+            def setPreferableBackend(self, *a):
+                pass
+
+            def setPreferableTarget(self, *a):
+                pass
+
+        a = tmp_path / 'a.onnx'
+        b = tmp_path / 'b.onnx'
+        a.write_bytes(b'x')
+        b.write_bytes(b'x')
+        nets = {str(a): FakeNet(640), str(b): FakeNet(320)}
+        monkeypatch.setattr(yd, 'cv2', types.SimpleNamespace(
+            dnn=types.SimpleNamespace(
+                readNetFromONNX=lambda p: nets[p],
+                DNN_BACKEND_OPENCV=0, DNN_TARGET_CPU=1)))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(a))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(b))
+        det = yd.YoloDetector()
+        assert det.load() is True
+        assert det._seg is True and det.task == 'seg'
+        assert det._out_names == ['output0', 'output1']
+
+    def test_load_fails_when_no_candidate_suits(self, monkeypatch, tmp_path):
+        """Обе модели отбракованы probe (или отсутствуют) — режим не падает,
+        load() = False, в оверлей уходит «MODEL NOT FOUND» один раз."""
+        import picarpro.camera.yolo_detector as yd
+
+        class FakeNet:
+            def getUnconnectedOutLayersNames(self):
+                return ['output0', 'output1']
+
+            def setInput(self, blob):
+                self.shape = tuple(blob.shape)
+
+            def forward(self, names=None):
+                raise ValueError('Blob dimensions do not match')
+
+            def setPreferableBackend(self, *a):
+                pass
+
+            def setPreferableTarget(self, *a):
+                pass
+
+        a = tmp_path / 'a.onnx'
+        b = tmp_path / 'b.onnx'
+        a.write_bytes(b'x')
+        b.write_bytes(b'x')
+        nets = {str(a): FakeNet(), str(b): FakeNet()}
+        monkeypatch.setattr(yd, 'cv2', types.SimpleNamespace(
+            dnn=types.SimpleNamespace(
+                readNetFromONNX=lambda p: nets[p],
+                DNN_BACKEND_OPENCV=0, DNN_TARGET_CPU=1)))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_PATH', str(a))
+        monkeypatch.setattr(yd, 'YOLO_SEG_MODEL_BUNDLED', str(b))
+        det = yd.YoloDetector()
+        assert det.load() is False and det.loaded is False
 
     def test_no_detect_only_model_in_repo(self):
         import os

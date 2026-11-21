@@ -2,12 +2,13 @@ import threading
 import time
 
 from picarpro.logger import logger
+from picarpro.utils import hotspot
 from picarpro.utils.system_info import SystemInfo
 from picarpro.network import get_ip
 from picarpro.control import ControlArbiter
 from config import (SERVO_STEERING, DEFAULT_SPEED, FLASK_PORT, HW_RETRY_INTERVAL_S,
                     RADAR_SECTOR_DEG,
-                    WEB_ACTIVE_TTL_S)
+                    WEB_ACTIVE_TTL_S, WAITING_LED_POLL_S)
 
 
 _CV2_FOUND = None
@@ -124,6 +125,38 @@ class SharedState:
                 pass
         logger.warning('[State] EMERGENCY STOP')
 
+    def _hotspot_count(self):
+        """Число устройств точки доступа (кэш 3 с внутри hotspot.count_clients).
+
+        None — считать не удалось (нет iw/leases/arp, запуск не на роботе).
+        """
+        try:
+            count, _src = hotspot.count_clients(
+                local_ips=hotspot.local_ip_candidates(get_ip))
+        except Exception as e:
+            logger.warning(f'[State] hotspot count failed: {e}')
+            count = None
+        return count
+
+    def _devices_connected(self):
+        """Есть ли хоть какое-то подключённое устройство (v1.6.13).
+
+        Источник — точка доступа (iw/dnsmasq/arp, см. picarpro/utils/
+        hotspot.py), а не только вкладки веб-интерфейса: телефон мог висеть
+        в Wi-Fi робота без открытого UI, а подсветка мигала «ждём».
+        Геймпад DS4 (Bluetooth) и открытые вкладки тоже считаются
+        устройствами. Если hotspot-счётчик недоступен — прежнее поведение
+        (только веб-клиенты).
+        """
+        if self.ws_clients:
+            return True
+        count = self._hotspot_count()
+        if count is not None and count > 0:
+            return True
+        if self.ds4 is not None and self.ds4.connected:
+            return True
+        return False
+
     def refresh_waiting_led(self):
         """Нет ни одного подключённого устройства -> нижняя подсветка мигает
         синим (ожидание подключения); появилось -> прежний режим подсветки."""
@@ -131,9 +164,23 @@ class SharedState:
         if leds is None or not hasattr(leds, 'set_waiting'):
             return
         try:
-            leds.set_waiting(len(self.ws_clients) == 0)
+            leds.set_waiting(not self._devices_connected())
         except Exception as e:
             logger.warning(f'[State] waiting LED failed: {e}')
+
+    def _waiting_led_loop(self):
+        """Подключение к точке доступа происходит БЕЗ веб-событий: если не
+        опрашивать hotspot, подсветка не узнавала о телефоне, подключившемся
+        мимо веб-интерфейса (и наоборот — продолжала мигать после
+        отключения всех устройств)."""
+        while self.running:
+            time.sleep(WAITING_LED_POLL_S)
+            if not self.running:
+                break
+            try:
+                self.refresh_waiting_led()
+            except Exception:
+                pass
 
     def on_last_client_gone(self):
         """Последний веб-клиент отключился (обрыв Wi-Fi, закрыли вкладку).
@@ -220,6 +267,11 @@ class SharedState:
         from picarpro.power import PowerManager
         self.power = self._try_init('Power', lambda: PowerManager(self))
         self._start_hw_retry()
+        # v1.6.13: фоновый опрос hotspot — подсветка «ждём подключения»
+        # реагирует на подключение/отключение устройств мимо веб-интерфейса
+        self._waiting_led_thread = threading.Thread(
+            target=self._waiting_led_loop, daemon=True)
+        self._waiting_led_thread.start()
 
     # ---- автовосстановление железа (v1.4.0) --------------------------------
     # Если в момент загрузки шина I2C была занята/зависла (классика:
@@ -380,6 +432,9 @@ class SharedState:
             'ds4': self.ds4.get_status() if self.ds4 else None,
             'low_power': bool(self.power and self.power.low_power),
             'clients': len(self.ws_clients),
+            # v1.6.13: устройства точки доступа (iw/dnsmasq/arp) — источник
+            # счётчика «Устройства» и подсветки ожидания; None = не считается
+            'hotspot_clients': self._hotspot_count(),
             'driver': self.control.driver,
             'hw': {
                 'motors': self.motors._initialized if self.motors else False,
@@ -413,7 +468,6 @@ class SharedState:
             'left_blinker': self.left_blinker,
             'right_blinker': self.right_blinker,
             'ir_left': ir_l, 'ir_middle': ir_m, 'ir_right': ir_r,
-            'ds4': self.ds4.get_status() if self.ds4 else None,
             'voice': {
                 'available': self.voice._initialized if self.voice else False,
                 'active': self.voice._active if self.voice else False,

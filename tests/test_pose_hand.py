@@ -151,6 +151,45 @@ class TestModelLoading:
         import picarpro.camera.pose_detector as pd
         assert os.path.isfile(pd.POSE_MODEL_BUNDLED), 'models/yolo11n-pose.onnx'
 
+    def test_load_falls_back_when_installed_wrong_input(self, monkeypatch,
+                                                        tmp_path):
+        """v1.6.12: модель в /home/pi/models с другим входом отбраковывается
+        probe-прогоном, берётся комплектная (см. YOLO-детектор)."""
+        import picarpro.camera.pose_detector as pd
+
+        class FakeNet:
+            def __init__(self, expects):
+                self.expects = expects
+
+            def setInput(self, blob):
+                self.shape = tuple(blob.shape)
+
+            def forward(self):
+                if self.shape[2] != self.expects:
+                    raise ValueError('Blob dimensions do not match')
+                return np.zeros((1, 56, 2100), np.float32)
+
+            def setPreferableBackend(self, *a):
+                pass
+
+            def setPreferableTarget(self, *a):
+                pass
+
+        a = tmp_path / 'a.onnx'
+        b = tmp_path / 'b.onnx'
+        a.write_bytes(b'x')
+        b.write_bytes(b'x')
+        nets = {str(a): FakeNet(640), str(b): FakeNet(320)}
+        monkeypatch.setattr(pd, 'cv2', types.SimpleNamespace(
+            dnn=types.SimpleNamespace(
+                readNetFromONNX=lambda p: nets[p],
+                DNN_BACKEND_OPENCV=0, DNN_TARGET_CPU=1)))
+        monkeypatch.setattr(pd, 'POSE_MODEL_PATH', str(a))
+        monkeypatch.setattr(pd, 'POSE_MODEL_BUNDLED', str(b))
+        d = pd.PoseDetector()
+        assert d.load() is True
+        assert d.loaded and d.model_path == str(b)
+
 
 class _FakeCam:
     def __init__(self):

@@ -544,6 +544,23 @@
         <div class="upd-step">
           <div class="upd-step-head">
             <span class="upd-step-num">1</span>
+            <span class="upd-step-title" data-i18n="upd_step_gh">Проверка обновлений (GitHub)</span>
+          </div>
+          <div class="upd-file-row">
+            <div class="upd-gh-info" id="upd-gh-info" data-i18n="upd_gh_idle">Не проверялось</div>
+            <button class="ms-chip" id="upd-check" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span data-i18n="upd_gh_check">Проверить</span>
+            </button>
+            <button class="ms-btn ms-btn-start" id="upd-gh-install" type="button" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span data-i18n="upd_gh_install">Скачать с GitHub и установить</span>
+            </button>
+          </div>
+        </div>
+        <div class="upd-step">
+          <div class="upd-step-head">
+            <span class="upd-step-num">2</span>
             <span class="upd-step-title" data-i18n="upd_step1">Установка архива</span>
           </div>
           <div class="upd-file-row">
@@ -560,7 +577,7 @@
         </div>
         <div class="upd-step">
           <div class="upd-step-head">
-            <span class="upd-step-num">2</span>
+            <span class="upd-step-num">3</span>
             <span class="upd-step-title" data-i18n="upd_step2">Откат при необходимости</span>
           </div>
           <div class="upd-file-row">

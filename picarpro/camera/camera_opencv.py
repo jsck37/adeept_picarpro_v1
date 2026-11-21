@@ -112,8 +112,14 @@ class CVThread(threading.Thread):
         self.on_motion = None
         self._prev_gray = None
         self._last_motion_ts = 0.0
-        self.overlay_frame = None          # BGR (или None)
-        self._overlay_lock = threading.Lock()
+        # v1.6.13: оверлей — не «запечённая» картинка CVThread, а ДАННЫЕ для
+        # отрисовки (кортеж вида ('pose', persons, hand, err)). Раньше стрим
+        # показывал именно картинку оверлея — кадр на момент инференса, поэтому
+        # в режимах CV видео обновлялось со скоростью инференса (2-4 fps), а не
+        # камеры. Теперь живой кадр берётся из захвата, а метки рисуются на
+        # нём в момент публикации (см. paint() и Camera._capture_loop).
+        self._paint_args = None
+        self._paint_lock = threading.Lock()
         self.overlay_wanted = False
         self._yolo_err_drawn = False
         self.yolo = YoloDetector()
@@ -146,17 +152,17 @@ class CVThread(threading.Thread):
         self._flag.set()
 
     def get_overlay(self):
-        """Оверлей (BGR) или None. Копия не нужна: массив после публикации
-        никто не изменяет — каждый кадр создаёт новый."""
-        with self._overlay_lock:
-            return self.overlay_frame
+        """Аргументы отрисовки оверлея (или None). Копия не нужна: кортеж
+        заменяется целиком, данные внутри после публикации не мутируют."""
+        with self._paint_lock:
+            return self._paint_args
 
-    def _set_overlay(self, bgr):
-        with self._overlay_lock:
-            self.overlay_frame = bgr
+    def _set_paint(self, *args):
+        with self._paint_lock:
+            self._paint_args = args if args else None
 
     def clear_overlay(self):
-        self._set_overlay(None)
+        self._set_paint()
         self._prev_gray = None
         self._yolo_err_drawn = False
         self._pose_err_drawn = False
@@ -203,12 +209,33 @@ class CVThread(threading.Thread):
             handler(frame)
 
     @staticmethod
-    def _to_bgr(frame):
-        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-    @staticmethod
     def _scaled_contour(c, inv):
         return (c.astype(np.float32) * inv).astype(np.int32)
+
+    # ---- отрисовка оверлея на СВЕЖЕМ кадре (v1.6.13) ------------------------
+    def paint(self, disp_bgr, paint_args=None):
+        """Нарисовать метки активного CV-режима на СВЕЖЕМ BGR-кадре.
+
+        Вызывается из Camera._capture_loop в момент публикации JPEG: видео
+        в стриме всегда живое (30 fps), метки последнего инференса — поверх.
+        Раньше стрим показывал сам кадр CVThread — видео «замерзало» до
+        окончания инференса (визуальные 2-4 fps при 30 fps захвата).
+        """
+        if paint_args is None:
+            paint_args = self.get_overlay()
+        if not paint_args:
+            return disp_bgr
+        kind, args = paint_args[0], paint_args[1:]
+        painter = {
+            'line': self._paint_line,
+            'target': self._paint_target,
+            'watchdog': self._paint_watchdog,
+            'pose': self._paint_pose,
+            'yolo': self._paint_yolo,
+        }.get(kind)
+        if painter is None:
+            return disp_bgr
+        return painter(disp_bgr, *args)
 
     # ---- линия ------------------------------------------------------------
     def _find_line(self, frame):
@@ -242,20 +269,30 @@ class CVThread(threading.Thread):
             math.degrees(math.atan2(pos2 - pos1, y1 - y2))
             if pos1 > 0 and pos2 > 0 and y1 != y2 else 0)
         if self.overlay_wanted:
-            self._draw_line_overlay(frame, top, bot, found, y1, y2, pos1, pos2)
+            self._set_paint('line', {
+                'top': top, 'bot': bot, 'y1': y1, 'y2': y2,
+                'w1': found[0][1] if found[0] else 0,   # ширина линии, px
+                'w2': found[1][1] if found[1] else 0,
+                'pos1': pos1, 'pos2': pos2,
+                'width': frame.shape[1],
+                'tracking': pos1 > 0 or pos2 > 0,
+            })
         if self.on_line_found:
             self.on_line_found(self.line_pos, self.line_angle)
 
-    def _draw_line_overlay(self, frame, top, bot, found, y1, y2, pos1, pos2):
-        """Оверлей — НАСТОЯЩАЯ картинка камеры (раньше был чёрный экран с
-        бинарной полосой, по которому нельзя понять, что видит робот)."""
-        h, w = frame.shape[:2]
-        disp = self._to_bgr(frame)
+    def _paint_line(self, disp, args):
+        """Оверлей линии — на СВЕЖЕМ кадре (раньше рисовался на кадре CVThread,
+        и по видео было нельзя понять, что видит робот прямо сейчас)."""
+        top, bot = args['top'], args['bot']
+        y1, y2 = args['y1'], args['y2']
+        pos1, pos2 = args['pos1'], args['pos2']
+        h, w = disp.shape[:2]
         cv2.rectangle(disp, (0, top), (w - 1, bot - 1), (0, 160, 0), 1)
-        for y, hit, pos in ((y1, found[0], pos1), (y2, found[1], pos2)):
+        for y, hit, pos, lw in ((y1, args['pos1'] > 0, args['pos1'], args['w1']),
+                                (y2, args['pos2'] > 0, args['pos2'], args['w2'])):
             cv2.line(disp, (0, y), (w, y), (0, 255, 0), 1)
             if hit:
-                half = max(2, int(hit[1] / 2))
+                half = max(2, int(lw / 2))
                 cv2.rectangle(disp, (pos - half, y - CV_LINE_ROW_PAD),
                               (pos + half, y + CV_LINE_ROW_PAD), (0, 255, 255), -1)
                 cv2.circle(disp, (pos, y), 6, (0, 0, 255), -1)
@@ -263,11 +300,11 @@ class CVThread(threading.Thread):
             cv2.line(disp, (pos2, y2), (pos1, y1), (0, 0, 255), 3)
         cx = w // 2
         cv2.line(disp, (cx, top), (cx, bot), (255, 255, 0), 1)        # центр кадра
-        tracking = pos1 > 0 or pos2 > 0
+        tracking = args['tracking']
         cv2.putText(disp, 'LINE' if tracking else 'NO LINE', (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                     (0, 255, 0) if tracking else (0, 0, 255), 2)
-        self._set_overlay(disp)
+        return disp
 
     # ---- общий поиск пятна по HSV (рука/цвет) ------------------------------
     def _blob(self, frame, min_area, morph):
@@ -287,21 +324,22 @@ class CVThread(threading.Thread):
                 self._scaled_contour(c, inv) if inv != 1.0 else c)
 
     def _find_hand(self, frame):
-        """Рука через YOLO-pose (v1.6.10): запястья людей в кадре, из них —
-        самая передняя (ближайшая) рука. Инференс не на каждом кадре; между
-        ними используется последний результат. Колбэк: on_hand_found(pos, scale),
-        scale = 0 — руки нет."""
+        """Рука через YOLO-pose (v1.6.10): ладони людей в кадре (v1.6.13 —
+        центр ладони, не запястье), из них — самая передняя (ближайшая).
+        Инференс не на каждом кадре; между ними используется последний
+        результат. Колбэк: on_hand_found(pos, scale), scale = 0 — руки нет."""
         pose = self.pose
         if not pose.loaded and not pose.load():
             if self.overlay_wanted and not self._pose_err_drawn:
-                bgr = self._to_bgr(frame)
-                cv2.putText(bgr, 'POSE MODEL NOT FOUND', (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                self._set_overlay(bgr)
+                self._set_paint('pose', None, None, 'POSE MODEL NOT FOUND')
                 self._pose_err_drawn = True
             return
         if pose.should_infer() or not pose.last_infer_ms:
-            persons = pose.infer(frame)
+            # HSV-границы кожи (тот же фильтр, что у trackHand до v1.6.10):
+            # привязка расчётного центра ладони к реальному пятну
+            with self._hand_lock:
+                skin = (self._hand_low, self._hand_high)
+            persons = pose.infer(frame, skin_bounds=skin)
         else:
             with pose._lock:
                 persons = list(pose.persons)
@@ -312,12 +350,20 @@ class CVThread(threading.Thread):
             self.hand_pos = [int(hand['x']), int(hand['y'])]
             self.hand_area = int(hand['scale'])
         if self.overlay_wanted:
-            self._set_overlay(pose.draw(self._to_bgr(frame), persons, hand))
+            self._set_paint('pose', persons, hand, None)
         if self.on_hand_found:
             if hand:
                 self.on_hand_found(self.hand_pos, self.hand_area)
             else:
                 self.on_hand_found([0, 0], 0)
+
+    def _paint_pose(self, disp, persons, hand, err):
+        """Метки режима Hand на свежем кадре: скелет, центр ладони, статус."""
+        if err:
+            cv2.putText(disp, err, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return disp
+        return self.pose.draw(disp, persons or [], hand)
 
     def _find_color(self, frame):
         """Следование за цветным объектом — порт findColor из v1/v2."""
@@ -328,15 +374,15 @@ class CVThread(threading.Thread):
 
         blob = self._blob(frame, FINDCOLOR_AREA_MIN, morph)
         if self.overlay_wanted:
-            self._draw_target_overlay(frame, blob, 'COLOR', cross=False)
+            self._set_paint('target', blob, 'COLOR', False)
         if self.on_color_found:
             if blob:
                 self.on_color_found([blob[0], blob[1]], blob[2])
             else:
                 self.on_color_found([0, 0], 0)
 
-    def _draw_target_overlay(self, frame, blob, label, cross):
-        disp = self._to_bgr(frame)
+    def _paint_target(self, disp, blob, label, cross):
+        """Оверлей findColor (конечный контур цели) на свежем кадре."""
         if blob is None:
             h, w = disp.shape[:2]
             if cross:
@@ -360,7 +406,14 @@ class CVThread(threading.Thread):
             cv2.putText(disp, f'{label} ({cx},{cy})', (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                         (0, 0, 255) if cross else (0, 255, 0), 2)
-        self._set_overlay(disp)
+        return disp
+
+    def _paint_watchdog(self, disp, alarm, motion_pixels):
+        """Статус охраны (MOTION/CLEAR) на свежем кадре."""
+        cv2.putText(disp, f'MOTION {motion_pixels}px' if alarm else 'CLEAR',
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    (0, 0, 255) if alarm else (0, 255, 0), 2)
+        return disp
 
     # ---- охрана -----------------------------------------------------------
     def _watch_dog(self, frame):
@@ -381,11 +434,7 @@ class CVThread(threading.Thread):
         motion_pixels = int(cv2.countNonZero(motion_mask) / (s * s))
         alarm = motion_pixels >= WATCHDOG_MIN_AREA
         if self.overlay_wanted:
-            disp = self._to_bgr(frame)
-            cv2.putText(disp, f'MOTION {motion_pixels}px' if alarm else 'CLEAR',
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 0, 255) if alarm else (0, 255, 0), 2)
-            self._set_overlay(disp)
+            self._set_paint('watchdog', alarm, motion_pixels)
         if alarm:
             now = time.monotonic()
             if now - self._last_motion_ts >= WATCHDOG_COOLDOWN_S:
@@ -396,15 +445,13 @@ class CVThread(threading.Thread):
     # ---- YOLO -------------------------------------------------------------
     def _yolo_detect(self, frame):
         """Детектирование объектов YOLO (ONNX через cv2.dnn); инференс — только
-        каждый YOLO_FRAME_SKIP-й кадр, между ними показывается прошлый итог."""
+        каждый YOLO_FRAME_SKIP-й кадр, между ними показывается прошлый итог
+        (нарисован на свежем кадре в _paint_yolo)."""
         if not self.yolo.loaded:
             if not self.yolo.load():
                 # «модель не найдена» рисуем ОДИН раз
                 if self.overlay_wanted and not self._yolo_err_drawn:
-                    bgr = self._to_bgr(frame)
-                    cv2.putText(bgr, 'YOLO MODEL NOT FOUND', (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    self._set_overlay(bgr)
+                    self._set_paint('yolo', None, 'YOLO MODEL NOT FOUND')
                     self._yolo_err_drawn = True
                 return
         if not self.yolo.should_infer():
@@ -412,19 +459,25 @@ class CVThread(threading.Thread):
         else:
             objs = self.yolo.infer(frame)
         if self.overlay_wanted:
-            bgr = self._to_bgr(frame)
-            # «YOLO Mask»: рамки + полупрозрачные маски объектов
-            self.yolo.draw(bgr, objs, masks=True)
-            cv2.putText(bgr, f'YOLO-{self.yolo.task} {len(objs)} obj '
-                             f'({self.yolo.last_infer_ms:.0f} ms)',
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 255, 255), 2)
-            self._set_overlay(bgr)
+            self._set_paint('yolo', objs, None)
         if self.on_yolo_found and objs:
             try:
                 self.on_yolo_found(objs)
             except Exception as e:
                 logger.warning(f'[YOLO] callback error: {e}')
+
+    def _paint_yolo(self, disp, objs, err):
+        """«YOLO Mask»: рамки + полупрозрачные маски на свежем кадре."""
+        if err:
+            cv2.putText(disp, err, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return disp
+        self.yolo.draw(disp, objs or [], masks=True)
+        cv2.putText(disp, f'YOLO-{self.yolo.task} {len(objs or [])} obj '
+                         f'({self.yolo.last_infer_ms:.0f} ms)',
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    (0, 255, 255), 2)
+        return disp
 
 
 class Camera:
@@ -919,10 +972,15 @@ class Camera:
                     if (want_jpeg and _HAS_CV2 and not self._hw_active
                             and t_loop - self._last_jpeg_ts >= gap):
                         self._last_jpeg_ts = t_loop
-                        overlay = self.cv_thread.get_overlay() if cv_on else None
-                        self._publish_jpeg(
-                            overlay if overlay is not None
-                            else cv2.cvtColor(raw, cv2.COLOR_RGB2BGR))
+                        # v1.6.13: стрим всегда из СВЕЖЕГО кадра; метки
+                        # последнего инференса рисуются поверх (paint).
+                        # Раньше публиковался сам кадр CVThread — видео в
+                        # режимах CV обновлялось со скоростью инференса
+                        # (2-4 fps), а не камеры (30 fps).
+                        disp = cv2.cvtColor(raw, cv2.COLOR_RGB2BGR)
+                        if cv_on:
+                            disp = self.cv_thread.paint(disp)
+                        self._publish_jpeg(disp)
                     # спим остаток интервала: capture_array() уже ждал кадр,
                     # прежний «полный» сон вдвое занижал реальный fps
                     sleep_s = frame_interval - (time.monotonic() - t_loop)

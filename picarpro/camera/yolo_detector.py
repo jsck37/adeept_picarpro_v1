@@ -3,9 +3,10 @@
 Ключевые решения под 1 ГБ RAM (см. docs/MEMORY_TUNING.md):
 * НЕТ PyTorch/ultralytics в рантайме: модель один раз экспортируется в ONNX
   (tools/export_yolo_onnx.py) и загружается через cv2.dnn — экономия ~700 МБ;
-* вход 640x640 (YOLO_INPUT_SIZE) — как у официального ONNX релиза v7.0;
-  замер: детекция ~150 МБ пик RSS, сегментация ~190 МБ — в 500 МБ свободной
-  ОЗУ укладываются;
+* вход 320x320 (YOLO_INPUT_SIZE): v1.6.12 — официальные веса v7.0
+  реэкспортированы под 320. Замер через cv2.dnn: пик RSS ~110 МБ при 640
+  против ~35 МБ при 320 (в ~3 раза меньше ОЗУ, в ~3.5 раза быстрее инференс) —
+  в свободные ~500 МБ (стек ~250 МБ) укладывается с большим запасом;
 * инференс выполняется в отдельном потоке CVThread (camera_opencv) и только
   для каждого YOLO_FRAME_SKIP-го кадра — поток видео (MJPEG) не блокируется;
 * клон frame не создаётся на каждый кадр: передаётся уже скопированный кадр.
@@ -26,7 +27,7 @@ import time
 from picarpro.logger import logger
 from config import (
     YOLO_INPUT_SIZE, YOLO_CONFIDENCE, YOLO_NMS_THRESHOLD,
-    YOLO_FRAME_SKIP, YOLO_CLASSES_FILE,
+    YOLO_FRAME_SKIP, YOLO_CLASSES_FILE, YOLO_CLASSES_BUNDLED,
     YOLO_SEG_MODEL_PATH, YOLO_SEG_MODEL_BUNDLED,
     YOLO_MASK_THRESHOLD, YOLO_MAX_MASKS,
 )
@@ -70,7 +71,9 @@ class YoloDetector:
 
     def __init__(self):
         self._net = None
-        self._classes = _load_classes(YOLO_CLASSES_FILE)
+        # /home/pi/models/classes.txt, затем комплектный из models/ (v1.6.12)
+        self._classes = (_load_classes(YOLO_CLASSES_FILE)
+                         or _load_classes(YOLO_CLASSES_BUNDLED))
         self._frame_counter = 0
         self._last_infer_ts = 0.0
         self.last_infer_ms = 0.0
@@ -94,20 +97,36 @@ class YoloDetector:
         return None, None
 
     def load(self):
-        """Ленивая загрузка модели (вызывается при первом включении режима)."""
+        """Ленивая загрузка модели (вызывается при первом включении режима).
+
+        Кандидаты пробуются по порядку (v1.6.12): модель «на месте»
+        (/home/pi/models), затем комплектная (models/). После чтения ONNX
+        вход проверяется probe-прогоном нулевого блоба YOLO_INPUT_SIZE —
+        установленная ранее модель с другим входом (например 640 до
+        v1.6.12) отбрасывается, берётся следующая: иначе инференс падал бы
+        на каждом кадре с 'Blob dimensions do not match'.
+        """
         if self._net is not None or not _HAS_CV2:
             return self.loaded
-        task, path = self._model_path()
-        if not path:
-            logger.warning(
-                '[YOLO] model not found — положите yolov5n-seg.onnx в '
-                '/home/pi/models (или запустите setup.py), '
-                'см. docs/YOLO_GUIDE.md')
-            return False
-        try:
-            self._net = cv2.dnn.readNetFromONNX(path)
-            self._out_names = self._net.getUnconnectedOutLayersNames()
-            self._seg = len(self._out_names) > 1      # + proto-выход
+        last_err = None
+        for path in (YOLO_SEG_MODEL_PATH, YOLO_SEG_MODEL_BUNDLED):
+            if not path or not os.path.isfile(path):
+                continue
+            try:
+                net = cv2.dnn.readNetFromONNX(path)
+                out_names = net.getUnconnectedOutLayersNames()
+                probe = np.zeros(
+                    (1, 3, YOLO_INPUT_SIZE, YOLO_INPUT_SIZE), dtype=np.float32)
+                net.setInput(probe)
+                net.forward(list(out_names)) if len(out_names) > 1 \
+                    else net.forward()
+            except Exception as e:
+                last_err = e
+                logger.warning(f'[YOLO] {path} не подходит: {e}')
+                continue
+            self._net = net
+            self._out_names = out_names
+            self._seg = len(out_names) > 1             # + proto-выход
             self.task = 'seg' if self._seg else 'detect'
             # на RPi выгоднее распределять по ядрам CPU, без OpenVINO
             self._net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
@@ -116,11 +135,15 @@ class YoloDetector:
                 f'[YOLO] loaded {path} '
                 f'(task {self.task}, input {YOLO_INPUT_SIZE}x{YOLO_INPUT_SIZE}, '
                 f'{len(self._classes)} classes)')
-        except Exception as e:
-            logger.error(f'[YOLO] load failed: {e}')
-            self._net = None
-            self._seg = False
-            self.task = 'detect'
+            return True
+        if last_err is not None or self._model_path() == (None, None):
+            logger.warning(
+                '[YOLO] model not found — положите yolov5n-seg.onnx '
+                f'(вход {YOLO_INPUT_SIZE}) в /home/pi/models '
+                '(или запустите setup.py), см. docs/YOLO_GUIDE.md')
+        self._net = None
+        self._seg = False
+        self.task = 'detect'
         return self.loaded
 
     def should_infer(self):
