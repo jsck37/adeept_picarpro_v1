@@ -155,9 +155,6 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/></svg>
               <span data-i18n="auto_estop">АВАРИЙНЫЙ СТОП</span>
             </button>
-            <div style="margin-top:6px;font-size:.72rem;color:var(--text-3)" data-i18n="push_note">
-              Push Mode
-            </div>
             <div id="radar-box" style="display:none;margin-top:8px">
               <canvas id="radar-canvas" width="280" height="190"
                       style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
@@ -266,7 +263,7 @@
                   <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100%</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
                   <div><b>R1</b> <span data-i18n="ds4_help5">гудок</span> &nbsp; <b>Dpad&#9650;</b> <span data-i18n="ds4_help6">фары</span></div>
                   <div><b>Dpad&#9660;</b> <span data-i18n="ds4_help7">радуга</span> &nbsp; <b>Dpad&#9664;/&#9654;</b> <span data-i18n="ds4_help8">поворотники</span></div>
-                  <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/середина)</span></div>
+                  <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/сер/выс)</span></div>
                 </div>
               </div>
             </div>
@@ -356,11 +353,11 @@
               <div class="btn-group" id="crane-arm-group">
                 <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle" data-i18n="crane_grab_release">Захватить / Отпустить</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Середина</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Средний</span></div>
               <div class="btn-group" id="crane-grip-group">
-                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низ</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Середина<button>
-                <button class="gbtn crane-grip-btn" id="crane-grip-high" data-action="grip_low" data-i18n="grip_low">Вверх</button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низкий</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Средний<button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-high" data-action="grip_high" data-i18n="grip_high">Вверхний</button>
               </div>
             </div>
           </div>
@@ -441,7 +438,6 @@
         </div>
         <div class="collapsible-body open" id="hl-body">
           <div id="hl-controls">
-            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_main_title"> Свет </div>
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main" data-i18n="hl_main">Фара</button>
               <button class="headlight-btn off" id="hl-side" type="button" data-i18n="hl_side">Габариты</button>
