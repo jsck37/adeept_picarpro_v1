@@ -225,7 +225,7 @@ var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 var craneArmClosed = false;
-var craneGripPosition = 'mid';   // v1.6.4: high убран
+var craneGripPosition = 'mid';
 var logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
 var logFilters = { info: true, warn: true, error: true, debug: true };
 var logSortMode = 'time';
@@ -1038,14 +1038,17 @@ function toggleCraneArm() {
 function updateCraneGripUI() {
   var lowBtn = document.getElementById('crane-grip-low');
   var midBtn = document.getElementById('crane-grip-mid');
+  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
   if (!lowBtn) return;
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
-  var angleMap = { low: 100, mid: 135 };
-  var keyMap = { low: 'grip_low', mid: 'grip_mid' };
+  highBtn.classList.remove('active');
+  var angleMap = { low: 100, mid: 135, high: 170 };
+  var keyMap = { low: 'grip_low', mid: 'grip_mid', high: 'grip_high' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
+   else if (craneGripPosition === 'high') highBtn.classList.add('active');
   if (label && keyMap[craneGripPosition] !== undefined) {
     label.textContent = t('grip_label_fmt',
       {s: t(keyMap[craneGripPosition]), a: angleMap[craneGripPosition]});
@@ -1623,7 +1626,7 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     var action = btn.dataset.action;
     if (action === 'grip_low') craneGripPosition = 'low';
     else if (action === 'grip_mid') craneGripPosition = 'mid';
-    // v1.6.4: grip_high удалён — осталось low/mid
+    else if (action === 'grip_high') craneGripPosition = 'high';
     sendCommand('crane', { action: action });
     updateCraneGripUI();
   });
