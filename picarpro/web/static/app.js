@@ -225,7 +225,7 @@ var currentLedMode = 'off';
 var lastSentDir = 'stop';
 var moveThrottle = 0;
 var craneArmClosed = false;
-var craneGripPosition = 'mid';
+var craneGripPosition = 'mid';   // v1.6.4: high убран
 var logCounts = { info: 0, warn: 0, error: 0, debug: 0 };
 var logFilters = { info: true, warn: true, error: true, debug: true };
 var logSortMode = 'time';
@@ -1038,17 +1038,14 @@ function toggleCraneArm() {
 function updateCraneGripUI() {
   var lowBtn = document.getElementById('crane-grip-low');
   var midBtn = document.getElementById('crane-grip-mid');
-  var highBtn = document.getElementById('crane-grip-high');
   var label = document.getElementById('crane-grip-label');
   if (!lowBtn) return;
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
-  highBtn.classList.remove('active');
-  var angleMap = { low: 100, mid: 135, high: 170 };
-  var keyMap = { low: 'grip_low', mid: 'grip_mid', high: 'grip_high' };
+  var angleMap = { low: 100, mid: 135 };
+  var keyMap = { low: 'grip_low', mid: 'grip_mid' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
-   else if (craneGripPosition === 'high') highBtn.classList.add('active');
   if (label && keyMap[craneGripPosition] !== undefined) {
     label.textContent = t('grip_label_fmt',
       {s: t(keyMap[craneGripPosition]), a: angleMap[craneGripPosition]});
@@ -1190,8 +1187,12 @@ function setCamLabels(txt) {
 // пальца сбрасывало второй джойстик, а камера «читала» палец колёс.
 function makeStick(container, knob, pad, onMove, onEnd) {
   if (!container || !knob) return null;
-  var activeId = null, rect = null;
-  function center() {
+  // v1.6.15: джойстик ФИКСИРОВАННЫЙ — ручка больше не прыгает к точке
+  // касания. Вектор команды = смещение пальца от места ПЕРВОГО касания
+  // (origin), ограниченное радиусом основания; само касание без движения
+  // даёт нулевую команду (робот не дёргается при простом тапе).
+  var activeId = null, rect = null, origin = null;
+  function radius() {
     if (!rect) {          // rect кэшируется на время драга (без reflow на каждый move)
       var b = container.getBoundingClientRect();
       rect = { x: b.left + b.width / 2, y: b.top + b.height / 2, r: b.width / 2 - pad };
@@ -1199,8 +1200,8 @@ function makeStick(container, knob, pad, onMove, onEnd) {
     return rect;
   }
   function handle(e) {
-    var c = center();
-    var dx = e.clientX - c.x, dy = e.clientY - c.y;
+    var c = radius();
+    var dx = e.clientX - origin.x, dy = e.clientY - origin.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > c.r) { dx = dx / dist * c.r; dy = dy / dist * c.r; }
     knob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
@@ -1218,10 +1219,11 @@ function makeStick(container, knob, pad, onMove, onEnd) {
     if (activeId !== null) return;
     activeId = e.pointerId;
     rect = null;
+    origin = { x: e.clientX, y: e.clientY };
     try { container.setPointerCapture(e.pointerId); } catch (err) {}
     knob.classList.remove('spring-back');
     e.preventDefault();
-    handle(e);
+    onMove(0, 0, radius().r);   // касание без движения = ноль команды
   });
   container.addEventListener('pointermove', function(e) {
     if (e.pointerId === activeId) handle(e);
@@ -1621,7 +1623,7 @@ document.querySelectorAll('.crane-grip-btn').forEach(function(btn) {
     var action = btn.dataset.action;
     if (action === 'grip_low') craneGripPosition = 'low';
     else if (action === 'grip_mid') craneGripPosition = 'mid';
-    else if (action === 'grip_high') craneGripPosition = 'high';
+    // v1.6.4: grip_high удалён — осталось low/mid
     sendCommand('crane', { action: action });
     updateCraneGripUI();
   });
@@ -2254,9 +2256,280 @@ document.querySelectorAll('.tab-btn').forEach(function(b) {
   else window.addEventListener('resize', setH);
 })();
 
+// ==== v1.6.15: вкладка «Админ» ============================================
+// Пароль config.ADMIN_PASSWORD -> X-Admin-Token (sessionStorage). Две
+// секции: редактор конфига (правки пишутся в config_local.py, применяются
+// перезапуском сервиса) и устройства Wi-Fi (временные блокировки iptables
+// по MAC с таймаутом).
+
+var ADM_TOK_KEY = 'admin_token';
+function admToken() {
+  try { return sessionStorage.getItem(ADM_TOK_KEY) || ''; } catch (e) { return ''; }
+}
+function admSetToken(v) {
+  try {
+    if (v) sessionStorage.setItem(ADM_TOK_KEY, v);
+    else sessionStorage.removeItem(ADM_TOK_KEY);
+  } catch (e) {}
+}
+function admHeaders() {
+  var h = {'Content-Type': 'application/json'};
+  if (admToken()) h['X-Admin-Token'] = admToken();
+  return h;
+}
+function admFetch(url, opts, cb) {
+  opts = opts || {};
+  opts.headers = Object.assign(admHeaders(), opts.headers || {});
+  fetch(url, opts).then(function(r) {
+    return r.json().then(function(j) { return {s: r.status, j: j}; },
+                         function() { return {s: r.status, j: {}}; });
+  }).then(function(r) {
+    if (r.s === 403 && r.j && r.j.error === 'admin_auth_required') admShowGate();
+    cb(r.j || {ok: false, error: 'network'}, r.s);
+  }).catch(function() { cb({ok: false, error: 'network'}); });
+}
+
+var admCfgEntries = [];   // снимок с сервера [{key,type,value}]
+var admCfgDirty = {};     // key -> новое значение (JSON-типы)
+
+function admShowGate() {
+  admSetToken('');
+  var gate = document.getElementById('adm-gate');
+  var panel = document.getElementById('adm-panel');
+  if (gate) gate.hidden = false;
+  if (panel) panel.hidden = true;
+}
+function admShowPanel() {
+  var gate = document.getElementById('adm-gate');
+  var panel = document.getElementById('adm-panel');
+  if (gate) gate.hidden = true;
+  if (panel) panel.hidden = false;
+}
+
+function admRenderConfig() {
+  var list = document.getElementById('adm-cfg-list');
+  if (!list) return;
+  var q = (document.getElementById('adm-cfg-search').value || '').toLowerCase();
+  list.textContent = '';
+  admCfgEntries.forEach(function(e) {
+    if (q && e.key.toLowerCase().indexOf(q) === -1) return;
+    var row = document.createElement('div');
+    row.className = 'adm-row' + (e.key in admCfgDirty ? ' adm-row-dirty' : '');
+    var lab = document.createElement('label');
+    lab.className = 'adm-row-key';
+    lab.textContent = e.key;
+    lab.title = e.type;
+    row.appendChild(lab);
+    var inp;
+    if (e.type === 'bool') {
+      inp = document.createElement('input');
+      inp.type = 'checkbox';
+      inp.checked = !!e.value;
+      inp.addEventListener('change', function() {
+        admCfgDirty[e.key] = inp.checked;
+        row.classList.add('adm-row-dirty');
+      });
+    } else if (e.type === 'int' || e.type === 'float') {
+      inp = document.createElement('input');
+      inp.type = 'number';
+      if (e.type === 'float') inp.step = 'any';
+      inp.value = e.value;
+      inp.addEventListener('change', function() {
+        var v = e.type === 'int' ? parseInt(inp.value, 10) : parseFloat(inp.value);
+        if (isNaN(v)) { row.classList.add('adm-row-bad'); return; }
+        row.classList.remove('adm-row-bad');
+        admCfgDirty[e.key] = v;
+        row.classList.add('adm-row-dirty');
+      });
+    } else {
+      inp = document.createElement(e.type === 'dict' ? 'textarea' : 'input');
+      if (e.type === 'dict') { inp.rows = 2; inp.className = 'adm-json'; }
+      inp.value = e.type === 'str' ? e.value : JSON.stringify(e.value);
+      inp.addEventListener('change', function() {
+        try {
+          var v = e.type === 'str' ? inp.value : JSON.parse(inp.value);
+          row.classList.remove('adm-row-bad');
+          admCfgDirty[e.key] = v;
+          row.classList.add('adm-row-dirty');
+        } catch (err) { row.classList.add('adm-row-bad'); }
+      });
+    }
+    inp.className = 'adm-row-input' + (inp.className ? ' ' + inp.className : '');
+    row.appendChild(inp);
+    list.appendChild(row);
+  });
+}
+
+function admLoadConfig() {
+  admFetch('/api/admin/config', {}, function(j) {
+    if (!j.ok) return;
+    admCfgEntries = j.entries || [];
+    admCfgDirty = {};
+    admRenderConfig();
+  });
+}
+
+function admSaveConfig() {
+  if (!Object.keys(admCfgDirty).length) {
+    var st = document.getElementById('adm-cfg-status');
+    if (st) st.textContent = t('adm_cfg_no_changes');
+    return;
+  }
+  var btn = document.getElementById('adm-cfg-save');
+  if (btn) btn.disabled = true;
+  admFetch('/api/admin/config', {method: 'POST', body: JSON.stringify({values: admCfgDirty})},
+    function(j) {
+      if (btn) btn.disabled = false;
+      var st = document.getElementById('adm-cfg-status');
+      if (st) {
+        if (j.applied > 0) {
+          var keys = (j.keys || []).join(', ');
+          st.textContent = t('adm_cfg_saved') + (keys ? ': ' + keys : '')
+            + (j.errors && j.errors.length ? (' | ' + j.errors.join('; ')) : '');
+        } else {
+          st.textContent = (j.errors || []).join('; ') || t('adm_cfg_no_changes');
+        }
+      }
+      admLoadConfig();
+    });
+}
+
+function admRestart() {
+  if (!window.confirm(t('adm_restart_confirm'))) return;
+  var btn = document.getElementById('adm-restart');
+  if (btn) btn.disabled = true;
+  admFetch('/api/admin/restart', {method: 'POST'}, function(j) {
+    if (btn) btn.disabled = false;
+    var st = document.getElementById('adm-cfg-status');
+    if (st) st.textContent = j.ok ? t('adm_restart_ok') : (j.error || 'error');
+    if (j.ok) setTimeout(function() { window.location.reload(); }, 4000);
+  });
+}
+
+function admLoadDevices() {
+  admFetch('/api/admin/devices', {}, function(j) {
+    if (!j.ok) return;
+    admRenderDevices(j.clients || [], j.blocked || {}, j.now || 0);
+  });
+}
+
+function admRenderDevices(clients, blocked, now) {
+  var tb = document.getElementById('adm-dev-tbody');
+  if (!tb) return;
+  tb.textContent = '';
+  var status = document.getElementById('adm-dev-status');
+  if (!clients.length) {
+    var tr0 = document.createElement('tr');
+    var td0 = document.createElement('td');
+    td0.colSpan = 6;
+    td0.className = 'adm-empty';
+    td0.textContent = t('adm_dev_empty');
+    tr0.appendChild(td0);
+    tb.appendChild(tr0);
+    if (status) status.textContent = t('adm_dev_status_default');
+    return;
+  }
+  clients.forEach(function(c) {
+    var b = blocked[c.mac];
+    var tr = document.createElement('tr');
+    if (b) tr.className = 'adm-row-blocked';
+    [c.hostname || '\u2014', c.ip || '\u2014', c.mac,
+     (c.signal_dbm === null || c.signal_dbm === undefined) ? '\u2014' : c.signal_dbm + ' dBm',
+     b ? t('adm_dev_blocked')
+        + (b.remaining_s ? ' \u00b7 ' + Math.ceil(b.remaining_s / 60) + ' ' + t('adm_min_unit') : '')
+       : t('adm_dev_online')
+    ].forEach(function(txt) {
+      var td = document.createElement('td');
+      td.textContent = txt;
+      tr.appendChild(td);
+    });
+    var tda = document.createElement('td');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-chip' + (b ? ' adm-unblock-btn' : '');
+    btn.textContent = b ? t('adm_unblock') : t('adm_block');
+    btn.addEventListener('click', function() {
+      if (b) {
+        admFetch('/api/admin/unblock', {method: 'POST', body: JSON.stringify({mac: c.mac})},
+          function(j) { if (j.ok) admLoadDevices(); });
+      } else {
+        if (!window.confirm(t('adm_block_confirm') + ' ' + c.mac + '?')) return;
+        var mins = parseInt(document.getElementById('adm-block-min').value, 10) || 0;
+        admFetch('/api/admin/block', {method: 'POST',
+          body: JSON.stringify({mac: c.mac, minutes: mins})},
+          function(j) {
+            var st = document.getElementById('adm-dev-status');
+            if (st) st.textContent = j.ok ? t('adm_block_done') : (j.error || 'error');
+            if (j.ok) admLoadDevices();
+          });
+      }
+    });
+    tda.appendChild(btn);
+    tr.appendChild(tda);
+    tb.appendChild(tr);
+  });
+}
+
+function adminInit() {
+  var pass = document.getElementById('adm-pass');
+  var loginBtn = document.getElementById('adm-login');
+  function doLogin() {
+    if (!pass || !pass.value) return;
+    if (loginBtn) loginBtn.disabled = true;
+    admFetch('/api/admin/login', {method: 'POST',
+      body: JSON.stringify({password: pass.value})}, function(j, s) {
+      if (loginBtn) loginBtn.disabled = false;
+      var st = document.getElementById('adm-gate-status');
+      if (j.ok) {
+        pass.value = '';
+        admSetToken(j.token);
+        admShowPanel();
+        admLoadConfig();
+        admLoadDevices();
+      } else if (j.error === 'login_locked') {
+        if (st) st.textContent = t('adm_err_locked')
+          + ' ' + (j.retry_after_s || 60) + ' ' + t('adm_sec');
+      } else {
+        if (st) st.textContent = t('adm_err_wrong');
+      }
+    });
+  }
+  if (loginBtn) loginBtn.addEventListener('click', doLogin);
+  if (pass) pass.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
+  var logoutBtn = document.getElementById('adm-logout');
+  if (logoutBtn) logoutBtn.addEventListener('click', function() {
+    admFetch('/api/admin/logout', {method: 'POST'}, function() { admShowGate(); });
+  });
+  var saveBtn = document.getElementById('adm-cfg-save');
+  if (saveBtn) saveBtn.addEventListener('click', admSaveConfig);
+  var reloadBtn = document.getElementById('adm-cfg-reload');
+  if (reloadBtn) reloadBtn.addEventListener('click', admLoadConfig);
+  var search = document.getElementById('adm-cfg-search');
+  if (search) search.addEventListener('input', admRenderConfig);
+  var restartBtn = document.getElementById('adm-restart');
+  if (restartBtn) restartBtn.addEventListener('click', admRestart);
+  var devBtn = document.getElementById('adm-dev-refresh');
+  if (devBtn) devBtn.addEventListener('click', admLoadDevices);
+
+  // вход был раньше (в этой сессии браузера) — сразу открываем панель
+  if (admToken()) {
+    admShowPanel();
+    admLoadConfig();
+    admLoadDevices();
+  }
+  // автообновление списка устройств, пока открыта вкладка «Админ»
+  setInterval(function() {
+    var c = document.getElementById('content-admin');
+    if (c && c.classList.contains('active') && admToken()) admLoadDevices();
+  }, 15000);
+}
+
 // ---- инициализация ----
 setLang(LANG);          // применяет словарь и подсвечивает активный язык
 restoreCollapsed();
 wsConnect();
 fetchConsoleHistory();
 updateVideoFeed();
+adminInit();            // v1.6.15: вкладка «Админ» (конфиг + отключение клиентов)

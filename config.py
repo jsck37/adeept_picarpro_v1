@@ -132,12 +132,14 @@ SERVO_LIMITS = {
     6: {"min": 100, "max": 180},   # Crane Grab (захват, канал 6)
 }
 
-# Клешня — все углы внутри SERVO_LIMITS
+# Клешня — все углы внутри SERVO_LIMITS (раньше OPEN=80 и GRIP_HIGH=190
+# упирались в механический стоп: серво стояло под током и перегревалось).
+# v1.6.4: позиция GRIP_HIGH (180°) удалена по требованию владельца —
+# осталось только Low/Mid.
 CRANE_ARM_OPEN = 100
 CRANE_ARM_CLOSED = 150
 CRANE_GRIP_LOW = 100
 CRANE_GRIP_MID = 135
-CRANE_GRIP_HIGH = 170
 
 # ---------------------------------------------------------------------------
 # Зуммер — GPIO 24, PWM для мелодий (BUZZER_PASSIVE=False для активного)
@@ -347,6 +349,12 @@ SECRET_KEY = os.environ.get('PICARPRO_SECRET_KEY', '')
 AUTH_TOKEN = os.environ.get('PICARPRO_TOKEN', '')
 CORS_ORIGINS = [o.strip() for o in os.environ.get('PICARPRO_CORS', '').split(',') if o.strip()]
 MAX_CONTENT_LENGTH = 1 * 1024 * 1024  # 1 MiB на запрос
+
+# v1.6.15 — пароль АДМИН-ПАНЕЛИ (вкладка «Админ»: правка конфига в
+# config_local.py + временное отключение WiFi-клиентов). Это отдельный
+# уровень поверх AUTH_TOKEN. Сменить: здесь или в config_local.py
+# (ADMIN_PASSWORD = '…'); после смены перезапуск сервиса не нужен.
+ADMIN_PASSWORD = 'C2H5OH'
 
 # ---------------------------------------------------------------------------
 # Маппинг углов руля

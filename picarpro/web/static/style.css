@@ -688,3 +688,39 @@ input[type=range]::-moz-range-thumb{border-color:var(--surface)}
   body,.card,.tab-btn{transition:none}
   .lv-banner{animation:none}
 }
+
+/* ==== v1.6.15: вкладка «Админ» (конфиг + отключение клиентов) ============ */
+.adm-wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding:12px}
+.adm-card{padding:14px}
+.adm-title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem;margin-bottom:10px}
+.adm-title svg{width:22px;height:22px;color:var(--accent)}
+.adm-title .adm-actions{margin-left:auto}
+.adm-gate-row{display:flex;gap:10px;align-items:center}
+.adm-gate-row input[type=password]{flex:1;min-width:0;padding:9px 12px;border-radius:10px;border:1px solid var(--accent-line);background:var(--surface);color:inherit;font-size:1rem}
+.adm-sec{margin-top:14px;padding-top:12px;border-top:1px dashed var(--accent-line)}
+.adm-sec-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.adm-sec-title{font-weight:700}
+.adm-sec-head input[type=search]{flex:1;min-width:120px;max-width:260px;padding:7px 10px;border-radius:8px;border:1px solid var(--accent-line);background:var(--surface);color:inherit}
+.adm-sec-head select,.adm-min-label,.adm-min-unit{font-size:.9rem}
+.adm-sec-head select{padding:5px 8px;border-radius:8px;border:1px solid var(--accent-line);background:var(--surface);color:inherit}
+.adm-cfg-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow-y:auto;padding-right:2px}
+.adm-row{display:flex;align-items:center;gap:10px}
+.adm-row-key{flex:0 0 38%;min-width:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;opacity:.9}
+.adm-row-input{flex:1;min-width:0;padding:6px 9px;border-radius:8px;border:1px solid var(--accent-line);background:var(--surface);color:inherit;font-size:.88rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.adm-row-input[type=checkbox]{flex:0 0 auto;width:20px;height:20px}
+textarea.adm-json{resize:vertical}
+.adm-row-dirty .adm-row-input{border-color:var(--accent);background:var(--accent-soft)}
+.adm-row-dirty .adm-row-key{color:var(--accent);font-weight:700}
+.adm-row-bad .adm-row-input{border-color:var(--danger-strong);background:var(--danger-soft)}
+.adm-restart-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
+.adm-table-wrap{overflow-x:auto}
+.adm-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.adm-table th{text-align:left;padding:6px 8px;opacity:.65;font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+.adm-table td{padding:7px 8px;border-top:1px solid var(--accent-line);overflow-wrap:anywhere}
+.adm-table td.adm-empty{text-align:center;opacity:.6;padding:18px}
+.adm-row-blocked td{background:var(--danger-soft)}
+.adm-row-blocked .adm-unblock-btn{border-color:var(--danger-strong);color:var(--danger-strong)}
+@media (max-width:640px){
+  .adm-row{flex-direction:column;align-items:stretch;gap:4px}
+  .adm-row-key{flex:none}
+}

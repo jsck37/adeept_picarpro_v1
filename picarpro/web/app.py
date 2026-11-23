@@ -259,6 +259,103 @@ def create_app(state):
         return jsonify({'ok': True, 'required': token_required(),
                         'authorized': request_authorized()})
 
+    # ---- admin panel (v1.6.15) --------------------------------------------
+    # Отдельный уровень доступа поверх AUTH_TOKEN: пароль config.ADMIN_PASSWORD
+    # -> короткоживущий X-Admin-Token (HMAC + nonce, лимит попыток на IP).
+    def _admin_guard():
+        from picarpro.web import admin
+        if not admin.verify_token(app.config['SECRET_KEY'],
+                                  request.headers.get('X-Admin-Token', '')):
+            return jsonify({'ok': False, 'error': 'admin_auth_required'}), 403
+        return None
+
+    @app.route('/api/admin/login', methods=['POST'])
+    def admin_login():
+        import config as cfg
+        from picarpro.web import admin
+        data = request.get_json(silent=True) or {}
+        ip = request.remote_addr or '?'
+        left = admin.login_locked(ip)
+        if left > 0:
+            return jsonify({'ok': False, 'error': 'login_locked',
+                            'retry_after_s': int(left) + 1}), 429
+        if not admin.check_password(data.get('password', ''),
+                                    cfg.ADMIN_PASSWORD):
+            admin.register_login_fail(ip)
+            return jsonify({'ok': False, 'error': 'wrong_password'}), 403
+        admin.register_login_ok(ip)
+        return jsonify({'ok': True,
+                        'token': admin.issue_token(app.config['SECRET_KEY']),
+                        'ttl_s': admin.ADMIN_TOKEN_TTL_S})
+
+    @app.route('/api/admin/logout', methods=['POST'])
+    def admin_logout():
+        from picarpro.web import admin
+        admin.revoke_token(request.headers.get('X-Admin-Token', ''))
+        return jsonify({'ok': True})
+
+    @app.route('/api/admin/config', methods=['GET', 'POST'])
+    def admin_config():
+        from picarpro.web import admin
+        g = _admin_guard()
+        if g:
+            return g
+        if request.method == 'GET':
+            return jsonify({'ok': True, 'entries': admin.config_entries()})
+        data = request.get_json(silent=True) or {}
+        res = admin.set_config(data.get('values', {}),
+                               str(BASE_DIR / 'config_local.py'))
+        ok = res.get('applied', 0) > 0 or not res['errors']
+        return jsonify({'ok': ok, **res})
+
+    @app.route('/api/admin/devices')
+    def admin_devices():
+        from picarpro.utils import hotspot
+        from picarpro.web import admin
+        g = _admin_guard()
+        if g:
+            return g
+        return jsonify({'ok': True,
+                        'clients': hotspot.list_clients(),
+                        'blocked': admin.blocks_status(),
+                        'now': time.time()})
+
+    @app.route('/api/admin/block', methods=['POST'])
+    def admin_block():
+        from picarpro.web import admin
+        g = _admin_guard()
+        if g:
+            return g
+        data = request.get_json(silent=True) or {}
+        res = admin.block(data.get('mac'), data.get('minutes', 15),
+                          BASE_DIR / 'instance', note=str(data.get('note', ''))[:100])
+        return jsonify(res), (200 if res.get('ok') else 400)
+
+    @app.route('/api/admin/unblock', methods=['POST'])
+    def admin_unblock():
+        from picarpro.web import admin
+        g = _admin_guard()
+        if g:
+            return g
+        data = request.get_json(silent=True) or {}
+        res = admin.unblock(data.get('mac'))
+        return jsonify(res), (200 if res.get('ok') else 400)
+
+    @app.route('/api/admin/restart', methods=['POST'])
+    def admin_restart():
+        from picarpro import updater
+        g = _admin_guard()
+        if g:
+            return g
+        g = _update_guard()
+        if g:
+            return g
+        if not updater.schedule_restart(1.5):
+            return jsonify({'ok': False,
+                            'error': 'systemctl не найден — перезапустите сервис вручную'}), 400
+        logger.info('[Admin] перезапуск сервиса запланирован (1.5 с)')
+        return jsonify({'ok': True, 'scheduled': True})
+
     # ---- video ------------------------------------------------------------
     @app.route('/video_feed')
     def video_feed():
@@ -426,6 +523,14 @@ def create_app(state):
     @app.route('/api/bt/load_hid_sony', methods=['POST'])
     def bt_load_hid():
         return jsonify({'ok': _load_hid_sony()})
+
+    # v1.6.15: восстановить активные блокировки из instance/admin_blocks.json
+    # (iptables волатилен — реестр источник правды). Ошибки не фатальны.
+    try:
+        from picarpro.web import admin as _admin_mod
+        _admin_mod.reapply_blocks(BASE_DIR / 'instance')
+    except Exception as e:
+        logger.warning(f'[Admin] реестр блокировок не восстановлен: {e}')
 
     return app
 

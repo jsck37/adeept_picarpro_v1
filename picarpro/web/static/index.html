@@ -25,6 +25,7 @@
     <button class="tab-btn active" data-tab="control" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="4"/><circle cx="8" cy="12" r="1.6"/><line x1="14" y1="10" x2="17" y2="10"/><line x1="14" y1="14" x2="17" y2="14"/></svg><span data-i18n="tab_control">Управление</span></button>
     <button class="tab-btn" data-tab="console" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span data-i18n="tab_console">Консоль</span></button>
     <button class="tab-btn" data-tab="update" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg><span data-i18n="tab_update">Обновление</span></button>
+    <button class="tab-btn" data-tab="admin" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span data-i18n="tab_admin">Админ</span></button>
   </nav>
 </aside>
 
@@ -155,11 +156,14 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/></svg>
               <span data-i18n="auto_estop">АВАРИЙНЫЙ СТОП</span>
             </button>
+            <div style="margin-top:6px;font-size:.72rem;color:var(--text-3)" data-i18n="push_note">
+              Push Mode (толчок клешнёй по HC-SR04, без камеры) — кнопка ниже.
+            </div>
             <div id="radar-box" style="display:none;margin-top:8px">
               <canvas id="radar-canvas" width="280" height="190"
                       style="width:100%;max-width:320px;display:block;background:#0b1a10;border-radius:8px"></canvas>
               <div style="margin-top:4px;font-size:.7rem;color:var(--text-3);line-height:1.45" data-i18n="radar_note">
-                Радар
+                Радар: сканирует панорамой камеры (SERVO_CAM_PAN) — колёса стоят на месте. Серво настраивается в config.py (ULTRASONIC_SCAN_SERVO).
               </div>
             </div>
             <div class="btn-group" id="steady-group" style="margin-top:6px">
@@ -225,7 +229,7 @@
         </div>
       </div>
 
-
+      
 
 <div class="card" id="card-ds4">
         <div class="card-title collapsible-header open" data-target="ds4-body">
@@ -260,10 +264,10 @@
               <div class="ds4-col">
                 <div style="font-size:.68rem;color:var(--text-2);line-height:1.6">
                   <div><b>L-stick</b> <span data-i18n="ds4_help1">езда</span> &nbsp; <b>R-stick</b> <span data-i18n="ds4_help2">камера (5&deg;/шаг)</span></div>
-                  <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100%</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
+                  <div><b>L2/R2</b> <span data-i18n="ds4_help3">скорость 100% (без авто-вперёд)</span> &nbsp; <b>L1</b> <span data-i18n="ds4_help4">габариты</span></div>
                   <div><b>R1</b> <span data-i18n="ds4_help5">гудок</span> &nbsp; <b>Dpad&#9650;</b> <span data-i18n="ds4_help6">фары</span></div>
                   <div><b>Dpad&#9660;</b> <span data-i18n="ds4_help7">радуга</span> &nbsp; <b>Dpad&#9664;/&#9654;</b> <span data-i18n="ds4_help8">поворотники</span></div>
-                  <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/сер/выс)</span></div>
+                  <div><b>&#215;</b> <span data-i18n="ds4_help9">клешня вкл/выкл</span> &nbsp; <b>&#9675;</b> <span data-i18n="ds4_help10">наклон захвата (низ/середина)</span></div>
                 </div>
               </div>
             </div>
@@ -353,12 +357,12 @@
               <div class="btn-group" id="crane-arm-group">
                 <button class="gbtn crane-arm-btn" id="crane-arm-toggle" data-action="arm_toggle" data-i18n="crane_grab_release">Захватить / Отпустить</button>
               </div>
-              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Средний</span></div>
+              <div style="margin:6px 0 4px;font-size:.75rem;color:var(--text-2);font-weight:600"><span data-i18n="crane_grip_title">Наклон захвата</span> <span id="crane-grip-label" style="font-weight:400;color:var(--accent)">Середина (135&deg;)</span></div>
               <div class="btn-group" id="crane-grip-group">
-                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низкий</button>
-                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Средний<button>
-                <button class="gbtn crane-grip-btn" id="crane-grip-high" data-action="grip_high" data-i18n="grip_high">Вверхний</button>
+                <button class="gbtn crane-grip-btn" id="crane-grip-low" data-action="grip_low" data-i18n="grip_low">Низ</button>
+                <button class="gbtn crane-grip-btn active" id="crane-grip-mid" data-action="grip_mid" data-i18n="grip_mid">Середина</button>
               </div>
+              <div style="margin-top:8px;font-size:.7rem;color:var(--text-3);line-height:1.45" data-i18n="crane_note">Каналы клешни: канал 5 — наклон (SERVO_CRANE_GRIP), канал 6 — захват (SERVO_CRANE_ARM). Если кнопки не двигают клешню, а ползунки двигают — поправьте SERVO_CRANE_* в config.py.</div>
             </div>
           </div>
 
@@ -438,8 +442,12 @@
         </div>
         <div class="collapsible-body open" id="hl-body">
           <div id="hl-controls">
+            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_main_title">Основная фара (robot-hat)</div>
             <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-main" data-i18n="hl_main">Фара</button>
+            </div>
+            <div style="margin-bottom:8px;font-size:.75rem;color:var(--text-2);font-weight:600" data-i18n="hl_side_title">Габариты (боковые огни, L1)</div>
+            <div class="headlight-row" style="margin-bottom:10px">
               <button class="headlight-btn off" id="hl-side" type="button" data-i18n="hl_side">Габариты</button>
             </div>
             <div class="signal-section">
@@ -594,6 +602,86 @@
   </div>
 </div>
 
+<div class="tab-content" id="content-admin">
+  <div class="adm-wrap">
+    <!-- вход -->
+    <div class="card adm-card" id="adm-gate">
+      <div class="adm-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span data-i18n="adm_title">Админ-панель</span>
+      </div>
+      <div class="adm-gate-row">
+        <input type="password" id="adm-pass" autocomplete="off"
+               data-i18n-aria="adm_pass_ph" aria-label="Пароль администратора"
+               data-i18n-title="adm_pass_ph" title="Пароль администратора">
+        <button class="ms-btn ms-btn-start" id="adm-login" type="button" data-i18n="adm_enter">Войти</button>
+      </div>
+      <div class="mission-status" id="adm-gate-status" data-i18n="adm_gate_status">Правка конфига и управление подключёнными к Wi-Fi устройствами. Пароль задаётся в config (ADMIN_PASSWORD).</div>
+    </div>
+
+    <!-- панель -->
+    <div class="card adm-card" id="adm-panel" hidden>
+      <div class="adm-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span data-i18n="adm_title">Админ-панель</span>
+        <span class="adm-actions">
+          <button class="ms-chip" id="adm-logout" type="button" data-i18n="adm_logout">Выйти</button>
+        </span>
+      </div>
+
+      <!-- конфиг -->
+      <div class="adm-sec" id="adm-cfg-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title" data-i18n="adm_cfg_title">Конфиг</span>
+          <input type="search" id="adm-cfg-search" data-i18n-aria="adm_cfg_search" aria-label="Поиск параметра" data-i18n-title="adm_cfg_search" title="Поиск параметра">
+          <button class="ms-chip" id="adm-cfg-reload" type="button" data-i18n="adm_reload">Обновить</button>
+          <button class="ms-btn ms-btn-start adm-save-btn" id="adm-cfg-save" type="button" data-i18n="adm_save">Сохранить</button>
+        </div>
+        <div class="adm-cfg-list" id="adm-cfg-list"></div>
+        <div class="mission-status" id="adm-cfg-status" data-i18n="adm_cfg_status_default">Изменения пишутся в config_local.py и применяются после перезапуска сервиса.</div>
+        <div class="adm-restart-row">
+          <button class="ms-btn ms-btn-stop" id="adm-restart" type="button" data-i18n="adm_restart">Перезапустить сервис</button>
+          <span class="ms-hint" data-i18n="adm_restart_hint">Робот остановится на пару секунд и продолжит работу</span>
+        </div>
+      </div>
+
+      <!-- устройства -->
+      <div class="adm-sec" id="adm-dev-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title" data-i18n="adm_dev_title">Устройства Wi-Fi</span>
+          <label class="adm-min-label" for="adm-block-min" data-i18n="adm_block_for">отключить на</label>
+          <select id="adm-block-min">
+            <option value="5">5</option>
+            <option value="15" selected>15</option>
+            <option value="30">30</option>
+            <option value="60">60</option>
+            <option value="1440">1440</option>
+            <option value="0" data-i18n="adm_min0">до отмены</option>
+          </select>
+          <span class="adm-min-unit" data-i18n="adm_min_unit">мин</span>
+          <button class="ms-chip" id="adm-dev-refresh" type="button" data-i18n="adm_reload">Обновить</button>
+        </div>
+        <div class="adm-table-wrap">
+          <table class="adm-table">
+            <thead>
+              <tr>
+                <th data-i18n="adm_col_host">Имя</th>
+                <th data-i18n="adm_col_ip">IP</th>
+                <th data-i18n="adm_col_mac">MAC</th>
+                <th data-i18n="adm_col_sig">Сигнал</th>
+                <th data-i18n="adm_col_state">Состояние</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="adm-dev-tbody"></tbody>
+          </table>
+        </div>
+        <div class="mission-status" id="adm-dev-status" data-i18n="adm_dev_status_default">Отключённое устройство теряет доступ к панели и интернету через робота до конца срока.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-content" id="content-console">
   <div class="console-card">
     <div class="console-toolbar">
@@ -632,7 +720,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><line x1="4" y1="4" x2="20" y2="20"/></svg>
     </button>
   </div>
-    <!-- v1.6.14: подсказка, если блокировка горизонтали не поддерживается
+  <!-- v1.6.14: подсказка, если блокировка горизонтали не поддерживается
        (iOS Safari): полный экран есть, а ориентацию держим руками -->
   <div class="drive-rotate-hint" id="drive-rotate-hint" data-i18n="drv_rotate_hint">Поверните телефон горизонтально</div>
   <div class="drive-stage" id="drive-stage">
