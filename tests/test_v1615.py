@@ -1,4 +1,5 @@
-"""v1.6.15: вкладка «Админ» (пароль C2H5OH) — прямой редактор конфига и
+"""v1.6.15: вкладка «Админ» (пароль из config.ADMIN_PASSWORD) — прямой
+редактор конфига и
 временное отключение Wi-Fi-клиентов (iptables по MAC), фиксированные
 джойстики в полноэкранном режиме."""
 import ast
@@ -14,24 +15,32 @@ def admin_reset():
     admin._fails.clear()
     admin._blocks.clear()
     admin._blocks_path = None
+    admin._devices.clear()
+    admin._devices_path = None
     with admin._tokens_lock:
         admin._issued_nonces.clear()
     yield admin
     admin._fails.clear()
     admin._blocks.clear()
     admin._blocks_path = None
+    admin._devices.clear()
+    admin._devices_path = None
     with admin._tokens_lock:
         admin._issued_nonces.clear()
 
 
 @pytest.fixture
-def app(clean_state, monkeypatch):
+def app(clean_state, monkeypatch, tmp_path):
     monkeypatch.setenv('PICARPRO_SECRET_KEY', 'test-secret')
     monkeypatch.setattr('config.AUTH_TOKEN', '')
     import picarpro.web.auth as auth_mod
     monkeypatch.setattr(auth_mod, 'AUTH_TOKEN', '')
     from picarpro.web.app import create_app
     application = create_app(clean_state)
+    # v1.6.16: трекер устройств (sweeper-поток) не должен писать реестр
+    # в настоящий instance/ — только во временный каталог теста
+    from picarpro.web import admin as _admin
+    _admin._devices_path = str(tmp_path / 'admin_devices.json')
     application.config['TESTING'] = True
     return application
 
@@ -41,8 +50,11 @@ def client(app):
     return app.test_client()
 
 
-def _login(client, password='C2H5OH'):
-    return client.post('/api/admin/login', json={'password': password})
+def _login(client, password=None):
+    import config as cfg
+    # пароль берём из config: владелец мог сменить его в config_local.py
+    return client.post('/api/admin/login',
+                       json={'password': password or cfg.ADMIN_PASSWORD})
 
 
 def _headers(client, **kw):
@@ -68,7 +80,9 @@ class TestAdminAuth:
     def test_lockout_after_fails(self, client, admin_reset):
         for _ in range(5):
             client.post('/api/admin/login', json={'password': 'bad'})
-        r = client.post('/api/admin/login', json={'password': 'C2H5OH'})
+        import config as cfg
+        r = client.post('/api/admin/login',
+                        json={'password': cfg.ADMIN_PASSWORD})
         assert r.status_code == 429
         assert r.get_json()['error'] == 'login_locked'
 
@@ -84,8 +98,11 @@ class TestAdminAuth:
                           headers=h).status_code == 403
 
     def test_password_matches_config_default(self, client, admin_reset):
+        # v1.6.16: не завязываем тест на конкретный пароль — владелец меняет
+        # ADMIN_PASSWORD в config/config_local.py (в jsck37/adeept_picarpro_v1
+        # пароль приватный), тест проверяет только что пароль не пустой
         import config as cfg
-        assert cfg.ADMIN_PASSWORD == 'C2H5OH'
+        assert isinstance(cfg.ADMIN_PASSWORD, str) and cfg.ADMIN_PASSWORD
 
 
 # ---------------------------------------------------------------------------

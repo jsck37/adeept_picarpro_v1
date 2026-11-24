@@ -122,16 +122,14 @@ class TestCrane:
         assert r['closed'] is False
 
     def test_grip_positions(self, state):
-        # v1.6.4: grip_high (180°) удалён — остались low/mid
+        # v1.6.16: grip_high вернулся — верх рабочего хода (150°), не 180°
         from config import SERVO_CRANE_GRIP
-        for act, angle in (('grip_low', 100), ('grip_mid', 135)):
+        for act, angle in (('grip_low', 100), ('grip_mid', 135),
+                           ('grip_high', 150)):
             r = call(state, 'crane', {'action': act})
             assert r['ok'] is True
             assert state.servos.get_angle(SERVO_CRANE_GRIP) == angle
-        # grip_high больше не существует — команда отклоняется как unknown
-        r = call(state, 'crane', {'action': 'grip_high'})
-        assert r['ok'] is False
-        assert state.crane_grip_position == 'mid'
+        assert state.crane_grip_position == 'high'
 
     def test_grip_custom_angle(self, state):
         from config import SERVO_CRANE_GRIP

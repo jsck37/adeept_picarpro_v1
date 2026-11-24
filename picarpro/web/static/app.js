@@ -1044,7 +1044,9 @@ function updateCraneGripUI() {
   lowBtn.classList.remove('active');
   midBtn.classList.remove('active');
   highBtn.classList.remove('active');
-  var angleMap = { low: 100, mid: 135, high: 170 };
+  // v1.6.16: high вернулся — верх рабочего хода 100..150 (было 170 вне
+  // диапазона и 180° до v1.6.4 — упор в механический стоп)
+  var angleMap = { low: 100, mid: 135, high: 150 };
   var keyMap = { low: 'grip_low', mid: 'grip_mid', high: 'grip_high' };
   if (craneGripPosition === 'low') lowBtn.classList.add('active');
   else if (craneGripPosition === 'mid') midBtn.classList.add('active');
@@ -2416,6 +2418,20 @@ function admLoadDevices() {
   });
 }
 
+// v1.6.16: активное время устройства в человеческом виде («2ч 05м», «38с»)
+function fmtActiveTime(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  var d = Math.floor(sec / 86400);
+  var h = Math.floor((sec % 86400) / 3600);
+  var m = Math.floor((sec % 3600) / 60);
+  var s = sec % 60;
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  if (d > 0) return d + t('adm_act_d') + ' ' + h + t('adm_act_h');
+  if (h > 0) return h + t('adm_act_h') + ' ' + pad(m) + t('adm_act_m');
+  if (m > 0) return m + t('adm_act_m') + ' ' + pad(s) + t('adm_act_s');
+  return s + t('adm_act_s');
+}
+
 function admRenderDevices(clients, blocked, now) {
   var tb = document.getElementById('adm-dev-tbody');
   if (!tb) return;
@@ -2424,7 +2440,7 @@ function admRenderDevices(clients, blocked, now) {
   if (!clients.length) {
     var tr0 = document.createElement('tr');
     var td0 = document.createElement('td');
-    td0.colSpan = 6;
+    td0.colSpan = 7;
     td0.className = 'adm-empty';
     td0.textContent = t('adm_dev_empty');
     tr0.appendChild(td0);
@@ -2436,9 +2452,58 @@ function admRenderDevices(clients, blocked, now) {
     var b = blocked[c.mac];
     var tr = document.createElement('tr');
     if (b) tr.className = 'adm-row-blocked';
-    [c.hostname || '\u2014', c.ip || '\u2014', c.mac,
-     (c.signal_dbm === null || c.signal_dbm === undefined) ? '\u2014' : c.signal_dbm + ' dBm',
-     b ? t('adm_dev_blocked')
+    // v1.6.16: имя — редактируемое (ручное помечается); активное время —
+    // «всего в сети», в подсказке — сессия, всего и дата первой связи.
+    var dispName = c.hostname || '\u2014';
+    var tdn = document.createElement('td');
+    var nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'adm-name-btn';
+    nameBtn.title = t('adm_rename_hint');
+    nameBtn.textContent = (c.manual_name ? '\u270e ' : '') + dispName;
+    nameBtn.addEventListener('click', function() {
+      var entered = window.prompt(t('adm_rename_prompt'), c.hostname || '');
+      if (entered === null) return;           // отмена
+      admFetch('/api/admin/device_name', {method: 'POST',
+        body: JSON.stringify({mac: c.mac, name: entered})},
+        function(j) {
+          var st = document.getElementById('adm-dev-status');
+          if (st) st.textContent = j.ok ? t('adm_rename_done')
+                                        : (j.error || 'error');
+          if (j.ok) admLoadDevices();
+        });
+    });
+    tdn.appendChild(nameBtn);
+    tr.appendChild(tdn);
+    [c.ip || '\u2014', c.mac,
+     (c.signal_dbm === null || c.signal_dbm === undefined) ? '\u2014' : c.signal_dbm + ' dBm'
+    ].forEach(function(txt) {
+      var td = document.createElement('td');
+      td.textContent = txt;
+      tr.appendChild(td);
+    });
+    // v1.6.16: активное время — «всего в сети»; в подсказке — сессия,
+    // общий счётчик и дата первой связи.
+    var tdActive = document.createElement('td');
+    tdActive.className = 'adm-col-active';
+    if (c.active_s > 0 || c.session_s > 0) {
+      var tip = t('adm_active_total') + ': ' + fmtActiveTime(c.active_s || 0);
+      if (c.session_s > 0) {
+        tip += ' \u00b7 ' + t('adm_active_session') + ': '
+             + fmtActiveTime(c.session_s);
+      }
+      if (c.first_seen) {
+        tip += ' \u00b7 ' + t('adm_active_since') + ': '
+             + new Date(c.first_seen * 1000).toLocaleString();
+      }
+      tdActive.textContent = fmtActiveTime(c.active_s || 0);
+      tdActive.title = tip;
+    } else {
+      tdActive.textContent = '\u2014';
+      tdActive.title = t('adm_active_unknown');
+    }
+    tr.appendChild(tdActive);
+    [b ? t('adm_dev_blocked')
         + (b.remaining_s ? ' \u00b7 ' + Math.ceil(b.remaining_s / 60) + ' ' + t('adm_min_unit') : '')
        : t('adm_dev_online')
     ].forEach(function(txt) {

@@ -720,6 +720,11 @@ textarea.adm-json{resize:vertical}
 .adm-table td.adm-empty{text-align:center;opacity:.6;padding:18px}
 .adm-row-blocked td{background:var(--danger-soft)}
 .adm-row-blocked .adm-unblock-btn{border-color:var(--danger-strong);color:var(--danger-strong)}
+/* v1.6.16: имя устройства — кнопка (клик = переименовать), активное время */
+.adm-name-btn{background:none;border:none;padding:0;font:inherit;color:var(--accent);
+  cursor:pointer;text-align:left;overflow-wrap:anywhere}
+.adm-name-btn:hover{text-decoration:underline dotted}
+.adm-col-active{white-space:nowrap;font-variant-numeric:tabular-nums}
 @media (max-width:640px){
   .adm-row{flex-direction:column;align-items:stretch;gap:4px}
   .adm-row-key{flex:none}

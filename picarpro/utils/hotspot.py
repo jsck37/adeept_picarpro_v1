@@ -16,6 +16,8 @@ WebSocket-клиенты веб-интерфейса: телефон мог бы
 ws_clients. Опрос кэшируется на HOTSPOT_COUNT_TTL_S — вызовы идут из
 статуса и фонового цикла подсветки.
 """
+import glob
+import os
 import re
 import subprocess
 import threading
@@ -30,6 +32,14 @@ _LEASE_PATHS = (
     '/var/lib/misc/dnsmasq.leases',
     '/var/lib/dnsmasq/dnsmasq.leases',
     '/etc/picarpro/dnsmasq.leases',
+)
+# v1.6.16: lease-файлы, путь которых заранее не известен. Точка доступа
+# NetworkManager (подсеть 10.42.0.x) пишет leases в
+# /var/lib/NetworkManager/dnsmasq-<iface>.leases — раньше такие файлы
+# не находились, и в админ-панели у всех устройств было пустое имя.
+_LEASE_GLOBS = (
+    '/var/lib/NetworkManager/*.leases',
+    '/run/dnsmasq/*.leases',
 )
 _ARP_PATH = '/proc/net/arp'
 
@@ -52,31 +62,57 @@ def _iw_station_count(iface, run=None):
                if ln.strip().startswith('Station'))
 
 
-def _lease_count(paths=_LEASE_PATHS):
-    """Число активных DHCP-leases (не-timeout строки) или None."""
+def _lease_files(paths=_LEASE_PATHS, globs=None):
+    """Все существующие lease-файлы: статические пути + шаблоны (v1.6.16).
+
+    Шаблоны (_LEASE_GLOBS) добавляются только для вызова с путями по
+    умолчанию: тесты и другие вызывающие передают явный список файлов —
+    сканировать системные каталоги в этом случае не нужно.
+    """
+    if globs is None:
+        globs = _LEASE_GLOBS if paths is _LEASE_PATHS else ()
+    found = []
     for p in paths:
+        if os.path.isfile(p) and p not in found:
+            found.append(p)
+    for pattern in globs:
+        for p in sorted(glob.glob(pattern)):
+            if os.path.isfile(p) and p not in found:
+                found.append(p)
+    return found
+
+
+def _lease_count(paths=_LEASE_PATHS, globs=None):
+    """Число активных DHCP-leases (уникальные MAC всех файлов) или None."""
+    files = _lease_files(paths, globs)
+    if not files:
+        return None
+    # формат: <expiry> <mac> <ip> <hostname> <client-id>
+    now = time.time()
+    macs = set()
+    read_any = False
+    for p in files:
         try:
             with open(p, encoding='utf-8') as f:
                 lines = [ln.split() for ln in f if ln.strip()]
-            # формат: <expiry> <mac> <ip> <hostname> <client-id>
-            now = time.time()
-            n = 0
-            for parts in lines:
-                if len(parts) < 3:
-                    continue
-                exp = parts[0]
-                if exp.isdigit():
-                    if int(exp) < now:
-                        continue        # истёкший lease
-                elif exp.lower() == 'never':
-                    pass
-                else:
-                    continue            # duid/неизвестный формат
-                n += 1
-            return n
         except OSError:
             continue
-    return None
+        read_any = True
+        for parts in lines:
+            if len(parts) < 3:
+                continue
+            exp = parts[0]
+            if exp.isdigit():
+                if int(exp) < now:
+                    continue        # истёкший lease
+            elif exp.lower() == 'never':
+                pass
+            else:
+                continue            # duid/неизвестный формат
+            macs.add(parts[1].lower())
+    if not read_any:
+        return None                 # файлы есть, но ни один не читается
+    return len(macs)
 
 
 def _arp_count(arp_path=_ARP_PATH, local_ips=()):
@@ -203,16 +239,23 @@ def _iw_stations(iface, run=None):
     return out
 
 
-def _lease_entries(paths=_LEASE_PATHS):
-    """Активные leases: [{mac, ip, hostname, expires}] (первый найденный файл)."""
-    for p in paths:
+def _lease_entries(paths=_LEASE_PATHS, globs=None):
+    """Активные leases: [{mac, ip, hostname, expires}] (v1.6.16: все файлы).
+
+    Раньше брался только ПЕРВЫЙ найденный файл — если точка доступа
+    поднята NetworkManager, leases лежат в другом файле и имена
+    терялись. Теперь все найденные файлы сливаются по MAC: ip — из
+    первой записи, hostname — первая не пустая.
+    """
+    files = _lease_files(paths, globs)
+    now = time.time()
+    out = {}
+    for p in files:
         try:
             with open(p, encoding='utf-8') as f:
                 lines = [ln.split() for ln in f if ln.strip()]
         except OSError:
             continue
-        now = time.time()
-        out = []
         for parts in lines:
             if len(parts) < 4:
                 continue
@@ -227,11 +270,14 @@ def _lease_entries(paths=_LEASE_PATHS):
             mac = parts[1].lower()
             if not _MAC_RE.match(mac):
                 continue
-            out.append({'mac': mac, 'ip': parts[2],
-                        'hostname': parts[3] if parts[3] != '*' else '',
-                        'expires': int(exp) if exp.isdigit() else None})
-        return out
-    return []
+            rec = out.setdefault(mac, {'mac': mac, 'ip': parts[2],
+                                       'hostname': '', 'expires': None})
+            hostname = parts[3] if parts[3] != '*' else ''
+            if hostname and not rec['hostname']:
+                rec['hostname'] = hostname
+            if exp.isdigit() and rec['expires'] is None:
+                rec['expires'] = int(exp)
+    return list(out.values())
 
 
 def _arp_entries(arp_path=_ARP_PATH, local_ips=()):
@@ -258,7 +304,7 @@ def _arp_entries(arp_path=_ARP_PATH, local_ips=()):
 
 
 def list_clients(ifaces=_IFACES, lease_paths=_LEASE_PATHS,
-                 arp_path=_ARP_PATH, local_ips=(), run=None):
+                 arp_path=_ARP_PATH, local_ips=(), run=None, known=None):
     """Список подключённых устройств: [{mac, ip, hostname, signal_dbm}].
 
     Слияние по MAC (v1.6.15). Устройства, известные только по iw (без
@@ -266,6 +312,11 @@ def list_clients(ifaces=_IFACES, lease_paths=_LEASE_PATHS,
     когда clients подключены через чужой роутер (робот в клиентском
     режиме) — блокировки админ-панели в этом случае всё равно работают
     по MAC (iptables), просто строку не из чего собрать.
+
+    v1.6.16: known — {mac: {'name': ...}} из реестра устройств
+    (picarpro.web.admin): если lease не дал hostname (многие телефоны
+    шлют '*') или lease-файла нет вовсе, имя берётся из реестра —
+    последнее виденное или заданное вручную в админ-панели.
     """
     merged = {}
     for st in _iw_stations_all(ifaces, run=run):
@@ -277,10 +328,14 @@ def list_clients(ifaces=_IFACES, lease_paths=_LEASE_PATHS,
     for ar in _arp_entries(arp_path, local_ips=local_ips):
         merged.setdefault(ar['mac'], {})
         merged[ar['mac']].setdefault('ip', ar['ip'])
+    known = known or {}
     out = []
     for mac, info in merged.items():
+        hostname = info.get('hostname') or ''
+        if not hostname:
+            hostname = (known.get(mac) or {}).get('name') or ''
         out.append({'mac': mac, 'ip': info.get('ip') or '',
-                    'hostname': info.get('hostname') or '',
+                    'hostname': hostname,
                     'signal_dbm': info.get('signal_dbm')})
     out.sort(key=lambda d: (not d['ip'], d['ip'], d['mac']))
     return out

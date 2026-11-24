@@ -18,6 +18,13 @@
    (iptables волатилен). Без root/iptables возвращается ошибка — сервис
    при этом не падает.
 
+3. Реестр устройств (v1.6.16) — instance/admin_devices.json: имена
+   (последнее виденное hostname из leases + ручное переименование) и
+   активное время использования (session_s — текущая сессия, active_s —
+   всего). Ведёт тот же фоновый цикл, что и снятие истёкших блокировок:
+   раз в SWEEP_INTERVAL_S собирает hotspot.list_clients() и обновляет
+   реестр.
+
 Все подзапросы токенизируются отдельно от основного AUTH_TOKEN:
 POST /api/admin/login с паролем -> X-Admin-Token (HMAC + nonce), попытки
 подбора ограничены (MAX_LOGIN_FAILS -> LOCKOUT_S на IP).
@@ -428,12 +435,15 @@ def unblock(mac, run=None):
 
 
 def reapply_blocks(blocks_dir, run=None, now=None):
-    """При старте сервиса: перечитать реестр и вернуть iptables-правила.
+    """При старте сервиса: перечитать реестры и вернуть iptables-правила.
 
     Истёкшие блокировки снимаются из реестра. Ошибки iptables не фатальны
-    (панель поднимется в любом случае).
+    (панель поднимется в любом случае). v1.6.16: здесь же читается реестр
+    устройств (имена + активное время) и стартует фоновый цикл — он ведёт
+    и снятие истёкших блокировок, и трекер присутствия устройств.
     """
     _load_blocks(os.path.join(str(blocks_dir), BLOCKS_FILENAME))
+    _load_devices(os.path.join(str(blocks_dir), DEVICES_FILENAME))
     now = now if now is not None else time.time()
     expired = []
     with _blocks_lock:
@@ -456,7 +466,179 @@ def reapply_blocks(blocks_dir, run=None, now=None):
     return applied
 
 
+# ---------------------------------------------------------------------------
+# v1.6.16: реестр устройств (instance/admin_devices.json) — имена и активное
+# время использования.
+#
+# Имена. hostname из leases dnsmasq многие устройства не присылают (часть
+# телефонов шлёт '*'), а lease-файл точки доступа NetworkManager раньше не
+# находился вовсе — в админ-панели вместо имён стояло «—». Реестр запоминает
+# последнее виденное имя по MAC; владелец может задать имя вручную
+# (device_set_name) — ручное имя приоритетно и переживает смену lease.
+#
+# Активное время. Общий фоновый цикл (sweeper, раз в SWEEP_INTERVAL_S)
+# собирает hotspot.list_clients() и копит устройству активные секунды:
+#   session_s — непрерывное присутствие (разрыв больше TRACK_GAP_S = новая
+#   сессия), active_s — сумма всех сессий («активное время использования»).
+# Реестр переживает перезапуск сервиса.
+# ---------------------------------------------------------------------------
+DEVICES_FILENAME = 'admin_devices.json'
+DEVICE_NAME_MAX = 64
+TRACK_INTERVAL_S = SWEEP_INTERVAL_S    # шаг накопления времени (10 с)
+TRACK_GAP_S = 120.0    # разрыв больше этого — устройство возвращалось
+DEVICE_PRUNE_S = 30 * 24 * 3600.0      # 30 дней не в сети — вычистить
+MAX_DEVICES = 64
+DEVICES_SAVE_EVERY_S = 300.0           # периодическая запись (беречь SD)
+
+_devices = {}      # mac -> {name, manual, first_seen, last_seen, active_s, session_s}
+_devices_lock = threading.Lock()
+_devices_path = None
+_devices_last_save = 0.0
+
+
+def _new_device_rec(now):
+    return {'name': '', 'manual': False, 'first_seen': now, 'last_seen': now,
+            'active_s': 0.0, 'session_s': 0.0}
+
+
+def _load_devices(path):
+    global _devices, _devices_path, _devices_last_save
+    _devices_path = path
+    _devices_last_save = time.monotonic()
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _devices = {str(k).lower(): v for k, v in data.items()
+                        if isinstance(v, dict) and _mac_ok(k)}
+    except (OSError, ValueError):
+        _devices = {}
+
+
+def _save_devices(force=False):
+    """Записать реестр (атомарно). force — при структурных изменениях."""
+    global _devices_last_save
+    if _devices_path is None:
+        return
+    mono = time.monotonic()
+    if not force and mono - _devices_last_save < DEVICES_SAVE_EVERY_S:
+        return                      # активное время дожмётся по таймеру
+    _devices_last_save = mono
+    try:
+        os.makedirs(os.path.dirname(str(_devices_path)) or '.', exist_ok=True)
+        tmp = str(_devices_path) + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(_devices, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, _devices_path)
+    except OSError as e:
+        logger.error(f'[Admin] не сохранён реестр устройств: {e}')
+
+
+def _prune_devices_locked(now, hard=False):
+    """Убрать устаревшие записи. hard — урезать до MAX_DEVICES. -> были ли."""
+    removed = False
+    stale = [m for m, r in _devices.items()
+             if now - r.get('last_seen', 0) > DEVICE_PRUNE_S]
+    for m in stale:
+        _devices.pop(m, None)
+        removed = True
+    if hard:
+        while len(_devices) >= MAX_DEVICES:
+            oldest = min(_devices, key=lambda m: _devices[m].get('last_seen', 0))
+            _devices.pop(oldest, None)
+            removed = True
+    return removed
+
+
+def devices_track(clients, now=None, interval_s=TRACK_INTERVAL_S):
+    """Отметить присутствие устройств и накопить активное время (v1.6.16).
+
+    clients — список dict из hotspot.list_clients(). Вызывается из
+    фонового цикла; для тестов можно звать напрямую с injected now.
+    """
+    if not clients:
+        return
+    now = now if now is not None else time.time()
+    structural = False
+    with _devices_lock:
+        for c in clients:
+            mac = (c.get('mac') or '').lower()
+            if not _mac_ok(mac):
+                continue
+            rec = _devices.get(mac)
+            if rec is None:
+                if len(_devices) >= MAX_DEVICES:
+                    _prune_devices_locked(now, hard=True)
+                if len(_devices) >= MAX_DEVICES:
+                    continue        # реестр переполнен — новое не пишем
+                rec = _new_device_rec(now)
+                rec['active_s'] = float(interval_s)
+                rec['session_s'] = float(interval_s)
+                _devices[mac] = rec
+                structural = True
+            else:
+                gap = now - rec.get('last_seen', now)
+                if 0 < gap <= TRACK_GAP_S:
+                    rec['active_s'] += gap
+                    rec['session_s'] += gap
+                else:
+                    # устройство возвращалось (или сервис перезапускался) —
+                    # сессия новая, в общий счёт идёт только текущий шаг
+                    rec['active_s'] += float(interval_s)
+                    rec['session_s'] = float(interval_s)
+                    structural = True
+                rec['last_seen'] = now
+            # имя: запоминаем последнее виденное hostname (ручное не трогаем)
+            if not rec.get('manual'):
+                hn = str(c.get('hostname') or '').strip()
+                if hn and hn != '*':
+                    hn = hn[:DEVICE_NAME_MAX]
+                    if hn != rec.get('name'):
+                        rec['name'] = hn
+                        structural = True
+        if _prune_devices_locked(now):
+            structural = True
+        _save_devices(force=structural)
+
+
+def device_set_name(mac, name):
+    """Задать устройству имя вручную (пустое — сбросить на авто)."""
+    if not _mac_ok(mac):
+        return {'ok': False, 'error': 'MAC задан неверно (aa:bb:cc:dd:ee:ff)'}
+    mac = mac.lower()
+    name = str(name or '').strip()[:DEVICE_NAME_MAX]
+    with _devices_lock:
+        rec = _devices.get(mac)
+        if rec is None:
+            rec = _new_device_rec(time.time())
+            _devices[mac] = rec
+        if name:
+            rec['name'] = name
+            rec['manual'] = True
+        else:
+            # сброс: имя снова подберётся из leases при появлении устройства
+            rec['manual'] = False
+            rec['name'] = ''
+        _save_devices(force=True)
+    logger.info(f'[Admin] имя устройства {mac}: {name!r}')
+    return {'ok': True, 'mac': mac, 'name': name}
+
+
+def devices_info():
+    """Снимок реестра: {mac: {name, manual, first_seen, last_seen, ...}}."""
+    with _devices_lock:
+        return {mac: dict(rec) for mac, rec in _devices.items()}
+
+
+def known_names():
+    """Имена из реестра для hotspot.list_clients(known=...): {mac: {'name'}}."""
+    with _devices_lock:
+        return {mac: {'name': rec.get('name') or ''}
+                for mac, rec in _devices.items() if rec.get('name')}
+
+
 def _sweep_loop():
+    from picarpro.utils import hotspot    # локальный импорт (без циклов)
     while True:
         time.sleep(SWEEP_INTERVAL_S)
         now = time.time()
@@ -468,6 +650,17 @@ def _sweep_loop():
         for mac in expired:
             logger.info(f'[Admin] блокировка {mac} истекла — снимаю')
             unblock(mac)
+        # v1.6.16: трекер устройств — имена + активное время использования
+        try:
+            clients = hotspot.list_clients()
+        except Exception as e:
+            clients = []
+            logger.error(f'[Admin] трекер устройств: {e}')
+        if clients:
+            try:
+                devices_track(clients, now=now)
+            except Exception as e:
+                logger.error(f'[Admin] трекер устройств: {e}')
 
 
 def _ensure_sweeper():

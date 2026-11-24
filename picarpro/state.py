@@ -44,7 +44,7 @@ class SharedState:
         self.left_blinker = False
         self.right_blinker = False
         self.crane_arm_closed = False
-        self.crane_grip_position = 'mid'   # v1.6.4: high убран
+        self.crane_grip_position = 'mid'   # v1.6.16: high вернулся (150°)
         self.led_mode = 'off'
         self.led_color = (255, 0, 0)
         self.ws_clients = set()

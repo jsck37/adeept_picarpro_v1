@@ -315,10 +315,40 @@ def create_app(state):
         g = _admin_guard()
         if g:
             return g
+        # v1.6.16: имена — leases dnsmasq, затем реестр устройств (ручное
+        # имя / последнее виденное); в ответе — активное время использования.
+        clients = hotspot.list_clients(known=admin.known_names())
+        info = admin.devices_info()
+        for c in clients:
+            d = info.get(c['mac'])
+            if d:
+                c['manual_name'] = bool(d.get('manual'))
+                # ручное имя приоритетнее hostname из leases
+                if c['manual_name'] and d.get('name'):
+                    c['hostname'] = d['name']
+                c['first_seen'] = d.get('first_seen')
+                c['last_seen'] = d.get('last_seen')
+                c['active_s'] = round(float(d.get('active_s') or 0), 1)
+                c['session_s'] = round(float(d.get('session_s') or 0), 1)
+            else:
+                c['manual_name'] = False
+                c['first_seen'] = c['last_seen'] = None
+                c['active_s'] = c['session_s'] = 0.0
         return jsonify({'ok': True,
-                        'clients': hotspot.list_clients(),
+                        'clients': clients,
                         'blocked': admin.blocks_status(),
                         'now': time.time()})
+
+    @app.route('/api/admin/device_name', methods=['POST'])
+    def admin_device_name():
+        # v1.6.16: ручное имя устройства в админ-панели (пустое — сброс)
+        from picarpro.web import admin
+        g = _admin_guard()
+        if g:
+            return g
+        data = request.get_json(silent=True) or {}
+        res = admin.device_set_name(data.get('mac'), data.get('name', ''))
+        return jsonify(res), (200 if res.get('ok') else 400)
 
     @app.route('/api/admin/block', methods=['POST'])
     def admin_block():

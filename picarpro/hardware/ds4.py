@@ -17,14 +17,15 @@ from config import (
     DEFAULT_SPEED, SERVO_CAM_PAN, SERVO_CAM_TILT,
     SERVO_STEERING, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
-    CRANE_GRIP_LOW, CRANE_GRIP_MID,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     DS4_INVERT_LY, DS4_INVERT_RY, DS4_SPEED_MULT, DS4_CRANE_STEP,
     DS4_STEER_RANGE,
 )
 
-# v1.6.4: позиция «high» убрана по требованию владельца (low/mid)
-CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID]
-CRANE_GRIP_LABELS = ['low', 'mid']
+# v1.6.16: «high» вернулся по запросу владельца — верх рабочего хода
+# (CRANE_GRIP_HIGH = 150°), не старые 180° из v1.6.3 и раньше.
+CRANE_GRIP_POSITIONS = [CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH]
+CRANE_GRIP_LABELS = ['low', 'mid', 'high']
 
 _BTN_TL2 = getattr(ecodes, 'BTN_TL2', None) if HAS_EVDEV else None
 _BTN_TR2 = getattr(ecodes, 'BTN_TR2', None) if HAS_EVDEV else None
@@ -66,7 +67,7 @@ class DS4Controller:
         self._cam_pan = self._cam_tilt = 90
         self._headlights_on = False
         self._crane_arm_closed = False
-        self._crane_grip_index = 1          # старт: mid (high убран v1.6.4)
+        self._crane_grip_index = 1          # старт: mid (v1.6.16: high вернулся)
         self._crane_grip_direction = -1
         self._lock = threading.Lock()
         self._smooth_lock = threading.Lock()

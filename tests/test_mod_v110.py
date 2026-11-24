@@ -58,7 +58,7 @@ class TestServoLimitsViaCommands:
         call(state, 'servo', {'id': 2, 'angle': 200})
         assert state.servos.get_angle(2) == 180
         from config import SERVO_CRANE_GRIP, SERVO_CRANE_ARM
-        # v1.6.4: grip_high (180°) удалён — максимум grip_mid (135)
+        # v1.6.16: grip_high вернулся (150°) — максимум рабочего хода
         call(state, 'crane', {'action': 'grip_mid'})
         assert state.servos.get_angle(SERVO_CRANE_GRIP) == 135
         call(state, 'crane', {'action': 'grip_low'})

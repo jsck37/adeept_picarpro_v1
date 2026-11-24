@@ -141,14 +141,29 @@ class TestButtons:
         ds4._connected = False
 
     def test_crane_grip_cycle(self, ds4, hw):
-        """v1.6.4: осталось low/mid (high удалён); цикл mid -> low -> mid."""
+        """v1.6.16: снова low/mid/high; цикл mid -> low -> mid -> high."""
         from tests.fakes.all_fakes import FakeEcodes
+        from config import SERVO_CRANE_GRIP, CRANE_GRIP_HIGH
         ds4.start(motors=hw.motors, servos=hw.servos, leds=hw.leds,
                   buzzer=hw.buzzer, switches=hw.switches, shared_state=hw)
+        ds4._connected = True  # без «подключения» поток сглаживания не активен
         assert ds4._crane_grip_index == 1  # mid (старт)
         ds4._btn_press(FakeEcodes.BTN_EAST)
         assert ds4._crane_grip_index == 0  # low
         assert hw.crane_grip_position == 'low'
+        ds4._btn_press(FakeEcodes.BTN_EAST)
+        assert hw.crane_grip_position == 'mid'
+        ds4._btn_press(FakeEcodes.BTN_EAST)
+        assert ds4._crane_grip_index == 2  # high — верх рабочего хода
+        assert hw.crane_grip_position == 'high'
+        # плавный ход асинхронный — ждём достижения цели
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if hw.servos.get_angle(SERVO_CRANE_GRIP) == CRANE_GRIP_HIGH:
+                break
+            time.sleep(0.02)
+        assert hw.servos.get_angle(SERVO_CRANE_GRIP) == CRANE_GRIP_HIGH
+        ds4._connected = False
 
     def test_removed_modes_are_noops(self, ds4, hw):
         """v1.6.4: △/□ (CV line/hand track), Options/Share (police) и PS

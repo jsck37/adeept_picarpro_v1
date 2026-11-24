@@ -14,7 +14,7 @@ from picarpro.camera.camera_opencv import (CV_NONE, CV_LINE, CV_HAND,
 from config import (
     SERVO_COUNT, SERVO_CRANE_ARM, SERVO_CRANE_GRIP,
     CRANE_ARM_OPEN, CRANE_ARM_CLOSED,
-    CRANE_GRIP_LOW, CRANE_GRIP_MID,
+    CRANE_GRIP_LOW, CRANE_GRIP_MID, CRANE_GRIP_HIGH,
     SWITCH_PINS, DEFAULT_SPEED,
 )
 
@@ -123,7 +123,7 @@ def process(state, data, client=None):
         if state.servos:
             state.servos.move_init()
             state.crane_arm_closed = False
-            state.crane_grip_position = 'mid'   # v1.6.4: high убран
+            state.crane_grip_position = 'mid'   # v1.6.16: high вернулся (150°)
             r = {'ok': True}
 
     elif cmd == 'servo_get_limits':
@@ -167,7 +167,9 @@ def process(state, data, client=None):
             'arm_close': (SERVO_CRANE_ARM, CRANE_ARM_CLOSED, True, None),
             'grip_low': (SERVO_CRANE_GRIP, CRANE_GRIP_LOW, None, 'low'),
             'grip_mid': (SERVO_CRANE_GRIP, CRANE_GRIP_MID, None, 'mid'),
-            # v1.6.4: grip_high (180°) удалён по требованию владельца
+            # v1.6.16: grip_high вернулся по запросу владельца — верх
+            # рабочего хода (CRANE_GRIP_HIGH, 150°), не старые 180°.
+            'grip_high': (SERVO_CRANE_GRIP, CRANE_GRIP_HIGH, None, 'high'),
         }
         if act == 'arm_toggle' and state.servos:
             new_closed = not state.crane_arm_closed
